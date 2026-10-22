@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phasebuild"
+version = "0.8.3"
+description = "OASIS4.3-Build: phase-guided protein model building with PhaseBuild"
+readme = "README.md"
+license = {text = "LGPL-2.1-or-later"}
+authors = [{name = "DingWei (丁玮)", email = "dingwei@iphy.ac.cn"}]
+requires-python = ">=3.9"
+dependencies = ["gemmi>=0.7", "numpy>=1.19", "scipy>=1.7"]
+
+[project.scripts]
+phasebuild = "phasebuild.cli:main"
+phasebuild-gui = "phasebuild.gui:main"
+
+[tool.setuptools.package-data]
+phasebuild = ["gui_assets/*"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[project.optional-dependencies]
+test = ["pytest>=6"]
+
+[project.urls]
+Source = "https://github.com/WeiDing535/OASIS4.3-Build"
+Issues = "https://github.com/WeiDing535/OASIS4.3-Build/issues"

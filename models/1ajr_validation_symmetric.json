@@ -1,0 +1,39 @@
+{
+  "validation_structure": {
+    "path": "/Applications/ccp4-9/lib/data/reference_structures/reference-1ajr.pdb",
+    "sha256": "9d0586baa0401f8596855ac69e3f25e6bc5ca13c4726d9a6898fc9d1ee485a5e"
+  },
+  "map": {
+    "path": "/Applications/ccp4-9/lib/data/reference_structures/reference-1ajr.mtz",
+    "sha256": "aa273de687f4a7a62168e66f775287cb49eb51cdb191c4b9e0c0331dc0cec14a"
+  },
+  "profile": {
+    "path": "/Volumes/Fast_4T/GPT_WORK/phasebuild/models/1tqw_1p9_symmetric.npz",
+    "sha256": "a1c1886ccd3e540e860844f5e5d4617b7fa05235ca47bd07a38a03bfcef5e17a"
+  },
+  "seed": 1,
+  "residues": 824,
+  "quantiles": [
+    0.05,
+    0.1,
+    0.5,
+    0.9,
+    0.95
+  ],
+  "positive_scores": [
+    3.1158402393847755,
+    3.324260253714535,
+    4.025343881829913,
+    4.293767955213214,
+    4.329723571090688
+  ],
+  "random_rotation_negative_scores": [
+    0.07554644588691191,
+    0.2077028588624374,
+    0.9666271886267787,
+    1.8895501608481862,
+    2.2201864417149366
+  ],
+  "auc_vs_random_rotation": 0.9979925652747667,
+  "scope": "Synthetic orientation test at known CA sites. Not a model-building benchmark."
+}

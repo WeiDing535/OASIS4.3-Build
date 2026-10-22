@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "Please cite this source release when using OASIS4.3-Build."
+title: "OASIS4.3-Build (PhaseBuild)"
+type: software
+version: "0.8.3"
+date-released: 2026-10-22
+authors:
+  - family-names: Ding
+    given-names: Wei
+    email: dingwei@iphy.ac.cn
+license: LGPL-2.1-or-later
+repository-code: "https://github.com/WeiDing535/OASIS4.3-Build"

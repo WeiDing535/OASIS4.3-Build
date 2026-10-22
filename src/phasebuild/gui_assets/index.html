@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PhaseBuild · 蛋白结构构建</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="#"><span class="brand-icon">P<span>β</span></span><span>PhaseBuild<small>PHASE TO STRUCTURE</small></span></a>
+  <div class="sidebar-label">工作空间</div>
+  <button class="nav active" id="new-task">＋ &nbsp; 新建任务</button>
+  <button class="nav" id="import-results">▤ &nbsp; 打开已有结果</button>
+  <div class="sidebar-label history-title">最近任务 <button id="refresh-history" title="刷新任务">↻</button></div>
+  <div id="history" class="history"></div>
+  <div class="sidebar-bottom"><span class="dot"></span> 本机计算 · 数据留在本机<small id="runtime">正在连接计算环境…</small></div>
+</aside>
+<main>
+  <header><div class="breadcrumb">工作空间 <span>/</span> 蛋白结构构建</div><div class="version">研究版 <b>0.8.3</b></div></header>
+  <div class="heading"><div><div class="eyebrow">MODEL BUILDING WORKBENCH</div><h1>从相位到结构</h1><p>选择数据，构建主链与侧链，在同一工作台查看精修结果。</p></div><button id="load-example" class="secondary">载入 INS 示例</button></div>
+  <div id="notice" class="notice hidden" role="status"></div>
+  <section class="card configuration">
+    <div class="section-heading"><h2><span class="step-number">01</span> 设置任务</h2><div class="config-tools"><button id="load-config" class="text-button">导入配置</button><button id="save-config" class="text-button">导出配置</button><input type="file" id="config-file" accept=".json" hidden></div></div>
+    <div class="mode-grid" role="radiogroup" aria-label="任务类型">
+      <label class="mode-card"><input type="radio" name="mode" value="fresh" checked><span class="mode-symbol">⌘</span><span><strong>从相位图建模</strong><small>主链搜索 → 序列归属 → 侧链</small></span></label>
+      <label class="mode-card"><input type="radio" name="mode" value="extend"><span class="mode-symbol">↗</span><span><strong>已有模型延伸</strong><small>从序列锚点双向补全末端</small></span></label>
+      <label class="mode-card"><input type="radio" name="mode" value="refine"><span class="mode-symbol">◇</span><span><strong>单独精修</strong><small>REFMAC · Rwork / Rfree</small></span></label>
+      <label class="mode-card"><input type="radio" name="mode" value="evaluate"><span class="mode-symbol">Σ</span><span><strong>独立 R 因子</strong><small>无需 REFMAC · 固定坐标评估</small></span></label>
+      <label class="mode-card"><input type="radio" name="mode" value="build_hl"><span class="mode-symbol">⇢</span><span><strong>无初始模型＋原 HL 精修</strong><small>Buccaneer 从实验相位构建 · 固定末轮</small></span></label>
+      <label class="mode-card"><input type="radio" name="mode" value="hybrid_hl"><span class="mode-symbol">⇄</span><span><strong>Buccaneer 集成＋原 HL 精修</strong><small>需已有种子模型 · 固定末轮结果</small></span></label>
+    </div>
+    <form id="job-form">
+      <div class="form-grid" id="input-fields"></div>
+      <div id="hybrid-options" class="hidden"><p class="hint">无初始模型模式从实验相位开始构建；已有种子模式从所选模型继续。两种模式均调用外部 Buccaneer 构建、REFMAC 精修。每轮保留同一份原始实验 HLA / HLB / HLC / HLD；后续地图只用本任务自身上轮精修输出。此模式不是原生 PhaseBuild 从头算法。</p><p class="hint">本模式使用固定列：地图 F / SIGF / FWT / PHWT / FOM；native F / SIGF / FreeR_flag，在高级设置填写原自由集数值（默认 0）。只接受现有自由集，不生成新标记。默认 5 轮 × 10 周期，固定最后一轮模型，不按 Rfree 选模。</p><label class="checkbox-label"><input type="checkbox" id="build_semet"> SeMet 实验（根据实验元数据启用）</label></div>
+      <div class="refinement-options"><label class="checkbox-label"><input type="checkbox" id="refine" checked> 启用 REFMAC 精修</label><span id="round-description">每轮构建后精修，并将更新图用于下一轮。</span></div>
+      <div class="form-grid compact">
+        <label class="field" id="rounds-field"><span>构建轮数</span><input id="rounds" type="number" min="1" max="50" value="5"><small>从头建模包含首轮主链搜索；延伸模式每轮进行末端延伸。</small></label>
+        <label class="field" id="cycles-field"><span>每轮精修周期</span><input id="cycles" type="number" min="1" max="200" value="10"><small>各轮固定取最后一个精修周期。</small></label>
+        <label class="field" id="map-mode-field"><span>后续地图策略</span><select id="map_mode"><option value="rebuild">完整重建流程（推荐）</option><option value="updated">使用自身精修后的更新图</option><option value="fixed">始终使用所选输入相位图</option></select><small>完整流程：首轮精修 → 原图清理补环 → 精修 → 原图延伸 → 更新图延伸；建议 5 轮，每轮 10 周期。</small></label>
+      </div>
+      <details id="advanced"><summary>高级设置 <span>构象库、搜索参数与自由集</span></summary><div class="form-grid advanced-grid" id="advanced-fields"></div><p class="hint">地图建模读取上方选择的振幅/相位列；振幅不会再次乘以 FOM。精修阶段支持自选 F / SIGF / 自由集列。自由集使用输入文件中的现有标记。</p></details>
+      <div class="run-bar"><div><span class="dot"></span> <span id="budget">3 轮构建，累计 30 个新增精修周期</span><small>每次写入新目录，保留已有数据与结果。</small></div><div class="run-actions"><button type="button" class="secondary" id="validate">检查输入</button><button type="submit" class="primary" id="start">开始运行 <span>→</span></button></div></div>
+    </form>
+  </section>
+  <section class="card workspace" id="workspace">
+    <div class="section-heading"><h2><span class="step-number">02</span> 运行与结果</h2><span id="job-state" class="state">等待任务</span></div>
+    <div class="job-progress hidden" id="job-progress"><div class="progress-top"><span id="current-stage"></span><span id="progress-count"></span><button id="stop" class="danger">停止任务</button></div><progress id="progress" value="0" max="1"></progress><div id="output-location" class="location"></div></div>
+    <div class="tabs" role="tablist"><button class="tab active" data-tab="results" role="tab">结果概览</button><button class="tab" data-tab="logs" role="tab">实时日志</button><button class="tab" data-tab="plan" role="tab">执行计划</button></div>
+    <div id="results" class="tab-panel"><div class="empty" id="empty-results"><div class="empty-icon">⌁</div><h3>准备好开始构建</h3><p>运行任务后，这里会显示精修指标、Cα 预览及结果文件。<br>也可以从左侧打开已有结果目录。</p></div><div id="result-content" class="hidden"><div class="metrics"><div><span>Rwork</span><strong id="rwork">—</strong></div><div><span>Rfree</span><strong id="rfree">—</strong></div><div><span>已建残基</span><strong id="residue-count">—</strong></div><div><span>自由集标记核验</span><strong id="free-status">—</strong></div></div><div class="result-grid"><div class="plot-panel"><h3>R 因子轨迹 <small>区分独立评估与 REFMAC</small></h3><canvas id="r-chart" aria-label="Rwork 和 Rfree 轨迹"></canvas><div class="plot-key"><span class="key work">Rwork</span><span class="key free">Rfree</span></div></div><div class="plot-panel"><h3>Cα 主链预览 <small>拖动旋转 · 滚轮缩放</small></h3><canvas id="model-view" aria-label="Cα 主链预览"></canvas></div></div><div class="table-wrap"><table><thead><tr><th>阶段 / 来源</th><th>周期</th><th>Rwork</th><th>Rfree</th><th>自由集</th></tr></thead><tbody id="metrics-table"></tbody></table></div><div class="artifacts-heading"><h3>结果文件</h3><a id="download-model" class="secondary hidden">下载所选模型</a></div><div id="artifacts" class="artifacts"></div><p class="hint">R 因子来源会明确标注：REFMAC 精修或固定坐标独立评估，两者的尺度/溶剂模型可能不同。Cα 预览用于快速查看，详细结构检查请在 Coot 等分子软件中进行。已有模型精修图可能携带先验信息，此处 Rfree 不代表经认证的独立盲测结果。</p></div></div>
+    <div id="logs" class="tab-panel hidden"><div class="log-toolbar"><span>保留完整日志，页面显示最近 60 KB</span><label><input type="checkbox" id="auto-scroll" checked> 自动滚动</label></div><pre id="log-text">等待启动任务…</pre></div>
+    <div id="plan" class="tab-panel hidden"><p class="hint">检查输入后生成实际执行计划；每一步调用已有 PhaseBuild / REFMAC 程序。</p><div id="plan-steps" class="plan-steps"></div></div>
+  </section>
+  <footer>PhaseBuild · 相位引导的蛋白结构构建研究原型 <span>无目标参考结构参与构建</span></footer>
+</main>
+<dialog id="file-dialog"><div class="dialog-heading"><h2 id="picker-title">选择文件</h2><button id="picker-close" aria-label="关闭">×</button></div><div class="picker-path"><button id="picker-up" class="secondary" title="上一级">↑</button><input id="picker-path" aria-label="文件或目录路径"><button id="picker-go" class="secondary">前往</button></div><input id="picker-filter" placeholder="筛选当前目录…" aria-label="筛选文件"><div id="picker-error" class="error-text"></div><div id="picker-list" class="picker-list"></div><div class="dialog-footer"><span id="picker-help">单击文件以选择，单击文件夹以进入</span><button id="picker-select" class="primary">选择此文件夹</button></div></dialog>
+</body></html>
