@@ -58,3 +58,18 @@ def test_portable_launcher_dispatches_both_hl_modes_and_records_current_sources(
     before=(bundle/'phasebuild').read_bytes()
     with pytest.raises(FileExistsError):builder.main(['--output',str(bundle)])
     assert (bundle/'phasebuild').read_bytes()==before
+
+
+def test_linux_launcher_runs_from_space_path_with_host_runtime_disabled(tmp_path):
+    import os
+    builder = load('phasebuild_linux_assembler', ROOT / 'packaging/assemble_bundle.py')
+    bundle = tmp_path / 'Linux bundle with spaces'
+    builder.main(['--platform', 'linux-x86_64', '--output', str(bundle)])
+    assert (bundle / 'OASIS4.3-Build.sh').is_file()
+    (bundle / 'python/bin').mkdir(parents=True)
+    (bundle / 'python/bin/python3').symlink_to(sys.executable)
+    environment = dict(os.environ, CCP4='/missing/host/ccp4', PHASEBUILD_RUNTIME='/missing/host/runtime')
+    process = subprocess.run([str(bundle / 'phasebuild'), '--help'], capture_output=True, text=True, env=environment)
+    assert process.returncode == 0 and 'linux-x86_64' in process.stdout
+    process = subprocess.run([str(bundle / 'OASIS4.3-Build.sh'), '--help'], capture_output=True, text=True, env=environment)
+    assert process.returncode == 0 and '--no-browser' in process.stdout

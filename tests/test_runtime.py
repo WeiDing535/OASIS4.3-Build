@@ -55,3 +55,10 @@ def test_required_runtime_files_must_be_executable(tmp_path):
     path.chmod(0o644)
     with pytest.raises(ValueError, match='executable unavailable'):
         resolve_runtime(tmp_path, required=('cbuccaneer',))
+
+
+def test_linux_loader_overrides_are_removed(tmp_path):
+    root = tmp_path / 'runtime';root.mkdir()
+    result = runtime_environment(root, inherited={'LD_LIBRARY_PATH': '/host/libs',
+        'LD_PRELOAD': '/host/preload.so', 'LD_AUDIT': '/host/audit.so'}, scratch=tmp_path / 'scratch')
+    assert all(key not in result for key in ['LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT'])

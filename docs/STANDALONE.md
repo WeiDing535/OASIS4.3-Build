@@ -1,3 +1,5 @@
+> 下一完整包优先 Linux x86_64，见 [Linux 构建与验收](LINUX.md)。下文记录已有 Intel Mac 本机评估包。
+
 # Intel Mac complete local package
 
 The user-facing packaging goal is one application folder containing the Python environment, scientific Python packages, external Buccaneer/REFMAC executables, dynamic libraries, monomer dictionary and reference resources. Users supply experimental inputs and do not install CCP4 separately.

@@ -27,3 +27,11 @@ jobs:
           python -B run_gui.py --help
           python -B run_build_from_phases.py --help
           python -B package_gui.py --output dist/phasebuild-source.zip
+      - name: Check Linux application staging (not a complete runtime package)
+        if: runner.os == 'Linux'
+        run: |
+          python -B packaging/audit_linux_runtime.py --help
+          python -B packaging/build_standalone.py --help
+          python -B packaging/assemble_bundle.py --platform linux-x86_64 --output dist/linux-app-staging
+          test -x dist/linux-app-staging/OASIS4.3-Build.sh
+          dist/linux-app-staging/phasebuild --help

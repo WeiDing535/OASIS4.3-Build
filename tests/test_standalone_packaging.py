@@ -39,3 +39,40 @@ def test_existing_bundle_is_never_overwritten(tmp_path):
     with pytest.raises(FileExistsError, match='overwrite bundle'):
         BUILDER.main(['--python-source', str(tmp_path / 'none'), '--runtime-source', str(tmp_path / 'none'), '--output', str(out)])
     assert list(out.iterdir()) == []
+
+
+def test_linux_platform_and_engine_architecture_gate(tmp_path, monkeypatch):
+    monkeypatch.setattr(BUILDER.platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(BUILDER.platform, 'machine', lambda: 'x86_64')
+    assert BUILDER.target_platform() == 'linux-x86_64'
+    root = tmp_path / 'runtime';(root / 'bin').mkdir(parents=True)
+    header = bytearray(20);header[:6] = b'\x7fELF\x02\x01';header[18:20] = (62).to_bytes(2, 'little')
+    for name in ['cbuccaneer', 'refmac5']:(root / 'bin' / name).write_bytes(header)
+    BUILDER.verify_linux_engines(root)
+    (root / 'bin/refmac5').write_bytes(b'macOS binary')
+    with pytest.raises(ValueError, match='Linux x86_64 ELF'):
+        BUILDER.verify_linux_engines(root)
+
+
+def test_linux_tar_preserves_executable_and_relative_symlink(tmp_path):
+    import tarfile
+    root = tmp_path / 'bundle with spaces';root.mkdir()
+    (root / 'launcher').write_text('#!/bin/sh\nexit 0\n');(root / 'launcher').chmod(0o755)
+    (root / 'alias').symlink_to('launcher')
+    target = tmp_path / 'bundle.tar.gz';BUILDER.write_tar(root, target)
+    with tarfile.open(target) as archive:
+        assert archive.getmember(root.name + '/launcher').mode & 0o111
+        link = archive.getmember(root.name + '/alias')
+        assert link.issym() and link.linkname == 'launcher'
+    with pytest.raises(FileExistsError):BUILDER.write_tar(root, target)
+
+
+def test_doctor_cannot_silently_use_host_python(tmp_path):
+    root = tmp_path / 'bundle'
+    report = {'python': str(root / 'python/bin/python3'), 'python_prefix': str(root / 'python'),
+              'packages': {'gemmi': {'path': str(root / 'python/lib/gemmi.so')}},
+              'runtime': {'root': str(root / 'runtime')}}
+    BUILDER.verify_doctor_paths(report, root)
+    report['packages']['gemmi']['path'] = '/host/python/gemmi.so'
+    with pytest.raises(ValueError, match='outside its prefix'):
+        BUILDER.verify_doctor_paths(report, root)
