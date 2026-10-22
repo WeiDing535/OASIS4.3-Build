@@ -6,6 +6,10 @@
 
 软件内核和界面沿用 **PhaseBuild 0.8.3** 名称。本仓库首个公开源码修订为 **2026-10-22**。旧版 OASIS4.3-GUI 定相软件保留在[独立仓库](https://github.com/WeiDing535/OASIS4.3-GUI)，没有被替换。
 
+## 完整包目标
+
+Intel Mac 完整本机试用包已提供组装工具，包含 Python 和全部 GUI 模式所需的外部运行组件，用户无需另装 CCP4。该运行时目前只用于本机评估，尚未公开发布二进制安装包；GitHub 上仍是源码。详见 [完整包说明](docs/STANDALONE.md)。
+
 ## 本机启动
 
 需要 Python ≥3.9、Gemmi、NumPy、SciPy。建模精修集成另外需要用户已有的 CCP4 安装及其参考资源。本仓库不附带 Python、CCP4 二进制或完整便携运行包。

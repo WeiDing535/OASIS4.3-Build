@@ -6,11 +6,7 @@ from pathlib import Path
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ['run_phasebuild.py', 'run_gui.py', 'run_refine.py', 'run_rfactor.py',
-           'run_phasebuild_hybrid.py', 'run_phasebuild_hybrid_hl.py', 'run_build_from_phases.py', 'run_phase_refinement.py',
-           'run_runtime_doctor.py', 'run_improve.py', 'run_complete.py', 'run_rebuild.py',
-           'run_extend.py', 'run_sad_development.py', 'run_context_seeds.py',
-           'run_weak_trace.py', 'run_weak_sequence.py', 'run_adaptive_stage.py']
+SCRIPTS = sorted(path.name for path in ROOT.glob('*.py'))
 MODELS = ['1tqw_1p9_symmetric.npz', 'residue_1tqw_1p9.npz', 'rotamers_1tqw_v08.json']
 LAUNCHER = '''#!/bin/sh
 set -eu
@@ -78,6 +74,12 @@ def main(argv=None):
     bank.mkdir(parents=True)
     for name in ['backbone_2p8.npz', 'residue_2p8.npz']:
         shutil.copy2(ROOT / 'runs/sad_four_optimization/models' / name, bank / name)
+    # Ship source documentation and license alongside every application copy.
+    for name in ['LICENSE', 'AUTHORS.md', 'README.md', 'README_EN.md', 'GUI_GUIDE.md',
+                 'SAD_RESEARCH_GUIDE.md', 'WEAK_PHASE_DEVELOPMENT.md', 'pyproject.toml']:
+        shutil.copy2(ROOT / name, app / name)
+    shutil.copytree(ROOT / 'packaging', app / 'packaging',
+                    ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     files = [{'relative_path': str(path.relative_to(app)), 'sha256': digest(path),
               'bytes': path.stat().st_size} for path in sorted(app.rglob('*')) if path.is_file()]
     (app / 'app_manifest.json').write_text(json.dumps({'distribution_status': 'local-evaluation',
