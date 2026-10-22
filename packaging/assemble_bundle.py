@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import platform
 from pathlib import Path
 import shutil
 
@@ -12,6 +13,7 @@ LAUNCHER = '''#!/bin/sh
 set -eu
 base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 unset PYTHONHOME PYTHONPATH CCP4 CLIBD CLIBD_MON CBIN CEXAM CINCL CLIB
+unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT
 unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_FRAMEWORK_PATH DYLD_INSERT_LIBRARIES
 export PHASEBUILD_STANDALONE=1 PHASEBUILD_RUNTIME="$base/runtime"
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$base/app/src"
@@ -31,7 +33,7 @@ case "$mode" in
   audit|evaluate) exec "$base/python/bin/python3" "$base/app/run_phasebuild.py" "$mode" "$@" ;;
   --help|-h|help)
     cat <<'HELP'
-PhaseBuild local portable preview (macOS x86_64)
+OASIS4.3-Build local portable preview (@PLATFORM@)
   ./phasebuild gui                  Open the local GUI
   ./phasebuild doctor [--verify]    Inspect/verify bundled components
   ./phasebuild hybrid-hl --help     PhaseBuild seed + Buccaneer + original HL refinement
@@ -56,9 +58,11 @@ def digest(path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', default=str(ROOT / 'dist/local_macos_x86_64'))
+    parser.add_argument('--platform', choices=['macos-x86_64', 'linux-x86_64'],
+                        default='linux-x86_64' if platform.system() == 'Linux' else 'macos-x86_64')
+    parser.add_argument('--output', default=None)
     args = parser.parse_args(argv)
-    out = Path(args.output).resolve()
+    out = Path(args.output or ROOT / 'dist' / ('local_' + args.platform.replace('-', '_'))).resolve()
     out.mkdir(parents=True, exist_ok=True)
     app = out / 'app'
     app.mkdir(exist_ok=False)
@@ -85,11 +89,13 @@ def main(argv=None):
     (app / 'app_manifest.json').write_text(json.dumps({'distribution_status': 'local-evaluation',
         'scientific_protocol': 'Opt-in integrated: optional initial seed, external Buccaneer3/2/2/2/2 and fixed originalHL REFMAC5x10',
         'files': files}, indent=2) + '\n')
-    (out / 'phasebuild').write_text(LAUNCHER)
+    (out / 'phasebuild').write_text(LAUNCHER.replace('@PLATFORM@', args.platform))
     (out / 'phasebuild').chmod(0o755)
     (out / 'PhaseBuild.command').write_text('#!/bin/sh\nset -eu\nbase=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$base/phasebuild" gui "$@"\n')
     (out / 'PhaseBuild.command').chmod(0o755)
-    print(json.dumps({'bundle': str(out), 'app_files': len(files),
+    name = 'OASIS4.3-Build.sh' if args.platform == 'linux-x86_64' else 'OASIS4.3-Build.command'
+    shutil.copy2(out / 'PhaseBuild.command', out / name)
+    print(json.dumps({'platform': args.platform, 'bundle': str(out), 'app_files': len(files),
                       'ready_for_local_validation': (out / 'runtime/runtime_manifest.json').is_file()
                         and (out / 'python/python_manifest.json').is_file()}, indent=2))
 

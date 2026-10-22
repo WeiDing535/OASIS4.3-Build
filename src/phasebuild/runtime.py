@@ -50,7 +50,8 @@ def runtime_environment(root, inherited=None, scratch=None):
     for name in list(environment):
         if name.startswith(('DYLD_', 'CCP4')) or name in (
                 'CLIBD', 'CLIBD_MON', 'CBIN', 'CEXAM', 'CINCL', 'CLIB',
-                'PYTHONHOME', 'PYTHONPATH', 'BINSORT_SCR'):
+                'PYTHONHOME', 'PYTHONPATH', 'BINSORT_SCR',
+                'LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT'):
             environment.pop(name, None)
     # CCP4's Fortran startup requires an existing writable scratch directory.
     # Replace a host installation's setting, and keep per-job scratch outside
