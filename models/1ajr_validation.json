@@ -1,0 +1,18 @@
+{
+  "validation_structure": "unrelated CCP4 library 1ajr",
+  "positive_score_quantiles": [
+    3.1906128927473025,
+    3.3990322224763383,
+    4.0796622686578825,
+    4.378717054260741
+  ],
+  "random_rotation_negative_quantiles": [
+    0.0044379154428878815,
+    0.9358622309722004,
+    1.9136073125072466,
+    2.2489577855157017
+  ],
+  "auc_vs_random_rotation": 0.9981280634367047,
+  "n_residues": 824,
+  "scope": "Synthetic orientation discrimination only; not model-building accuracy"
+}

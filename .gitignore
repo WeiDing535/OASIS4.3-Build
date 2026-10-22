@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.venv/
+*.egg-info/
+build/
+dist/
+.gui/
+.DS_Store
+validation/
+trial_validation/
+*.log
+runs/*
+!runs/sad_four_optimization/
+runs/sad_four_optimization/*
+!runs/sad_four_optimization/models/
