@@ -16,13 +16,28 @@ from .runtime import resolve_runtime, runtime_info
 from .sad_bridge import inspect_inputs, prepare_sad, adapt_maps, FLAG
 
 DEFAULTS = dict(copies=1, phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
-                free_value=0, seed=20261023, labels='', build_semet=False)
+                free_value=0, seed=20261023, labels='', build_semet=False,
+                method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
+                triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96)
 
 
 def validate(config, inspect=True):
     cfg = {**DEFAULTS, **config}
+    if cfg['method'] not in ('likelihood','pplus'):raise ValueError('Method must be likelihood or pplus')
+    if not isinstance(cfg['rank_fit'],bool):raise ValueError('rank_fit must be boolean')
+    if cfg['method']=='likelihood' and cfg['rank_fit']:raise ValueError('Rank fitting is available only for P+')
+    for key,low,high in [('aoe',0,1),('triplet_weight',0,1),('kmin',0,1)]:
+        value=cfg[key]
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not low<=value<=high:
+            raise ValueError('Invalid numeric parameter: '+key)
+    if not 0<cfg['aoe']<1:raise ValueError('AOE must lie strictly between 0 and 1')
+    if cfg['solvent_fraction'] is not None:
+        value=cfg['solvent_fraction']
+        if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not 0<value<1:
+            raise ValueError('Solvent fraction must be between 0 and 1, or blank for sequence estimate')
     for key,low,high in [('copies',1,100),('phase_cycles',1,100),('dm_cycles',1,100),
-                         ('rounds',1,20),('cycles',1,200),('free_value',0,999),('seed',0,2147483647)]:
+                         ('rounds',1,20),('cycles',1,200),('free_value',0,999),('seed',0,2147483647),
+                         ('max_neighbors',0,10000),('max_per_target',0,4096)]:
         value=cfg[key]
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or int(value)!=value or not low<=value<=high:
             raise ValueError('Invalid integer parameter: '+key)
@@ -41,12 +56,16 @@ def validate(config, inspect=True):
     if not cfg.get('fpp') or not isinstance(cfg['fpp'],str):raise ValueError('Specify element=f-double-prime')
     if inspect:
         if sys.version_info<(3,12):raise ValueError('SAD 全流程需要 Python 3.12；请使用整合版 conda 环境启动 GUI')
-        from oasis_py.cli import pairs
+        from .oasis_options import pairs
         from oasis_py.data import read_mtz, read_atoms
         from oasis_py.sequence import sequence_asu
         from oasis_py.reference_data import read_reference
-        from .sequencing import read_sequences
+        from .oasis_options import read_sequences
         sad,native,flags,partition=inspect_inputs(cfg['sad'],cfg['native'],cfg['free_value'])
+        forbidden=set(native.column_labels()) & {'FWT','PHWT','FOM','SAD_HLA','SAD_HLB','SAD_HLC','SAD_HLD'}
+        if forbidden:raise ValueError('Native must contain original observations without downstream map/prior columns: '+', '.join(sorted(forbidden)))
+        if set(pairs(cfg['labels']))-{'f','sigf','dano','sigdano','fplus','sigfplus','fminus','sigfminus'}:
+            raise ValueError('Unknown SAD column mapping name')
         data,_=read_mtz(cfg['sad'],'sad',pairs(cfg['labels']))
         heavy=read_atoms(cfg['heavy'],data)
         import gemmi
@@ -69,10 +88,14 @@ def stage_plan(cfg, python=None):
     prepare=out/'01_inputs';phase=out/'02_sad';dm=out/'03_dm';bridge=out/'04_bridge';build=out/'05_build'
     common=['--sad',str(prepare/'sad.mtz'),'--sequence',cfg['sequence'],'--heavy',cfg['heavy'],
             '--fpp',cfg['fpp'],'--copies',str(cfg['copies']),'--labels',cfg['labels'],
-            '--free-value',str(cfg['free_value']),'--seed',str(cfg['seed'])]
+            '--free-value',str(cfg['free_value']),'--seed',str(cfg['seed']),'--method',cfg['method']]
     phase_cmd=[python,'-u',str(root/'run_oasis_stage.py'),'phase']+common+['--cycles',str(cfg['phase_cycles']),'--output',str(phase/'experimental.mtz')]
+    for key in ['aoe','triplet_weight','kmin','max_neighbors','max_per_target']:
+        phase_cmd.extend(['--'+key.replace('_','-'),str(cfg[key])])
+    if cfg['rank_fit']:phase_cmd.append('--rank-fit')
     dm_cmd=[python,'-u',str(root/'run_oasis_stage.py'),'dm']+common+['--cycles',str(cfg['dm_cycles']),
         '--initial',str(phase/'experimental.mtz'),'--reference',cfg['reference'],'--output',str(dm/'map_phases.mtz')]
+    if cfg['solvent_fraction'] is not None:dm_cmd.extend(['--solvent-fraction',str(cfg['solvent_fraction'])])
     build_cmd=[python,'-u',str(root/'run_build_from_phases.py'),'--map',str(bridge/'building.mtz'),
         '--native',cfg['native'],'--sequence',str(prepare/'building.fasta'),'--phase-prior',str(phase/'experimental.mtz'),
         '--runtime',cfg['runtime'],'--free-value',str(cfg['free_value']),'--rounds',str(cfg['rounds']),
@@ -80,9 +103,9 @@ def stage_plan(cfg, python=None):
     if cfg['build_semet']:build_cmd.append('--build-semet')
     return [dict(id='prepare',name='输入与原自由集核验',directory=str(prepare),command=None,
                  outputs=[str(prepare/'sad.mtz'),str(prepare/'sad.json'),str(prepare/'building.fasta')]),
-            dict(id='sad',name='SAD 定相：保存密度修饰前实验 HL',directory=str(phase),command=phase_cmd,
+            dict(id='sad',name=('连续 SAD' if cfg['method']=='likelihood' else '直接法 P+')+' 定相：保存原始实验 HL',directory=str(phase),command=phase_cmd,
                  outputs=[str(phase/'experimental.mtz'),str(phase/'experimental.json')]),
-            dict(id='dm',name='密度修饰：生成建模相位',directory=str(dm),command=dm_cmd,
+            dict(id='dm',name=('MLHL-best' if cfg['method']=='likelihood' else 'Legacy')+' 密度修饰：生成建模相位',directory=str(dm),command=dm_cmd,
                  outputs=[str(dm/'map_phases.mtz'),str(dm/'map_phases.json')]),
             dict(id='bridge',name='按 HKL 生成工作集建模图',directory=str(bridge),command=None,
                  outputs=[str(bridge/'building.mtz'),str(bridge/'building.audit.json')]),
@@ -196,7 +219,7 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
             if stage['id']=='prepare':
                 folder.mkdir()
                 prepare_sad(cfg['sad'],cfg['native'],folder/'sad.mtz',cfg['free_value'])
-                from .sequencing import read_sequences
+                from .oasis_options import read_sequences
                 lines=[]
                 for copy in range(cfg['copies']):
                     for i,(name,seq) in enumerate(read_sequences(cfg['sequence'])):
