@@ -6,14 +6,16 @@ import sys
 from pathlib import Path
 from .runtime import default_runtime, resolve_runtime
 
-INTEGRATED_MODES = ('hybrid_hl', 'build_hl')
+INTEGRATED_MODES = ('hybrid_hl', 'build_hl', 'sad_to_model')
 INTEGRATED_ENGINES = ('hybrid-phasebuild-seeded-external-buccaneer-refmac',
                       'phasebuild-integrated-external-buccaneer-refmac')
 
 
 def defaults(project):
     project = Path(project)
-    return dict(mode='fresh', map='', native='', sequence='', model='', sequence_report='',
+    return dict(sad_input='', heavy='', fpp='', copies=1, phase_cycles=5, dm_cycles=5, sad_labels='',
+                dm_reference=str(Path(default_runtime())/'lib/data/reference_structures/reference-1tqw.mtz') if default_runtime() else '',
+                mode='fresh', map='', native='', sequence='', model='', sequence_report='',
                 phase_prior='', build_semet=False,
                 output=str(project/'runs'/'gui_run'), profile=str(project/'models/1tqw_1p9_symmetric.npz'),
                 residue_profile=str(project/'models/residue_1tqw_1p9.npz'),
@@ -66,6 +68,29 @@ def _inspect_hybrid_inputs(cfg):
         raise ValueError('序列文件为空')
 
 
+
+def make_sad_plan(cfg, project, python=None, inspect=True):
+    from .sad_pipeline import validate
+    out = Path(cfg['output']).expanduser().resolve()
+    if out.exists():
+        raise ValueError('输出目录已存在，请选择新名称：'+str(out))
+    values = dict(sad=cfg['sad_input'], native=cfg['native'], sequence=cfg['sequence'],
+                  heavy=cfg['heavy'], reference=cfg['dm_reference'], fpp=cfg['fpp'],
+                  copies=cfg['copies'], phase_cycles=cfg['phase_cycles'], dm_cycles=cfg['dm_cycles'],
+                  rounds=cfg['rounds'], cycles=cfg['cycles'], free_value=cfg['free_value'],
+                  labels=cfg['sad_labels'], runtime=cfg['ccp4'], output=str(out/'00_sad_to_model'),
+                  build_semet=False)
+    checked=validate(values, inspect=inspect)
+    cfg.update(output=str(out),refine=True,model='',map='',phase_prior='',ccp4=checked['runtime'])
+    command=[python or sys.executable,'-u',str(project/'run_sad_to_model.py')]
+    for key,value in checked.items():
+        if key=='build_semet':
+            if value:command.append('--build-semet')
+        else:command.extend(['--'+key.replace('_','-'),str(value)])
+    return cfg,[dict(name='SAD → 密度修饰 → 建模与精修（可恢复）',kind='sad_to_model',
+                     output=checked['output'],command=command)]
+
+
 def make_plan(config, project, python=None, inspect=True):
     """Read/validate inputs before any output is created. Never overwrite a run."""
     project = Path(project).resolve()
@@ -75,6 +100,8 @@ def make_plan(config, project, python=None, inspect=True):
     if set(config)-set(cfg):
         raise ValueError('未知配置项：'+', '.join(sorted(set(config)-set(cfg))))
     cfg.update(config)
+    if cfg['mode'] == 'sad_to_model':
+        return make_sad_plan(cfg, project, python=python, inspect=inspect)
     if cfg['mode'] not in ('fresh', 'extend', 'refine','evaluate') + INTEGRATED_MODES:
         raise ValueError('请选择有效任务类型')
     if not isinstance(cfg['refine'], bool):
@@ -331,6 +358,10 @@ def collect_results(directory):
         for path in sorted(root.rglob(suffix)):
             if path.is_file() and len(artifacts)<1000 and 'source_snapshot' not in path.parts:
                 artifacts.append(str(path.relative_to(root)))
+    for state in root.rglob('pipeline_report.json'):
+        for relative in ['02_sad/experimental.json','03_dm/map_phases.json','04_bridge/building.audit.json']:
+            item=state.parent/relative
+            if item.is_file():artifacts.append(str(item.relative_to(root)))
     candidates = []
     for step in data.get('steps',[]):
         folder = Path(step['output'])

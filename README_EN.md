@@ -4,13 +4,17 @@
 
 Research software for building protein models from existing crystallographic phase maps. It includes the PhaseBuild 0.8.3 native engine, a local browser GUI, and explicit external Buccaneer/REFMAC integration. The earlier [OASIS4.3-GUI](https://github.com/WeiDing535/OASIS4.3-GUI) repository remains unchanged.
 
+## Integrated development workflow
+
+The browser UI adds **SAD to model**: existing heavy-atom model -> SAD phasing -> density modification -> no-seed construction -> fixed-original-HL refinement. Use the Python 3.12 [conda environment](environment.yml). Independent engines remain available. Checkpointed CLI recovery and the distinct raw/DM phase provenance are described in [integration notes](docs/INTEGRATION.md). This is not a new real-data success claim or an update to the earlier Intel Mac binary draft.
+
 ## Linux-first complete bundle
 
 The next complete runtime target is Linux x86_64, with Python and scientific engines included. The Linux launcher, ELF/dependency audit and tar.gz assembler are implemented; an actual Linux runtime bundle still requires native runtime inputs and clean-system validation. See [Linux preparation](docs/LINUX.md). The existing Intel Mac local-evaluation bundle is retained. No public complete binary release has been made.
 
 ## Run from source
 
-Use an existing Python ≥3.9 environment with Gemmi, NumPy and SciPy. External construction/refinement additionally requires a user-provided CCP4 installation and reference resources. No Python or CCP4 runtime is bundled.
+Use an Python 3.12 environment with Gemmi, NumPy and SciPy. External construction/refinement additionally requires a user-provided CCP4 installation and reference resources. No Python or CCP4 runtime is bundled.
 
 On macOS with CCP4 at `/Applications/ccp4-9`, double-click `PhaseBuild.command` or run `./PhaseBuild.command`. For other installations set `PHASEBUILD_PYTHON` and `PHASEBUILD_RUNTIME` before launching. Alternatively run `python -B run_gui.py --project .` from the repository root.
 
