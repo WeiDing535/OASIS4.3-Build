@@ -13,6 +13,8 @@ def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['sad','native','sequence','heavy','reference','fpp','output']:p.add_argument('--'+name,required=True)
     p.add_argument('--runtime');p.add_argument('--labels',default='')
+    p.add_argument('--build-model',action=argparse.BooleanOptionalAction,default=True,
+                   help='Enable Buccaneer/REFMAC (default); --no-build-model stops after DM without external engines')
     p.add_argument('--method',choices=['likelihood','pplus'],default='likelihood')
     p.add_argument('--solvent-fraction',type=float)
     p.add_argument('--aoe',type=float,default=.5)
@@ -32,7 +34,8 @@ def main(argv=None):
         if Path(cfg['output']).exists() and not resume:p.error('Output exists; choose a new directory')
         print(json.dumps(dict(config=cfg,stages=stage_plan(cfg),output_created=False),indent=2));return 0
     report=run_pipeline(cfg,resume=resume)
-    print(json.dumps({'status':report['status'],'primary_model':report['primary_model']},indent=2));return 0
+    print(json.dumps({'status':report['status'],'primary_model':report['primary_model'],
+                      'dm_phases':report['dm_phases']},indent=2));return 0
 
 
 if __name__=='__main__':raise SystemExit(main())

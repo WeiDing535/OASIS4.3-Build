@@ -18,11 +18,14 @@ from .sad_bridge import inspect_inputs, prepare_sad, adapt_maps, FLAG
 DEFAULTS = dict(copies=1, phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 free_value=0, seed=20261023, labels='', build_semet=False,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
-                triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96)
+                triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True)
 
 
 def validate(config, inspect=True):
     cfg = {**DEFAULTS, **config}
+    if not isinstance(cfg['build_model'],bool):raise ValueError('build_model must be boolean')
+    if not cfg['build_model']:
+        cfg.update(rounds=DEFAULTS['rounds'],cycles=DEFAULTS['cycles'],runtime=None)
     if cfg['method'] not in ('likelihood','pplus'):raise ValueError('Method must be likelihood or pplus')
     if not isinstance(cfg['rank_fit'],bool):raise ValueError('rank_fit must be boolean')
     if cfg['method']=='likelihood' and cfg['rank_fit']:raise ValueError('Rank fitting is available only for P+')
@@ -49,10 +52,11 @@ def validate(config, inspect=True):
         if not path.is_file():raise ValueError('Missing input file: '+key)
         cfg[key]=str(path)
     cfg['output']=str(Path(cfg['output']).expanduser().resolve())
-    cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None,required=('cbuccaneer','refmac5')))
-    for suffix in ['.pdb','.mtz']:
-        if not (Path(cfg['runtime'])/'lib/data/reference_structures'/('reference-1tqw'+suffix)).is_file():
-            raise ValueError('External construction reference unavailable')
+    if cfg['build_model']:
+        cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None,required=('cbuccaneer','refmac5')))
+        for suffix in ['.pdb','.mtz']:
+            if not (Path(cfg['runtime'])/'lib/data/reference_structures'/('reference-1tqw'+suffix)).is_file():
+                raise ValueError('External construction reference unavailable')
     if not cfg.get('fpp') or not isinstance(cfg['fpp'],str):raise ValueError('Specify element=f-double-prime')
     if inspect:
         if sys.version_info<(3,12):raise ValueError('SAD 全流程需要 Python 3.12；请使用整合版 conda 环境启动 GUI')
@@ -101,8 +105,8 @@ def stage_plan(cfg, python=None):
         '--runtime',cfg['runtime'],'--free-value',str(cfg['free_value']),'--rounds',str(cfg['rounds']),
         '--cycles',str(cfg['cycles']),'--output',str(build)]
     if cfg['build_semet']:build_cmd.append('--build-semet')
-    return [dict(id='prepare',name='输入与原自由集核验',directory=str(prepare),command=None,
-                 outputs=[str(prepare/'sad.mtz'),str(prepare/'sad.json'),str(prepare/'building.fasta')]),
+    stages=[dict(id='prepare',name='输入与原自由集核验',directory=str(prepare),command=None,
+                 outputs=[str(prepare/'sad.mtz'),str(prepare/'sad.json')]+([str(prepare/'building.fasta')] if cfg.get('build_model',True) else [])),
             dict(id='sad',name=('连续 SAD' if cfg['method']=='likelihood' else '直接法 P+')+' 定相：保存原始实验 HL',directory=str(phase),command=phase_cmd,
                  outputs=[str(phase/'experimental.mtz'),str(phase/'experimental.json')]),
             dict(id='dm',name=('MLHL-best' if cfg['method']=='likelihood' else 'Legacy')+' 密度修饰：生成建模相位',directory=str(dm),command=dm_cmd,
@@ -111,6 +115,7 @@ def stage_plan(cfg, python=None):
                  outputs=[str(bridge/'building.mtz'),str(bridge/'building.audit.json')]),
             dict(id='build',name='Buccaneer 构建与固定原 HL 精修',directory=str(build),command=build_cmd,
                  outputs=[str(build/'primary_model.cif'),str(build/'hybrid_report.json')])]
+    return stages if cfg.get('build_model',True) else stages[:3]
 
 
 def source_identity():
@@ -175,14 +180,16 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
     cfg=config
     out=Path(cfg['output']);state_path=out/'pipeline_report.json';stages=stage_plan(cfg)
     inputs={key:fingerprint(cfg[key]) for key in ['sad','native','sequence','heavy','reference']}
-    runtime=Path(cfg['runtime']);inputs.update({name:fingerprint(runtime/'bin'/name) for name in ['cbuccaneer','refmac5']})
+    runtime=Path(cfg['runtime']) if cfg['build_model'] else None
+    if runtime:inputs.update({name:fingerprint(runtime/'bin'/name) for name in ['cbuccaneer','refmac5']})
     # Lock exact resources too; replacement reference/dictionaries cannot silently
     # enter a resumed experiment. The complete runtime manifest is preferred.
-    manifest=runtime/'runtime_manifest.json'
-    if manifest.is_file():inputs['runtime_manifest']=fingerprint(manifest)
-    for suffix in ['.mtz','.pdb']:
-        inputs['builder_reference'+suffix]=fingerprint(runtime/'lib/data/reference_structures'/('reference-1tqw'+suffix))
-    inputs['runtime_resources']=runtime_identity(runtime)
+    if runtime:
+        manifest=runtime/'runtime_manifest.json'
+        if manifest.is_file():inputs['runtime_manifest']=fingerprint(manifest)
+        for suffix in ['.mtz','.pdb']:
+            inputs['builder_reference'+suffix]=fingerprint(runtime/'lib/data/reference_structures'/('reference-1tqw'+suffix))
+        inputs['runtime_resources']=runtime_identity(runtime)
     import gemmi,numpy,scipy
     environment={'python':sys.version,'executable':sys.executable,'gemmi':gemmi.__version__,
                  'numpy':numpy.__version__,'scipy':scipy.__version__}
@@ -198,7 +205,7 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
                 if fingerprint(item['path'])!=item:raise ValueError('Checkpoint artifact changed: '+item['path'])
     else:
         state=dict(engine='oasis-sad-to-model',status='running',config=cfg,inputs=inputs,sources=sources,
-                   completed=[],created=time.time(),runtime=runtime_info(runtime),environment=environment,
+                   completed=[],created=time.time(),runtime=runtime_info(runtime) if runtime else None,environment=environment,
                    scope='SAD and DM use working reflections only; original flags unchanged. Later model-derived maps are not certified work-only; Rfree is not an independent end-to-end blind score.')
     def save():
         state['updated']=time.time();temp=state_path.with_suffix('.tmp');temp.write_text(json.dumps(state,indent=2,allow_nan=False)+'\n');temp.replace(state_path)
@@ -219,12 +226,13 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
             if stage['id']=='prepare':
                 folder.mkdir()
                 prepare_sad(cfg['sad'],cfg['native'],folder/'sad.mtz',cfg['free_value'])
-                from .oasis_options import read_sequences
-                lines=[]
-                for copy in range(cfg['copies']):
-                    for i,(name,seq) in enumerate(read_sequences(cfg['sequence'])):
-                        lines.extend(['>copy{}_chain{}'.format(copy+1,i+1),seq])
-                (folder/'building.fasta').write_text('\n'.join(lines)+'\n')
+                if cfg['build_model']:
+                    from .oasis_options import read_sequences
+                    lines=[]
+                    for copy in range(cfg['copies']):
+                        for i,(name,seq) in enumerate(read_sequences(cfg['sequence'])):
+                            lines.extend(['>copy{}_chain{}'.format(copy+1,i+1),seq])
+                    (folder/'building.fasta').write_text('\n'.join(lines)+'\n')
             elif stage['id']=='bridge':
                 folder.mkdir();adapt_maps(cfg['native'],out/'02_sad/experimental.mtz',out/'03_dm/map_phases.mtz',folder/'building.mtz',cfg['free_value'])
             else:
@@ -234,6 +242,11 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
                 with (out/(stage['id']+'.log')).open('w') as log:runner(stage['command'],log,env)
             artifacts=[fingerprint(path) for path in stage['outputs']]
             state['completed'].append(dict(id=stage['id'],name=stage['name'],artifacts=artifacts));save()
+        if not cfg['build_model']:
+            state.update(status='completed',current='complete',current_name='定相与密度修饰完成（未启用建模）',
+                         primary_model=None,primary_metric=None,experimental_prior=fingerprint(out/'02_sad/experimental.mtz'),
+                         dm_phases=fingerprint(out/'03_dm/map_phases.mtz'))
+            save();return state
         build_report=json.loads((out/'05_build/hybrid_report.json').read_text())
         if build_report.get('status')!='completed':raise RuntimeError('Construction/refinement endpoint is incomplete')
         model=out/'05_build/primary_model.cif';expected=build_report['primary_model']['sha256']
