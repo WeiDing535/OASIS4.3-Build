@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OASIS4.3-GUI"
+version = "0.1"
+description = "Protein SAD phasing with independent Python density modification and a desktop GUI"
+readme = "README.md"
+license = "LGPL-2.1-or-later"
+license-files = ["LICENSE", "licenses/*.txt"]
+authors = [{name = "DingWei (丁玮)", email = "dingwei@iphy.ac.cn"}]
+keywords = ["crystallography", "SAD", "phasing", "density-modification"]
+requires-python = ">=3.12,<3.13"
+dependencies = ["numpy>=1.26", "scipy>=1.12", "gemmi==0.7.5"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+report = ["matplotlib>=3.8"]
+gui = ["PySide6-Essentials>=6.8,<7"]
+
+[project.scripts]
+oasis-py = "oasis_py.cli:main"
+
+[project.gui-scripts]
+oasis-gui = "oasis_py.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+oasis_py = ["resources/*.mtz", "resources/*.json", "resources/*.md", "resources/*.gz", "resources/licenses/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["reference_data: requires separately provisioned upstream reference data"]
+
+[project.urls]
+"Author homepage" = "https://iop.cas.cn/rcjy/zgjgwry/?id=813"
+"Source" = "https://github.com/WeiDing535/OASIS4.3-GUI"
+"Issues" = "https://github.com/WeiDing535/OASIS4.3-GUI/issues"

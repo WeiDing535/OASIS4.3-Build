@@ -22,6 +22,7 @@ mode=${1:---help}
 if [ "$#" -gt 0 ]; then shift; fi
 case "$mode" in
   doctor) script=run_runtime_doctor.py ;;
+  sad-to-model) script=run_sad_to_model.py ;;
   hybrid-hl) script=run_phasebuild_hybrid_hl.py ;;
   build-hl) script=run_build_from_phases.py ;;
   hybrid) script=run_phasebuild_hybrid.py ;;
@@ -34,6 +35,7 @@ case "$mode" in
   --help|-h|help)
     cat <<'HELP'
 OASIS4.3-Build local portable preview (@PLATFORM@)
+  ./phasebuild sad-to-model --help  SAD phasing -> density modification -> model building
   ./phasebuild gui                  Open the local GUI
   ./phasebuild doctor [--verify]    Inspect/verify bundled components
   ./phasebuild hybrid-hl --help     PhaseBuild seed + Buccaneer + original HL refinement
@@ -80,10 +82,15 @@ def main(argv=None):
         shutil.copy2(ROOT / 'runs/sad_four_optimization/models' / name, bank / name)
     # Ship source documentation and license alongside every application copy.
     for name in ['LICENSE', 'AUTHORS.md', 'README.md', 'README_EN.md', 'GUI_GUIDE.md',
-                 'SAD_RESEARCH_GUIDE.md', 'WEAK_PHASE_DEVELOPMENT.md', 'pyproject.toml']:
+                 'SAD_RESEARCH_GUIDE.md', 'WEAK_PHASE_DEVELOPMENT.md', 'pyproject.toml', 'environment.yml']:
         shutil.copy2(ROOT / name, app / name)
     shutil.copytree(ROOT / 'packaging', app / 'packaging',
                     ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    shutil.copytree(ROOT / 'docs', app / 'docs')
+    provenance = app / 'vendor/oasis43'
+    provenance.mkdir(parents=True)
+    for name in ['UPSTREAM.json','TEST_PATCHES.md','LICENSE','AUTHORS.md']:
+        shutil.copy2(ROOT / 'vendor/oasis43' / name, provenance / name)
     files = [{'relative_path': str(path.relative_to(app)), 'sha256': digest(path),
               'bytes': path.stat().st_size} for path in sorted(app.rglob('*')) if path.is_file()]
     (app / 'app_manifest.json').write_text(json.dumps({'distribution_status': 'local-evaluation',

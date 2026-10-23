@@ -150,6 +150,12 @@ class Jobs:
                 job['log'] = log.read().decode('utf-8',errors='replace')
         else:
             job['log'] = ''
+        if job.get('config',{}).get('mode')=='sad_to_model':
+            state=Path(job['output'])/'00_sad_to_model/pipeline_report.json'
+            if state.is_file():
+                saved=json.loads(state.read_text())
+                job['pipeline_progress']={'completed':len(saved.get('completed',[])), 'total':5,
+                                          'current':saved.get('current_name','')}
         return job
 
     def history(self):

@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PhaseBuild · 蛋白结构构建</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OASIS · SAD 定相与结构构建</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body>
 <aside class="sidebar">
-  <a class="brand" href="#"><span class="brand-icon">P<span>β</span></span><span>PhaseBuild<small>PHASE TO STRUCTURE</small></span></a>
+  <a class="brand" href="#"><span class="brand-icon">P<span>β</span></span><span>OASIS4.3<small>SAD TO STRUCTURE</small></span></a>
   <div class="sidebar-label">工作空间</div>
   <button class="nav active" id="new-task">＋ &nbsp; 新建任务</button>
   <button class="nav" id="import-results">▤ &nbsp; 打开已有结果</button>
@@ -13,11 +13,12 @@
 </aside>
 <main>
   <header><div class="breadcrumb">工作空间 <span>/</span> 蛋白结构构建</div><div class="version">研究版 <b>0.8.3</b></div></header>
-  <div class="heading"><div><div class="eyebrow">MODEL BUILDING WORKBENCH</div><h1>从相位到结构</h1><p>选择数据，构建主链与侧链，在同一工作台查看精修结果。</p></div><button id="load-example" class="secondary">载入 INS 示例</button></div>
+  <div class="heading"><div><div class="eyebrow">MODEL BUILDING WORKBENCH</div><h1>从 SAD 数据到结构模型</h1><p>在同一工作台完成 SAD 定相、密度修饰、模型构建与精修，也可独立运行各阶段。</p></div><button id="load-example" class="secondary">载入 INS 示例</button></div>
   <div id="notice" class="notice hidden" role="status"></div>
   <section class="card configuration">
     <div class="section-heading"><h2><span class="step-number">01</span> 设置任务</h2><div class="config-tools"><button id="load-config" class="text-button">导入配置</button><button id="save-config" class="text-button">导出配置</button><input type="file" id="config-file" accept=".json" hidden></div></div>
     <div class="mode-grid" role="radiogroup" aria-label="任务类型">
+      <label class="mode-card"><input type="radio" name="mode" value="sad_to_model"><span class="mode-symbol">◎</span><span><strong>SAD 定相到模型</strong><small>SAD → 密度修饰 → 构建与精修</small></span></label>
       <label class="mode-card"><input type="radio" name="mode" value="fresh" checked><span class="mode-symbol">⌘</span><span><strong>从相位图建模</strong><small>主链搜索 → 序列归属 → 侧链</small></span></label>
       <label class="mode-card"><input type="radio" name="mode" value="extend"><span class="mode-symbol">↗</span><span><strong>已有模型延伸</strong><small>从序列锚点双向补全末端</small></span></label>
       <label class="mode-card"><input type="radio" name="mode" value="refine"><span class="mode-symbol">◇</span><span><strong>单独精修</strong><small>REFMAC · Rwork / Rfree</small></span></label>
@@ -26,7 +27,7 @@
       <label class="mode-card"><input type="radio" name="mode" value="hybrid_hl"><span class="mode-symbol">⇄</span><span><strong>Buccaneer 集成＋原 HL 精修</strong><small>需已有种子模型 · 固定末轮结果</small></span></label>
     </div>
     <form id="job-form">
-      <div class="form-grid" id="input-fields"></div>
+      <div class="form-grid" id="input-fields"></div><div id="sad-options" class="hidden"><p class="hint">提供 SAD 异常衍射数据、原始 native 与自由集、重原子模型和序列。程序分别保存原始 SAD HL 与密度修饰相位，自动接入无初始模型构建。首次整合支持已有重原子信息，使用未修饰的标准氨基酸 FASTA/PIR。native 需 F / SIGF / FreeR_flag。后续外部精修地图尚未认证为仅工作集；Rfree 不是端到端盲测指标。</p></div>
       <div id="hybrid-options" class="hidden"><p class="hint">无初始模型模式从实验相位开始构建；已有种子模式从所选模型继续。两种模式均调用外部 Buccaneer 构建、REFMAC 精修。每轮保留同一份原始实验 HLA / HLB / HLC / HLD；后续地图只用本任务自身上轮精修输出。此模式不是原生 PhaseBuild 从头算法。</p><p class="hint">本模式使用固定列：地图 F / SIGF / FWT / PHWT / FOM；native F / SIGF / FreeR_flag，在高级设置填写原自由集数值（默认 0）。只接受现有自由集，不生成新标记。默认 5 轮 × 10 周期，固定最后一轮模型，不按 Rfree 选模。</p><label class="checkbox-label"><input type="checkbox" id="build_semet"> SeMet 实验（根据实验元数据启用）</label></div>
       <div class="refinement-options"><label class="checkbox-label"><input type="checkbox" id="refine" checked> 启用 REFMAC 精修</label><span id="round-description">每轮构建后精修，并将更新图用于下一轮。</span></div>
       <div class="form-grid compact">

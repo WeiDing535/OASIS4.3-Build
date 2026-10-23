@@ -1,0 +1,10 @@
+name: oasis43-unified
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - numpy=1.26
+  - scipy=1.13
+  - gemmi=0.7.5
+  - pytest=8

@@ -16,9 +16,11 @@ def main(argv=None):
     target.parent.mkdir(parents=True,exist_ok=True)
     files=list((root/'src').rglob('*.py'))+list((root/'src/phasebuild/gui_assets').glob('*'))
     files+=list(root.glob('run_*.py'))+list(root.glob('train_*.py'))
-    files+=[root/name for name in ['pyproject.toml','README.md','GUI_GUIDE.md','SAD_RESEARCH_GUIDE.md','WEAK_PHASE_DEVELOPMENT.md','PhaseBuild.command','package_gui.py','LICENSE','AUTHORS.md','CITATION.cff','README_EN.md','CHANGELOG.md']]
+    files+=[root/name for name in ['pyproject.toml','README.md','GUI_GUIDE.md','SAD_RESEARCH_GUIDE.md','WEAK_PHASE_DEVELOPMENT.md','PhaseBuild.command','package_gui.py','LICENSE','AUTHORS.md','CITATION.cff','README_EN.md','CHANGELOG.md','environment.yml']]
     files+=list((root/'packaging').glob('*.py'))
     files+=list((root/'docs').glob('*.md'))
+    files += [p for p in (root/'src/oasis_py/resources').rglob('*') if p.is_file()]
+    files += [p for p in (root/'vendor/oasis43').rglob('*') if p.is_file() and '__pycache__' not in p.parts]
     files+=[root/'development/INTEGRATION_REPORT.md']
     files+=list((root/'tests').glob('*.py'))
     files+=[root/'models'/name for name in ['1tqw_1p9_symmetric.npz','residue_1tqw_1p9.npz','rotamers_1tqw_v08.json']]

@@ -7,3 +7,5 @@ The small profile/conformer assets retain their original metadata. They were dev
 The source GUI is a loopback web application. Python packages (Gemmi, NumPy, SciPy) and optional external engines (CCP4 Buccaneer/REFMAC and their dictionaries/reference resources) remain separately supplied dependencies, subject to their own licensing. This source export is not a redistribution clearance for external runtimes.
 
 The earlier OASIS4.3-GUI source and v0.1 release remain in their original repository. OASIS4.3-Build is published separately and retains PhaseBuild as its internal package identity.
+
+The subsequent unified development integration adds an unchanged `oasis_py` numerical-source snapshot and new orchestration/UI adapters. The original source-copy equivalence statement above refers to the first publication baseline, not later interface additions. Upstream hashes and one explicitly documented test-only portability patch are in `vendor/oasis43`.
