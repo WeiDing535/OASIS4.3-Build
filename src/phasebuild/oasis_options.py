@@ -34,4 +34,3 @@ def read_sequences(path):
     if not records or any(not seq or set(seq)-set('ACDEFGHIKLMNPQRSTVWY') for _,seq in records):
         raise ValueError('Invalid or empty protein sequence; supported codes are the 20 standard amino acids')
     return records
-
