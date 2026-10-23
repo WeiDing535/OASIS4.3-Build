@@ -37,12 +37,13 @@ def make_plan(config, project, python=None, inspect=True):
     command=[python or sys.executable,'-u',str(Path(project).resolve()/'run_sad_to_model.py')]
     for key,value in checked.items():
         if key=='build_semet':continue
-        if key=='rank_fit':
+        if key=='build_model':command.append('--build-model' if value else '--no-build-model')
+        elif key=='rank_fit':
             if value:command.append('--rank-fit')
         elif value is not None:command.extend(['--'+key.replace('_','-'),str(value)])
     checked.pop('build_semet')
     checked.update(output=str(outer),mode='sad_to_model')
-    return checked,[dict(name='OASIS4.3：定相 → 密度修饰 → Buccaneer → REFMAC',kind='sad_to_model',
+    return checked,[dict(name='OASIS4.3：定相 → 密度修饰'+(' → Buccaneer → REFMAC' if checked['build_model'] else '（未启用建模）'),kind='sad_to_model',
                          output=str(outer/'00_sad_to_model'),command=command)]
 
 
@@ -56,6 +57,9 @@ def describe_plan(cfg):
                 free_value=cfg['free_value'],kmin=cfg['kmin'],max_neighbors=cfg['max_neighbors'],
                 max_per_target=cfg['max_per_target'])
     active.update({'triplet_weight':cfg['triplet_weight']} if cfg['method']=='likelihood' else {'aoe':cfg['aoe'],'rank_fit':cfg['rank_fit']})
+    active['build_model']=cfg.get('build_model',True)
+    if not active['build_model']:
+        active.pop('rounds');active.pop('refmac_cycles')
     import gemmi
     from oasis_py.sequence import sequence_asu
     from .refinement import reflection_partition
@@ -66,7 +70,8 @@ def describe_plan(cfg):
     active.update(asu_residues=sample['asu_residues'],asu_chains=sample['asu_chains'],
                   native_work=partition['usable_work'],native_free=partition['usable_free'])
     return dict(stages=stage_plan(values),effective_options=active,sample_warnings=sample['warnings'],
-                fixed_protocol='Buccaneer 首轮 3 周期、后续每轮 2 周期；单线程；REFMAC 固定原始 SAD HL；固定最后一轮结果。')
+                fixed_protocol='Buccaneer 首轮 3 周期、后续每轮 2 周期；单线程；REFMAC 固定原始 SAD HL；固定最后一轮结果。' if active['build_model'] else
+                '未启用 Buccaneer / REFMAC：流程在密度修饰后结束，不检查或调用建模精修引擎；保留原始 SAD HL、最终相位、FOM 与日志。')
 
 
 def read_json(path):
@@ -98,16 +103,19 @@ def collect_results(directory):
     root=Path(directory).resolve()
     if not root.is_dir():raise ValueError('结果目录不存在')
     pipe=pipeline_root(root);state=read_json(pipe/'pipeline_report.json')
-    cfg=state.get('config',{});completed={item['id'] for item in state.get('completed',[])}
-    report=read_json(pipe/'05_build/hybrid_report.json')
+    cfg=state.get('config') or read_json(root/'gui_job.json').get('config',{})
+    completed={item['id'] for item in state.get('completed',[])}
+    building=cfg.get('build_model',True)
+    report=read_json(pipe/'05_build/hybrid_report.json') if building else {}
     labels=[('prepare','输入核验'),('sad','SAD 定相'),('dm','密度修饰'),('bridge','建模地图'),('build','Buccaneer / REFMAC')]
+    if not building:labels=labels[:3]
     stages=[]
     for key,label in labels:
         status='completed' if key in completed else state.get('status','waiting') if state.get('current')==key else 'waiting'
         if status=='completed' and key=='build' and state.get('status')!='completed':status='running'
         stages.append(dict(id=key,name=label,status=status))
     metrics=[]
-    for number in range(1,cfg.get('rounds',0)+1):
+    for number in range(1,(cfg.get('rounds',0) if building else 0)+1):
         folder=pipe/'05_build'/('round_%02d_refine'%number)
         ref=read_json(folder/'refinement_report.json')
         if ref.get('status')!='success':continue
@@ -115,7 +123,13 @@ def collect_results(directory):
         metrics.append(dict(stage='第 %d 轮'%number,round=number,r_work=stats.get('r_work'),r_free=stats.get('r_free'),
             cycles=ref.get('requested_cycles'),free_preserved=ref.get('free_flags_preserved'),
             engine='REFMAC · 原始 SAD HL',model=str((folder/'model.cif').relative_to(root))))
-    complete=state.get('status')=='completed' and report.get('status')=='completed'
+    pipeline_complete=state.get('status')=='completed'
+    if pipeline_complete and not building:
+        expected=state.get('dm_phases',{}).get('sha256')
+        phase_file=pipe/'03_dm/map_phases.mtz'
+        if not phase_file.is_file() or not expected or fingerprint(phase_file)['sha256']!=expected:
+            raise ValueError('最终密度修饰相位与流程记录的哈希不一致')
+    complete=pipeline_complete and building and report.get('status')=='completed'
     model=pipe/'primary_model.cif' if complete else root/metrics[-1]['model'] if metrics else None
     if complete:
         expected=state.get('primary_model',{}).get('sha256')
@@ -140,7 +154,8 @@ def collect_results(directory):
     for key,name,role in [('sad','02_sad/experimental.mtz','原始 SAD 相位与 HL'),
                          ('dm','03_dm/map_phases.mtz','密度修饰后相位与 FOM'),
                          ('bridge','04_bridge/building.mtz','初始 Buccaneer 建模地图')]:
-        if key in completed:add(pipe/name,role,'相位与地图')
+        if key in completed:add(pipe/name,'最终密度修饰相位与 FOM' if key=='dm' and not building and pipeline_complete else role,
+                              '主要结果' if key=='dm' and not building and pipeline_complete else '相位与地图')
     if complete:add(pipe/'05_build'/('round_%02d_refine'%cfg['rounds'])/'refined.mtz','最后一轮精修地图','主要结果')
     for name in ['pipeline_report.json','01_inputs/sad.json','02_sad/experimental.json','03_dm/map_phases.json',
                  '04_bridge/building.audit.json','05_build/hybrid_report.json']:
@@ -149,7 +164,7 @@ def collect_results(directory):
         add(root/name,'流程日志','日志')
     for name in ['sad.log','dm.log','build.log']:
         add(pipe/name,name,'日志')
-    for number in range(1,cfg.get('rounds',0)+1):
+    for number in range(1,(cfg.get('rounds',0) if building else 0)+1):
         for suffix,file,role in [('build','buccaneer.log','Buccaneer 日志'),('refine','refmac.log','REFMAC 日志'),
                                  ('refine','refinement_report.json','精修统计'),('build','buccaneer.xml','Buccaneer 统计')]:
             add(pipe/'05_build'/('round_%02d_%s'%(number,suffix))/file,'第 %d 轮 '%number+role,'逐轮记录')
@@ -166,6 +181,8 @@ def collect_results(directory):
                 solvent_source=dm_meta.get('solvent_source'),partition=partition,metrics=metrics,
                 sample=raw_meta.get('sequence_asu',{}),
                 primary_metric=metrics[-1] if metrics else None,primary_complete=complete,
+                build_model=building,pipeline_complete=pipeline_complete,
+                final_phases=str((pipe/'03_dm/map_phases.mtz').relative_to(root)) if pipeline_complete and not building else None,
                 final_model=str(model.relative_to(root)) if model and model.is_file() else None,
                 preview=preview,residues=sum(len(c['points']) for c in preview),chains=len(preview),
                 artifacts=artifacts,error=state.get('error'),selection_policy='fixed_final_round')
@@ -173,7 +190,8 @@ def collect_results(directory):
 
 def save_selected_result(directory):
     result=collect_results(directory)
-    if not result['primary_complete']:raise ValueError('流程尚未产生完整的最终模型')
+    if not result['pipeline_complete'] or (result['build_model'] and not result['primary_complete']):
+        raise ValueError('流程尚未产生完整的最终结果')
     return result
 
 
@@ -190,7 +208,7 @@ def enrich_job(job):
         label='第 %d / %d 轮 · %s'%(round_number,state['config']['rounds'],'REFMAC 精修' if sub=='refmac' else 'Buccaneer 构建')
         folder=pipe/'05_build'/('round_%02d_%s'%(round_number,'refine' if sub=='refmac' else 'build'))
         logs+=list(folder.glob('*.log'))
-    job['pipeline_progress']=dict(completed=len(state.get('completed',[])),total=5,current=label,
+    job['pipeline_progress']=dict(completed=len(state.get('completed',[])),total=5 if state['config'].get('build_model',True) else 3,current=label,
                                   revision=[state.get('updated'),build.get('current'),len(build.get('stages',[]))])
     parts=[]
     for path in logs:

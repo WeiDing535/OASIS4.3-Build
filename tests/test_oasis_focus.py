@@ -145,3 +145,59 @@ def test_focused_source_runs_without_legacy_entrypoints_or_training_models(input
         cwd=extracted,text=True,capture_output=True)
     assert probe.returncode==0,probe.stderr
     assert not Path(inputs['output']).exists()
+
+
+@pytest.mark.parametrize('method',['likelihood','pplus'])
+def test_phases_only_completes_without_resolving_or_fingerprinting_external_engines(inputs,method,monkeypatch):
+    cfg={**inputs,'method':method,'build_model':False,'runtime':'/missing/unused/runtime',
+         'rounds':None,'cycles':None}
+    def forbidden(*a,**kw):raise AssertionError('Phases-only must never resolve external engines')
+    monkeypatch.setattr(pipeline,'resolve_runtime',forbidden)
+    monkeypatch.setattr(pipeline,'runtime_info',forbidden)
+    runner=FakeStages(cfg,real_phase=True)
+    state=pipeline.run_pipeline(cfg,runner=runner,progress=lambda x:None)
+    out=Path(cfg['output'])
+    assert state['status']=='completed' and state['primary_model'] is None and state['runtime'] is None
+    assert runner.calls==['phase','dm'] and len(state['completed'])==3
+    assert 'cbuccaneer' not in state['inputs'] and 'runtime_resources' not in state['inputs']
+    assert not (out/'04_bridge').exists() and not (out/'05_build').exists()
+    assert not (out/'01_inputs/building.fasta').exists()
+    result=workflow.save_selected_result(out)
+    assert result['pipeline_complete'] and not result['primary_complete'] and not result['build_model']
+    assert len(result['stages'])==3 and result['final_model'] is None and result['metrics']==[]
+    assert result['final_phases']=='03_dm/map_phases.mtz'
+    assert any(f['group']=='主要结果' and f['path']==result['final_phases'] for f in result['artifacts'])
+    pipeline.run_pipeline({**cfg,'runtime':'/another/irrelevant/path'},resume=True,runner=runner)
+    assert runner.calls==['phase','dm']
+    (out/'03_dm/map_phases.mtz').write_bytes(b'tampered')
+    with pytest.raises(ValueError,match='哈希'):workflow.collect_results(out)
+
+
+def test_optional_build_flag_in_preflight_and_resume_protocol(inputs):
+    assert pipeline.validate(inputs)['build_model'] is True
+    cfg={**inputs,'build_model':False,'runtime':''}
+    checked,steps=workflow.make_plan(cfg,root())
+    assert '--no-build-model' in steps[0]['command'] and '--runtime' not in steps[0]['command']
+    plan=workflow.describe_plan(checked)
+    assert len(plan['stages'])==3 and plan['effective_options']['build_model'] is False
+    assert 'rounds' not in plan['effective_options'] and 'refmac_cycles' not in plan['effective_options']
+    assert not Path(inputs['output']).exists()
+    pipeline.run_pipeline(cfg,runner=FakeStages(cfg),progress=lambda x:None)
+    with pytest.raises(ValueError,match='Resume refused'):
+        pipeline.run_pipeline({**inputs,'build_model':True},resume=True,runner=FakeStages(inputs))
+    with pytest.raises(ValueError,match='boolean'):pipeline.validate({**inputs,'build_model':'false'})
+
+
+def test_gui_phases_only_job_is_successful_and_reports_three_stages(inputs,tmp_path):
+    from phasebuild.gui import Jobs
+    project=tmp_path/'project';project.mkdir()
+    (project/'run_sad_to_model.py').symlink_to(root()/'run_sad_to_model.py')
+    jobs=Jobs(project,workflow=workflow)
+    job=jobs.start({**inputs,'build_model':False,'runtime':''})
+    jobs.worker.join(timeout=25)
+    assert not jobs.worker.is_alive()
+    saved=jobs.get(job['id'])
+    assert saved['status']=='success',saved.get('log')
+    assert saved['pipeline_progress']['total']==saved['pipeline_progress']['completed']==3
+    assert len(saved['plan']['stages'])==3
+    assert workflow.collect_results(job['output'])['final_phases']=='00_sad_to_model/03_dm/map_phases.mtz'

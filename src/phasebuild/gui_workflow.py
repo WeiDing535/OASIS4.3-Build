@@ -84,7 +84,8 @@ def make_sad_plan(cfg, project, python=None, inspect=True):
     cfg.update(output=str(out),refine=True,model='',map='',phase_prior='',ccp4=checked['runtime'])
     command=[python or sys.executable,'-u',str(project/'run_sad_to_model.py')]
     for key,value in checked.items():
-        if key in ('build_semet','rank_fit'):
+        if key=='build_model':command.append('--build-model' if value else '--no-build-model')
+        elif key in ('build_semet','rank_fit'):
             if value:command.append('--'+key.replace('_','-'))
         elif value is not None:command.extend(['--'+key.replace('_','-'),str(value)])
     return cfg,[dict(name='SAD → 密度修饰 → 建模与精修（可恢复）',kind='sad_to_model',
