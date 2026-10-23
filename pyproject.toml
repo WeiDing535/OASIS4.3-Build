@@ -9,23 +9,32 @@ description = "OASIS4.3-Build: phase-guided protein model building with PhaseBui
 readme = "README.md"
 license = {text = "LGPL-2.1-or-later"}
 authors = [{name = "DingWei (丁玮)", email = "dingwei@iphy.ac.cn"}]
-requires-python = ">=3.9"
-dependencies = ["gemmi>=0.7", "numpy>=1.19", "scipy>=1.7"]
+requires-python = ">=3.12,<3.13"
+dependencies = ["gemmi==0.7.5", "numpy>=1.26,<2", "scipy>=1.12"]
 
 [project.scripts]
 phasebuild = "phasebuild.cli:main"
 phasebuild-gui = "phasebuild.gui:main"
+oasis43-gui = "phasebuild.oasis_gui:main"
+oasis-py = "oasis_py.cli:main"
 
 [tool.setuptools.package-data]
-phasebuild = ["gui_assets/*"]
+phasebuild = ["gui_assets/*", "oasis_assets/*"]
+oasis_py = ["resources/*.json", "resources/*.md", "resources/*.gz", "resources/licenses/*.txt"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 
 [project.optional-dependencies]
-test = ["pytest>=6"]
+test = ["pytest>=8"]
 
 [project.urls]
 Source = "https://github.com/WeiDing535/OASIS4.3-Build"
 Issues = "https://github.com/WeiDing535/OASIS4.3-Build/issues"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests", "vendor/oasis43/tests"]
+addopts = "-m 'not reference_data'"
+markers = ["reference_data: requires separately provisioned upstream reference data"]

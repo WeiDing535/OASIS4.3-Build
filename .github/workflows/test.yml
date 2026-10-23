@@ -9,6 +9,11 @@ permissions:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      VECLIB_MAXIMUM_THREADS: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -17,16 +22,18 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install Python test dependencies
         run: python -m pip install "numpy==1.26.4" "scipy==1.13.1" "gemmi==0.7.5" "pytest==8.3.5"
       - name: Run synthetic and contract tests (no external engines)
-        run: python -B -m pytest -q -p no:cacheprovider tests
+        run: python -B -m pytest -q -p no:cacheprovider tests vendor/oasis43/tests -m 'not reference_data'
       - name: Check CLI and source package
         run: |
           python -B run_gui.py --help
           python -B run_build_from_phases.py --help
           python -B package_gui.py --output dist/phasebuild-source.zip
+          python -B run_sad_to_model.py --help
+          python -B package_oasis.py --output dist/OASIS4.3-focused-source.zip
       - name: Check Linux application staging (not a complete runtime package)
         if: runner.os == 'Linux'
         run: |

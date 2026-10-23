@@ -172,6 +172,13 @@ def main(argv=None):
     shutil.copy2(ROOT / 'LICENSE', output / 'LICENSE')
     env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'C',
            'HOME': str(output.parent / (output.name + '-validation-home'))}
+    print('Verify unified Python 3.12 and OASIS engine', flush=True)
+    unified = subprocess.run([str(output/'python/bin/python3'), '-c',
+        "import sys; sys.path.insert(0,sys.argv[1]); assert sys.version_info[:2]==(3,12), 'Unified package requires Python 3.12'; import oasis_py.cli",
+        str(output/'app/src')], env=env, capture_output=True, text=True, timeout=60)
+    if unified.returncode:
+        raise RuntimeError('Incomplete unified Python runtime: '+unified.stderr)
+    report['validation']['unified_python_312'] = True
     print('Verify bundled doctor and CLI entry points', flush=True)
     doctor = subprocess.run([str(output / 'phasebuild'), 'doctor', '--verify'],
                             env=env, capture_output=True, text=True, timeout=180)
@@ -179,7 +186,7 @@ def main(argv=None):
         raise RuntimeError('Bundled doctor failed: ' + doctor.stdout + doctor.stderr)
     report['validation']['doctor'] = json.loads(doctor.stdout)
     verify_doctor_paths(report['validation']['doctor'], output)
-    modes = ['gui', 'native', 'hybrid-hl', 'build-hl', 'hybrid', 'refine', 'rfactor', 'phase-refine', 'audit', 'evaluate']
+    modes = ['sad-to-model', 'gui', 'native', 'hybrid-hl', 'build-hl', 'hybrid', 'refine', 'rfactor', 'phase-refine', 'audit', 'evaluate']
     report['validation']['cli_help'] = {}
     for mode in modes:
         result = subprocess.run([str(output / 'phasebuild'), mode, '--help'], env=env,

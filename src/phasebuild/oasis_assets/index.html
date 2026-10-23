@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OASIS4.3 · SAD 到结构模型</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body>
+<header class="topbar"><a href="#" class="brand">OASIS<span>4.3</span></a><span class="tag">两种定相方法 · 一条构建流程</span><span id="runtime-status" class="runtime">连接本机环境…</span></header>
+<main>
+<section class="hero"><div class="eyebrow">SINGLE-WAVELENGTH ANOMALOUS DIFFRACTION</div><h1>从 SAD 相位，到结构模型</h1><p>OASIS 定相 → 密度修饰 → 可选 Buccaneer 模型构建 / REFMAC 精修</p><div class="tools"><button id="new-task" class="secondary">新建任务</button><button id="import-results" class="secondary">打开已有结果</button><details class="history-menu"><summary>最近任务</summary><div id="history"></div></details></div></section>
+<div id="notice" class="notice hidden" role="status"></div>
+<form id="job-form">
+<section class="card"><div class="section-heading"><h2><span>01</span> 选择定相方法</h2><div class="config-tools"><button type="button" id="load-config" class="text-button">导入配置</button><button type="button" id="save-config" class="text-button">导出配置</button><input type="file" id="config-file" accept=".json" hidden></div></div>
+<div class="method-grid" role="radiogroup" aria-label="定相方法">
+<label class="method-card"><input type="radio" name="method" value="likelihood" checked><strong>连续 SAD</strong><small>连续相位似然 → MLHL-best 密度修饰</small><p>使用连续 SAD 相位概率；保留原始实验 HL。</p></label>
+<label class="method-card"><input type="radio" name="method" value="pplus"><strong>直接法 P+</strong><small>P+ 相位迭代 → Legacy 密度修饰</small><p>使用现有 P+ 路径；密度修饰保留原版连接方式。</p></label></div>
+<p id="method-note" class="hint"></p>
+<div class="form-grid" id="input-fields"></div>
+<p class="hint scope">需要已有重原子模型和正确的手性、晶胞及空间群设置。支持未修饰的标准氨基酸序列；本版不包含重原子搜索、自动选手或 SeMet 自动组成转换。SAD 与 native 须已合并到同一倒易不对称单元。</p>
+</section>
+<section class="card"><div class="section-heading"><h2><span>02</span> 参数与运行</h2><span class="tag">所有阶段顺序执行</span></div>
+<div class="parameter-section"><h3>样品与密度修饰</h3><div class="form-grid" id="sample-fields"></div><p class="hint">溶剂比例留空时按序列、ASU 份数和晶胞估算。密度修饰方法随定相方法配对，不交叉混用。</p></div>
+<div class="parameter-section"><h3>构建与精修</h3><label class="checkbox-label"><input type="checkbox" id="build_model" checked> 启用 Buccaneer 模型构建与 REFMAC 精修（默认开启）</label><p id="build-disabled-note" class="hint hidden">已关闭建模与精修：流程在密度修饰后完成，输出最终相位、FOM 和原始 SAD HL；无需配置 Buccaneer / REFMAC 运行资源。</p><div id="build-options"><div class="form-grid" id="build-fields"></div><p class="hint">Buccaneer 首轮 3 周期、后续每轮 2 周期；无初始蛋白模型。每轮 REFMAC 固定使用原始 SAD HL。预先指定轮数，最终模型取最后一轮，不按最低 Rfree 选择。</p></div></div>
+<details id="advanced"><summary>高级定相与运行选项 <span>方法专属参数、列映射、自由集、引擎路径</span></summary><div class="form-grid advanced-grid" id="advanced-fields"></div><label class="checkbox-label" id="rank-fit-field"><input type="checkbox" id="rank_fit"> P+ 相位差秩拟合（默认关闭）</label><p class="hint">三重相位关系使用共同的 kmin 和邻居上限；上限设为 0 表示不截断，可能明显增加时间和内存。随机种子控制 P+ / 密度修饰中的随机步骤，连续 SAD 定相本身按现有确定性算法运行。固定单线程以稳定数值复现。</p></details>
+<div class="run-bar"><div><strong id="budget"></strong><small>输入检查不创建输出目录；开始运行后保留全部阶段与日志。</small></div><div class="run-actions"><button type="button" id="validate" class="secondary">检查输入</button><button type="submit" id="start" class="primary">开始运行 →</button></div></div>
+</section></form>
+<section class="card" id="workspace"><div class="section-heading"><h2><span>03</span> 运行与结果</h2><span id="job-state" class="state">等待任务</span></div>
+<div class="job-progress hidden" id="job-progress"><div class="progress-top"><strong id="current-stage"></strong><span id="progress-count"></span><button id="stop" class="danger">停止任务</button></div><progress id="progress" value="0" max="5"></progress><div id="output-location" class="location"></div></div>
+<div id="stage-list" class="stage-list"></div>
+<div class="tabs" role="tablist"><button type="button" class="tab active" data-tab="results" role="tab">结果概览</button><button type="button" class="tab" data-tab="logs" role="tab">实时日志</button><button type="button" class="tab" data-tab="plan" role="tab">参数与执行计划</button></div>
+<div id="results" class="tab-panel"><div id="empty-results" class="empty"><h3>等待你的第一组 SAD 数据</h3><p>运行后分别展示原始相位、密度修饰结果和逐轮构建精修统计。</p></div>
+<div id="result-content" class="hidden"><p id="result-summary" class="summary"></p><div class="metrics"><div><span>原始 SAD 平均 FOM</span><strong id="sad-fom">—</strong></div><div><span>密度修饰后平均 FOM</span><strong id="dm-fom">—</strong></div><div id="refine-metric"><span>Rwork / Rfree</span><strong id="r-factor">—</strong></div><div id="model-metric"><span>Cα 残基 / 链</span><strong id="residue-count">—</strong></div></div>
+<p id="model-note" class="hint"></p><div class="result-grid"><div class="plot-panel"><h3>密度修饰 FOM 轨迹</h3><canvas id="fom-chart" aria-label="密度修饰平均 FOM 轨迹"></canvas></div><div class="plot-panel"><h3>逐轮 REFMAC R 因子</h3><canvas id="r-chart" aria-label="逐轮 Rwork 与 Rfree"></canvas><div class="plot-key"><span class="key work">Rwork</span><span class="key free">Rfree</span></div></div></div>
+<div class="table-wrap"><table><thead><tr><th>构建精修轮次</th><th>REFMAC 周期</th><th>Rwork</th><th>Rfree</th><th>原自由集标记</th></tr></thead><tbody id="metrics-table"></tbody></table></div>
+<div class="plot-panel model-panel"><h3>Cα 主链预览 <small>拖动旋转 · 滚轮缩放；仅预览几何</small></h3><canvas id="model-view" aria-label="Cα 主链预览"></canvas></div>
+<div class="artifacts-heading"><h3>结果文件</h3><a id="download-model" class="primary hidden">下载最终模型</a><a id="download-phases" class="primary hidden">下载最终相位 MTZ</a></div><div id="artifacts"></div>
+<p class="hint scope">FOM 是模型内部置信度，不等于已知真实相位准确度；两种方法的 FOM 不宜直接作为优劣排名。SAD / 密度修饰排除原自由集；后续外部引擎地图尚未认证为仅工作集，Rfree 不代表端到端独立盲测。完整实验数据效果仍需验证。</p></div></div>
+<div id="logs" class="tab-panel hidden"><div class="log-toolbar"><span>自动跟随当前阶段；完整日志可从结果文件下载</span><label><input type="checkbox" id="auto-scroll" checked> 自动滚动</label></div><pre id="log-text">等待启动任务…</pre></div>
+<div id="plan" class="tab-panel hidden"><h3>实际生效参数</h3><div id="effective-options" class="effective-options"></div><p id="fixed-protocol" class="hint"></p><div id="plan-steps"></div><details><summary>完整调用命令</summary><pre id="plan-command"></pre></details></div>
+</section><footer>OASIS4.3 · 精简开发版 <span>本机运行 · 原始数据与已有结果保留</span></footer></main>
+<dialog id="file-dialog"><div class="dialog-heading"><h2 id="picker-title">选择文件</h2><button id="picker-close" aria-label="关闭">×</button></div><div class="picker-path"><button id="picker-up" class="secondary" title="上一级">↑</button><input id="picker-path" aria-label="文件或目录路径"><button id="picker-go" class="secondary">前往</button></div><input id="picker-filter" placeholder="筛选当前目录…" aria-label="筛选文件"><div id="picker-error" class="error-text"></div><div id="picker-list" class="picker-list"></div><div class="dialog-footer"><span id="picker-help"></span><button id="picker-select" class="primary">选择此文件夹</button></div></dialog>
+</body></html>

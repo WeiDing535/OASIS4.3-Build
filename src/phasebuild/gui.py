@@ -15,7 +15,20 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from .gui_workflow import defaults, make_plan, collect_results, save_selected_result
+# Legacy entry points are loaded only by the archived workbench. The focused
+# application supplies its own workflow and does not import legacy algorithms.
+def defaults(*args,**kwargs):
+    from .gui_workflow import defaults as call
+    return call(*args,**kwargs)
+def make_plan(*args,**kwargs):
+    from .gui_workflow import make_plan as call
+    return call(*args,**kwargs)
+def collect_results(*args,**kwargs):
+    from .gui_workflow import collect_results as call
+    return call(*args,**kwargs)
+def save_selected_result(*args,**kwargs):
+    from .gui_workflow import save_selected_result as call
+    return call(*args,**kwargs)
 from .gui_paths import browse_path
 
 ASSETS = Path(__file__).with_name('gui_assets')
@@ -29,9 +42,10 @@ def save_json(path, value):
 
 
 class Jobs:
-    def __init__(self, project):
+    def __init__(self, project, workflow=None):
+        self.workflow=workflow
         self.project = Path(project).resolve()
-        self.storage = self.project/'.gui/jobs'
+        self.storage = self.project/('.gui-oasis/jobs' if workflow else '.gui/jobs')
         self.storage.mkdir(parents=True,exist_ok=True)
         self.lock = threading.RLock()
         self.items = {}
@@ -57,12 +71,13 @@ class Jobs:
         with self.lock:
             if self.active:
                 raise ValueError('已有任务运行中，请等待完成或停止它')
-            cfg, steps = make_plan(config,self.project)
+            cfg, steps = (self.workflow.make_plan if self.workflow else make_plan)(config,self.project)
             Path(cfg['output']).mkdir(parents=True,exist_ok=False)
             now = time.time()
             job = dict(id=secrets.token_hex(8),owned=True,created=now,updated=now,
                        status='queued',output=cfg['output'],config=cfg,steps=steps,
                        completed=0,current='',error=None)
+            if self.workflow:job['plan']=self.workflow.describe_plan(cfg)
             self.items[job['id']] = job
             self.active = job['id']
             self.persist(job)
@@ -102,7 +117,7 @@ class Jobs:
                         job['updated'] = time.time()
                         self.persist(job)
                 if job['status']!='stopping':
-                    save_selected_result(job['output'])
+                    (self.workflow.save_selected_result if self.workflow else save_selected_result)(job['output'])
                 with self.lock:
                     job.update(status='cancelled' if job['status']=='stopping' else 'success',current='')
         except Exception as error:
@@ -150,7 +165,15 @@ class Jobs:
                 job['log'] = log.read().decode('utf-8',errors='replace')
         else:
             job['log'] = ''
-        return job
+        if self.workflow and job.get('config') and not job.get('plan'):
+            job['plan']=self.workflow.describe_plan(job['config'])
+        if job.get('config',{}).get('mode')=='sad_to_model':
+            state=Path(job['output'])/'00_sad_to_model/pipeline_report.json'
+            if state.is_file():
+                saved=json.loads(state.read_text())
+                job['pipeline_progress']={'completed':len(saved.get('completed',[])), 'total':5,
+                                          'current':saved.get('current_name','')}
+        return self.workflow.enrich_job(job) if self.workflow else job
 
     def history(self):
         with self.lock:
@@ -158,7 +181,8 @@ class Jobs:
                     for j in sorted(self.items.values(),key=lambda j:j['created'],reverse=True)]
 
     def import_results(self, directory):
-        results = collect_results(directory)
+        if self.workflow:self.workflow.validate_import(directory)
+        results = (self.workflow.collect_results if self.workflow else collect_results)(directory)
         if not results['artifacts']:
             raise ValueError('该目录没有找到 PhaseBuild 结果文件')
         with self.lock:
@@ -220,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get('Host') != self.server.address:
                 self.respond({'error':'无效地址'},403)
                 return
-            file = ASSETS/('index.html' if route=='/' else route[1:])
+            file = self.server.assets/('index.html' if route=='/' else route[1:])
             body = file.read_bytes()
             self.send_response(200)
             self.headers_common(mimetypes.guess_type(str(file))[0]+'; charset=utf-8',len(body))
@@ -232,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
         value = lambda key,default='':query.get(key,[default])[0]
         try:
             if route=='/api/defaults':
-                self.respond(dict(config=defaults(self.server.jobs.project),history=self.server.jobs.history(),
+                self.respond(dict(config=(self.server.workflow.defaults if self.server.workflow else defaults)(self.server.jobs.project),history=self.server.jobs.history(),
                                   python=sys.executable,version='0.8.3',project=str(self.server.jobs.project)))
             elif route=='/api/browse':
                 path,selected,fallback = browse_path(value('path',str(self.server.jobs.project)),value('allow_parent')=='1')
@@ -250,12 +274,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(self.server.jobs.get(value('id')))
             elif route=='/api/results':
                 job = self.server.jobs.get(value('id'))
-                self.respond(collect_results(job['output']))
+                self.respond((self.server.workflow.collect_results if self.server.workflow else collect_results)(job['output']))
             elif route=='/api/download':
                 job = self.server.jobs.get(value('id'))
                 root = Path(job['output']).resolve()
                 file = (root/value('file')).resolve()
-                if root not in file.parents or not file.is_file() or file.suffix.lower() not in ('.cif','.pdb','.mtz','.json','.log','.txt','.png','.svg','.ccp4','.csv'):
+                if root not in file.parents or not file.is_file() or file.suffix.lower() not in ('.cif','.pdb','.mtz','.json','.log','.txt','.png','.svg','.ccp4','.csv','.xml'):
                     raise ValueError('无效结果文件')
                 self.send_response(200)
                 self.send_header('Content-Disposition',"attachment; filename*=UTF-8''"+__import__('urllib.parse',fromlist=['quote']).quote(file.name))
@@ -281,8 +305,10 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(size))
             route = urlparse(self.path).path
             if route=='/api/plan':
-                cfg,steps = make_plan(data,self.server.jobs.project)
-                self.respond(dict(config=cfg,steps=steps))
+                cfg,steps = (self.server.workflow.make_plan if self.server.workflow else make_plan)(data,self.server.jobs.project)
+                result=dict(config=cfg,steps=steps)
+                if self.server.workflow:result.update(self.server.workflow.describe_plan(cfg))
+                self.respond(result)
             elif route=='/api/start':
                 self.respond(self.server.jobs.start(data))
             elif route=='/api/stop':
@@ -299,31 +325,35 @@ class Handler(BaseHTTPRequestHandler):
             self.respond({'error':str(error)},400)
 
 
-def create_server(project, port=0, token=None):
+def create_server(project, port=0, token=None, workflow=None):
     server = Server(('127.0.0.1',port),Handler)
     server.address = '127.0.0.1:'+str(server.server_address[1])
     server.token = token or secrets.token_urlsafe(32)
-    server.jobs = Jobs(project)
+    server.workflow=workflow
+    server.assets=Path(__file__).with_name('oasis_assets') if workflow else ASSETS
+    server.jobs = Jobs(project,workflow=workflow)
     return server
 
 
-def main():
-    p = argparse.ArgumentParser(description='PhaseBuild 本机图形界面')
+def main(focused=False):
+    p = argparse.ArgumentParser(description='OASIS4.3 本机图形界面' if focused else 'PhaseBuild 本机图形界面')
     p.add_argument('--port',type=int,default=0,help='默认自动选择空闲端口')
     p.add_argument('--no-browser',action='store_true')
     p.add_argument('--project',default=str(Path(__file__).resolve().parents[2]))
     args = p.parse_args()
     project = Path(args.project).resolve()
-    if not (project/'run_phasebuild.py').is_file():
-        p.error('请选择包含 run_phasebuild.py 的 PhaseBuild 源码目录（--project）')
+    if not (project/('run_sad_to_model.py' if focused else 'run_phasebuild.py')).is_file():
+        p.error('请选择包含流程运行脚本的源码目录（--project）')
     # Fail early with a useful runtime error, before presenting an unusable UI.
     try:
         import gemmi, numpy, scipy
     except ImportError as error:
         p.error('缺少科学计算依赖，请使用完整便携包中的 PhaseBuild.command 启动：'+str(error))
-    server = create_server(project,args.port)
+    if focused:
+        from . import oasis_workflow
+    server = create_server(project,args.port,workflow=oasis_workflow) if focused else create_server(project,args.port)
     url = 'http://'+server.address+'/#token='+server.token
-    print('PhaseBuild GUI：'+url,flush=True)
+    print(('OASIS4.3 GUI：' if focused else 'PhaseBuild GUI：')+url,flush=True)
     print('仅在本机运行。按 Ctrl+C 退出服务；关闭网页不会停止计算。',flush=True)
     if not args.no_browser:
         threading.Timer(.4,lambda:webbrowser.open(url)).start()

@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "If you use OASIS4.3-GUI-0.1, please cite this software and the method paper listed below."
+title: "OASIS4.3-GUI-0.1"
+type: software
+version: "0.1"
+date-released: 2026-10-17
+authors:
+  - family-names: Ding
+    given-names: Wei
+    email: dingwei@iphy.ac.cn
+license: LGPL-2.1-or-later
+repository-code: "https://github.com/WeiDing535/OASIS4.3-GUI"
+url: "https://github.com/WeiDing535/OASIS4.3-GUI"
+preferred-citation:
+  type: article
+  title: "IPCAS: a direct-method-based pipeline from phasing to model building and refinement for macromolecular structure determination"
+  authors:
+    - family-names: Ding
+      given-names: Wei
+    - family-names: Zhang
+      given-names: T.
+    - family-names: He
+      given-names: Y.
+    - family-names: Wang
+      given-names: J.
+    - family-names: Wu
+      given-names: L.
+    - family-names: Han
+      given-names: P.
+    - family-names: Zheng
+      given-names: C.
+    - family-names: Gu
+      given-names: Y.
+    - family-names: Zeng
+      given-names: L.
+    - family-names: Hao
+      given-names: Q.
+    - family-names: Fan
+      given-names: H.
+  journal: Journal of Applied Crystallography
+  volume: 53
+  start: 253
+  end: 261
+  year: 2020
+  doi: 10.1107/S1600576719015115

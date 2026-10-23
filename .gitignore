@@ -15,3 +15,7 @@ runs/*
 !runs/sad_four_optimization/
 runs/sad_four_optimization/*
 !runs/sad_four_optimization/models/
+
+.conda-unified/
+
+.gui-oasis/

@@ -1,5 +1,7 @@
 # 本机 GUI 使用说明
 
+整合开发版新增“SAD 定相到模型”，需 Python 3.12 的 conda 环境。输入为 SAD 异常数据、原 native 自由集、已有重原子模型、序列和无关密度修饰参考。原始实验 HL 与密度修饰图分开保存；恢复使用 CLI 的 `--resume`。详见 [整合说明](docs/INTEGRATION.md)。
+
 本仓库为源码版，不包含历史便携包。macOS 默认使用 `/Applications/ccp4-9`；其他位置请设置 `PHASEBUILD_PYTHON` 和 `PHASEBUILD_RUNTIME`。在项目根目录双击 PhaseBuild.command，或使用已有科学 Python 运行 `python -B run_gui.py --project .`。
 
 服务只监听 127.0.0.1，使用启动时打印的完整链接访问。数据与计算留在本机。不要删除链接中的访问凭据。关闭网页不停止任务；终端 Ctrl+C 退出服务。

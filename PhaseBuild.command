@@ -1,8 +1,18 @@
 #!/bin/bash
 cd -- "$(dirname -- "$0")" || exit 1
 export PYTHONDONTWRITEBYTECODE=1
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
 export PHASEBUILD_RUNTIME="${PHASEBUILD_RUNTIME:-/Applications/ccp4-9}"
-runtime="${PHASEBUILD_PYTHON:-/Applications/ccp4-9/bin/ccp4-python}"
+runtime="${PHASEBUILD_PYTHON:-}"
+if [ -z "$runtime" ] && [ -x "$PWD/.conda-unified/bin/python" ]; then
+  runtime="$PWD/.conda-unified/bin/python"
+fi
+if [ -z "$runtime" ] && [ -n "${CONDA_PREFIX:-}" ]; then
+  runtime="$CONDA_PREFIX/bin/python"
+fi
+if [ -z "$runtime" ]; then
+  runtime="$(command -v python3.12 || true)"
+fi
 if [ ! -x "$runtime" ]; then
   echo '找不到运行环境：'"$runtime"
   read -r -p '按回车退出…'
