@@ -87,7 +87,8 @@ run_sad_to_model.py --sad ... --native ... --sequence ... --heavy ... \
   --trust-wang-radius 8 --max-per-target 48 --building-recipe pipeline
 ```
 
-5D9D 的端到端独立验证见 `work/exp/integrated_final_5d9d`。
+5D9D 的端到端独立验证（`work/exp/integrated_final_5d9d`）同样完成全部阶段：
+**R-free 28.39%**，对照 29.73%，序列清理被接受（Rwork 26.77%）。
 
 ## 5. 局限与风险
 
