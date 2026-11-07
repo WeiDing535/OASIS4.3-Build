@@ -41,7 +41,7 @@ def validate(config, inspect=True):
         from .phase_refinement import validate_phase_blur
         cfg['phase_blur_scale'],cfg['phase_blur_b']=validate_phase_blur((scale,blur_b))
         if cfg['method']!='pplus_bundled' or cfg['refinement_prior']!='dm_phifom' or not cfg['build_model']:raise ValueError('Phase confidence correction requires bundled P+ building with DM phase restraints')
-    if cfg['building_recipe'] not in ('legacy','ccp4'):raise ValueError('Unknown building recipe')
+    if cfg['building_recipe'] not in ('legacy','ccp4','pipeline'):raise ValueError('Unknown building recipe')
     if not isinstance(cfg['input_columns'],bool):raise ValueError('input_columns must be boolean')
     if cfg['method']=='pplus_bundled' and (cfg.get('labels') or cfg.get('native_labels') or not cfg.get('native')):cfg['input_columns']=True
     if not isinstance(cfg['auto_fpp'],bool):raise ValueError('auto_fpp must be boolean')
@@ -250,6 +250,13 @@ def stage_plan(cfg, python=None):
         stages.insert(1,dict(id='hand',name='双手工作集测序判别',directory=str(hand),
             command=[python,'-u',str(root/'run_hand_preselection.py'),'--config',str(out/'pipeline_report.json'),'--output',str(hand)],
             outputs=[str(hand/name) for name in ('hand_selection.json','selected_native.mtz','selected_sad.mtz','refined_heavy.pdb')]))
+    if cfg.get('building_recipe')=='pipeline' and cfg.get('build_model',True):
+        stages[4].update(name='CCP4 buccaneer_pipeline（与对照流程同一构建器）',
+            command=[python,'-u',str(root/'run_build_pipeline.py'),'--map',str(dm/'map_phases.mtz'),
+                     '--native',str(hand/'selected_native.mtz') if scout else (str(phase/'selected_native.mtz') if cfg.get('auto_hand') else (str(prepare/'native.mtz') if cfg.get('input_columns') else cfg['native'])),
+                     '--sequence',str(prepare/'building.fasta'),'--runtime',cfg['runtime'],
+                     '--rounds',str(cfg['rounds']),'--free-value',str(cfg['free_value']),'--output',str(build)],
+            outputs=[str(build/'primary_model.cif'),str(build/'hybrid_report.json')])
     if cfg.get('dm_engine')=='parrot':
         stages[2].update(name=('Parrot 各向异性校正/溶剂掩膜密度修饰（工作集）' if not cfg.get('feedback_cycles')
                                else 'Parrot 密度修饰 + %d 轮工作集 trace/Fcalc 反馈'%cfg['feedback_cycles']),

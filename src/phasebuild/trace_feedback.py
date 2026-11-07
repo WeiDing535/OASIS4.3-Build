@@ -24,7 +24,7 @@ def _cbuccaneer(runtime):
 
 
 def trace(work_mtz, phase_mtz, sequence, runtime, output_dir, *, resolution=2.0,
-          cycles=5, jobs=1, timeout=3600):
+          cycles=5, jobs=1, timeout=3600, progress=print):
     """Trace a partial model from a work-only map and report what was built."""
     out=Path(output_dir);out.mkdir(parents=True,exist_ok=True)
     reference=Path(runtime)/'lib/data/reference_structures/reference-1tqw'
@@ -64,6 +64,7 @@ def merge_phase_map(work_mtz, dm_mtz, destination, *, free_value=0):
     work=gemmi.read_mtz_file(str(work_mtz));work.ensure_asu()
     dm=gemmi.read_mtz_file(str(dm_mtz));dm.ensure_asu()
     work_labels=work.column_labels();dm_labels=dm.column_labels()
+    fp_label,sig_label=_amp_labels(work_labels)
     lookup={tuple(int(v) for v in row[:3]):row for row in np.array(dm)}
     quartet=['HL'+k for k in 'ABCD']
     rows=[]
@@ -71,10 +72,15 @@ def merge_phase_map(work_mtz, dm_mtz, destination, *, free_value=0):
         if row[work_labels.index('FreeR_flag')]==free_value:continue
         match=lookup.get(tuple(int(v) for v in row[:3]))
         if match is None:continue
-        f=row[work_labels.index('FP')];sig=row[work_labels.index('SIGFP')]
+        f=row[work_labels.index(fp_label)];sig=row[work_labels.index(sig_label)]
         values=[match[dm_labels.index(c)] for c in quartet]
         if not np.isfinite(values).all():continue
-        kappa=float(np.hypot(values[0],values[1]));fom=min(kappa,1.0)
+        kappa=float(np.hypot(values[0],values[1]))
+        if kappa<=0:fom=0.0
+        elif kappa>30:fom=1.0
+        else:
+            from scipy.special import i0e,i1e
+            fom=float(i1e(kappa)/max(i0e(kappa),1e-300))
         phase=float(np.degrees(np.arctan2(values[1],values[0]))%360.)
         rows.append([*row[:3],f,sig,f*fom,phase,phase,fom,*values])
     m=gemmi.Mtz(with_base=True);m.spacegroup=work.spacegroup;m.set_cell_for_all(work.cell);m.add_dataset('dm')
@@ -105,7 +111,9 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cyc
             runtime=runtime,scratch=folder/'scratch')
         row={'cycle':cycle+1,'dm':str(dm_path),'dm_info':info}
         if cycle<feedback_cycles:
-            traced=trace(merged,dm_path,sequence,runtime,folder/'trace',
+            trace_in=folder/'trace_input.mtz'
+            phase_input(merged,dm_path,trace_in)
+            traced=trace(trace_in,dm_path,sequence,runtime,folder/'trace',
                          resolution=trace_resolution,cycles=trace_cycles,progress=progress)
             row['trace']=traced;model=traced['model']
             progress('feedback cycle %d: %d residues in %d fragments'%(cycle+1,traced['residues'],traced['fragments']))
@@ -123,14 +131,56 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cyc
     return report
 
 
+def phase_input(work_mtz, dm_mtz, destination):
+    """Work rows with FP,SIGFP,FreeR_flag plus DM PHIB/FOM for the tracer."""
+    work=gemmi.read_mtz_file(str(work_mtz));work.ensure_asu()
+    dm=gemmi.read_mtz_file(str(dm_mtz));dm.ensure_asu()
+    wl=work.column_labels();dl=dm.column_labels()
+    fp_label,sig_label=_amp_labels(wl)
+    quartet=['HL'+k for k in 'ABCD']
+    if not all(c in dl for c in quartet):
+        for prefix in ('DM','PIRATE','PARROT'):
+            if all(prefix+'.ABCD.'+k in dl for k in 'ABCD'):
+                quartet=[prefix+'.ABCD.'+k for k in 'ABCD'];break
+        else:raise ValueError('No HL quartet in the density-modified MTZ')
+    lookup={tuple(int(v) for v in row[:3]):row for row in np.array(dm)}
+    rows=[]
+    for row in np.array(work):
+        match=lookup.get(tuple(int(v) for v in row[:3]))
+        if match is None:continue
+        values=[match[dl.index(c)] for c in quartet]
+        if not np.isfinite(values).all():continue
+        kappa=float(np.hypot(values[0],values[1]))
+        if kappa<=0:fom=0.0
+        elif kappa>30:fom=1.0
+        else:
+            from scipy.special import i0e,i1e
+            fom=float(i1e(kappa)/max(i0e(kappa),1e-300))
+        phase=float(np.degrees(np.arctan2(values[1],values[0]))%360.)
+        rows.append([*row[:3],row[wl.index(fp_label)],row[wl.index(sig_label)],
+                     row[wl.index('FreeR_flag')],phase,fom])
+    m=gemmi.Mtz(with_base=True);m.spacegroup=work.spacegroup;m.set_cell_for_all(work.cell);m.add_dataset('trace')
+    for label,kind in [('FP','F'),('SIGFP','Q'),('FreeR_flag','I'),('PHIB','P'),('FOM','W')]:m.add_column(label,kind)
+    m.set_data(np.asarray(rows,np.float32));m.write_to_file(str(destination))
+    return {'rows':len(rows),'hl_columns':quartet}
+
+
+def _amp_labels(labels):
+    """Accept both the staged F/SIGF schema and the FP/SIGFP schema."""
+    for pair in (('FP','SIGFP'),('F','SIGF')):
+        if pair[0] in labels and pair[1] in labels:return pair
+    raise ValueError('No amplitude/sigma pair (FP/SIGFP or F/SIGF) in the input MTZ')
+
+
 def merge_work(work_mtz, destination):
     """Restrict the observed amplitudes to work reflections, keeping FP/SIGFP/FreeR_flag."""
     m=gemmi.read_mtz_file(str(work_mtz));m.ensure_asu();labels=m.column_labels()
     data=np.array(m)
+    fp_label,sig_label=_amp_labels(labels)
     keep=data[:,labels.index('FreeR_flag')]!=0
     out=gemmi.Mtz(with_base=True);out.spacegroup=m.spacegroup;out.set_cell_for_all(m.cell);out.add_dataset('work')
     for label,kind in [('FP','F'),('SIGFP','Q'),('FreeR_flag','I')]:out.add_column(label,kind)
-    rows=np.column_stack([data[keep][:,:3],data[keep][:,labels.index('FP')],
-        data[keep][:,labels.index('SIGFP')],data[keep][:,labels.index('FreeR_flag')]])
+    rows=np.column_stack([data[keep][:,:3],data[keep][:,labels.index(fp_label)],
+        data[keep][:,labels.index(sig_label)],data[keep][:,labels.index('FreeR_flag')]])
     out.set_data(rows.astype(np.float32));out.write_to_file(str(destination))
     return {'work_rows':int(keep.sum()),'excluded':int((~keep).sum())}

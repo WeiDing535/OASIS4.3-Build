@@ -102,6 +102,8 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20, mask_radiu
     if not 0<solvent_fraction<1:raise ValueError('Solvent fraction must lie between 0 and 1')
     executable=locate(executable,runtime)
     work=gemmi.read_mtz_file(str(work_mtz));work.ensure_asu();labels=work.column_labels()
+    fp_label='FP' if 'FP' in labels else 'F'
+    sig_label='SIGFP' if 'SIGFP' in labels else 'SIGF'
     hl_source=hl_mtz or work_mtz
     quartet=_hl_columns(hl_source)
     # stage work-only input carrying the experimental HL quartet
@@ -111,7 +113,7 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20, mask_radiu
     for row in np.array(work):
         h=tuple(int(v) for v in row[:3]);other=lookup.get(h)
         if other is None:continue
-        rows.append(list(h)+[row[labels.index('FP')],row[labels.index('SIGFP')]]+[other[src_labels.index(c)] for c in quartet])
+        rows.append(list(h)+[row[labels.index(fp_label)],row[labels.index(sig_label)]]+[other[src_labels.index(c)] for c in quartet])
     if not rows:raise ValueError('No work reflections shared with the HL prior')
     staged=Path(output_mtz).parent/'parrot_input.mtz'
     m=gemmi.Mtz(with_base=True);m.spacegroup=work.spacegroup;m.set_cell_for_all(work.cell);m.add_dataset('parrot_work')
@@ -154,14 +156,17 @@ def _attach_fc(staged, model_pdb, destination):
     import tempfile
     from .refinement import refmac_refine
     source=gemmi.read_mtz_file(str(staged));labels=source.column_labels()
-    work=Path(destination).parent/'refmac_fc'
-    work.mkdir(exist_ok=True)
-    native=work/'native.mtz'
+    fp_label='FP' if 'FP' in labels else 'F'
+    sig_label='SIGFP' if 'SIGFP' in labels else 'SIGF'
+    work=Path(destination).parent/('refmac_fc_'+Path(destination).stem)
+    if work.exists():raise ValueError('REFMAC Fcalc workspace already exists: '+str(work))
+    native=Path(destination).parent/('native_'+Path(destination).stem+'.mtz')
     m=gemmi.read_mtz_file(str(staged));copy=gemmi.Mtz(with_base=True)
     copy.spacegroup=m.spacegroup;copy.set_cell_for_all(m.cell);copy.add_dataset('native')
-    for label,kind in [('FP','F'),('SIGFP','Q')]:copy.add_column(label,kind)
+    for label,kind in [('F','F'),('SIGF','Q')]:copy.add_column(label,kind)
     copy.add_column('FreeR_flag','I')
-    data=np.column_stack([np.array(m)[:,:3],np.array(m)[:,labels.index('FP')],np.array(m)[:,labels.index('SIGFP')],np.zeros(m.nreflections)])
+    data=np.column_stack([np.array(m)[:,:3],np.array(m)[:,labels.index(fp_label)],np.array(m)[:,labels.index(sig_label)],
+        (np.arange(m.nreflections)%20!=0).astype(float)])
     copy.set_data(data.astype(np.float32));copy.write_to_file(str(native))
     refined=refmac_refine(native,model_pdb,work,cycles=1)
     out=gemmi.read_mtz_file(str(work/'refined.mtz'))
@@ -172,7 +177,8 @@ def _attach_fc(staged, model_pdb, destination):
         match=lookup.get(tuple(int(v) for v in row[:3]))
         if match is None:continue
         fcs[i]=match[out_labels.index('FC')];phis[i]=match[out_labels.index('PHIC')]
+    base=np.array(source,copy=True)
     source.add_column('FC','F');source.add_column('PHIC','P')
-    source.set_data(np.column_stack([np.array(source),fcs,phis]).astype(np.float32))
+    source.set_data(np.column_stack([base,fcs,phis]).astype(np.float32))
     source.write_to_file(str(destination))
     return refined

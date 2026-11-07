@@ -20,7 +20,7 @@ def main(argv=None):
     p.add_argument('--canonical-dm-seed',action=argparse.BooleanOptionalAction,default=False,help='Opt-in map-only phase0.001deg/FOM1e-6 precision contract; original P+ results unchanged')
     p.add_argument('--phase-blur-scale',type=float,default=None,help='Opt-in DM phase restraint confidence scale, paired with --phase-blur-b')
     p.add_argument('--phase-blur-b',type=float,default=None,help='Opt-in resolution-dependent DM phase restraint blurring B')
-    p.add_argument('--building-recipe',choices=['legacy','ccp4'],default=None)
+    p.add_argument('--building-recipe',choices=['legacy','ccp4','pipeline'],default=None,help='pipeline runs the same CCP4 buccaneer_pipeline builder as the reference route')
     p.add_argument('--input-columns',action=argparse.BooleanOptionalAction,default=False)
     p.add_argument('--fpp',default='',help='Legacy explicit factors for reproducibility; new runs can use --elements and mandatory --wavelength')
     p.add_argument('--elements',default='',help='Heavy-atom element symbols, e.g. Se or Se,S; computes theoretical factors offline from explicit wavelength')
