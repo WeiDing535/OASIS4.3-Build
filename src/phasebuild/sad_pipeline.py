@@ -70,8 +70,12 @@ def validate(config, inspect=True):
         from .bundled_pplus import engine_layout
         engine_layout(cfg['runtime'])
     if trusted:
-        from .trust_workflow import phenix_directory
-        cfg['phenix_bin']=phenix_directory(cfg['phenix_bin'])
+        # The P+ trust-region phase stage itself never needs Phenix; only the
+        # original RESOLVE/CCTBX density-modification backend did. When the
+        # external Parrot engine is selected the requirement is dropped.
+        if cfg.get('dm_engine')!='parrot':
+            from .trust_workflow import phenix_directory
+            cfg['phenix_bin']=phenix_directory(cfg['phenix_bin'])
         cfg.update(phase_cycles=100,dm_cycles=40)
     for flag in ['trust_stability','trust_partial_cleanup','trust_work_weight']:
         if not isinstance(cfg[flag],bool):raise ValueError(flag+' must be boolean')
@@ -330,7 +334,7 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
     if cfg['method'] in ('pplus_trust','pplus_internal','pplus_bundled'):
         for key in ['observation_prior','composition_sequence']:
             if cfg[key]:inputs[key]=fingerprint(cfg[key])
-    if cfg['method']=='pplus_trust':
+    if cfg['method']=='pplus_trust' and cfg.get('dm_engine')!='parrot':
         for name in ['phenix.python','mmtbx.density_modification']:
             inputs[name]=fingerprint(Path(cfg['phenix_bin'])/name)
     runtime=Path(cfg['runtime']) if cfg['build_model'] or cfg['method']=='pplus_bundled' else None

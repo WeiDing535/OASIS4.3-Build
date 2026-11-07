@@ -92,7 +92,7 @@ def to_phifom(source,destination):
 
 def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20, mask_radius=3.0,
         anisotropy=True, model_pdb=None, executable=None, runtime=None, metadata=None,
-        scratch=None, timeout=3600):
+        scratch=None, timeout=3600, phenix_bin=None):
     """Run Parrot on the work-only data and write the pipeline map schema.
 
     ``work_mtz`` must contain FP/SIGFP and FreeR_flag; free reflections are never
@@ -134,7 +134,7 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20, mask_radiu
         if not Path(model_pdb).is_file():raise ValueError('Feedback model is missing')
         command+=['-colin-fc','/*/*/[FC,PHIC]']
         work_with_fc=Path(output_mtz).parent/'parrot_with_model.mtz'
-        _attach_fc(staged,model_pdb,work_with_fc)
+        _attach_fc(staged,model_pdb,work_with_fc,phenix_bin)
         command[command.index('-mtzin')+1]=str(work_with_fc)
     log_path=Path(output_mtz).parent/'parrot.log'
     with log_path.open('w') as log:
@@ -151,9 +151,16 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20, mask_radiu
             **(metadata or {}), **info}
 
 
-def _attach_fc(staged, model_pdb, destination):
-    """Attach FC/PHIC from a bulk-solvent-aware REFMAC pass to the staged MTZ."""
-    import tempfile
+def _attach_fc(staged, model_pdb, destination, phenix_bin=None):
+    """Attach bulk-solvent-corrected FC/PHIC to the staged MTZ.
+
+    A Phenix ``fmodel`` pass is preferred when an explicit binary directory is
+    supplied: it applies bulk-solvent scaling without moving the model, which is
+    the numerically stable option for a partial trace. Otherwise a single REFMAC
+    cycle provides the same columns with the bundled runtime.
+    """
+    if phenix_bin:
+        return _attach_fc_phenix(staged,model_pdb,destination,phenix_bin)
     from .refinement import refmac_refine
     source=gemmi.read_mtz_file(str(staged));labels=source.column_labels()
     fp_label='FP' if 'FP' in labels else 'F'
@@ -182,3 +189,28 @@ def _attach_fc(staged, model_pdb, destination):
     source.set_data(np.column_stack([base,fcs,phis]).astype(np.float32))
     source.write_to_file(str(destination))
     return refined
+
+
+def _attach_fc_phenix(staged, model_pdb, destination, phenix_bin):
+    """FC/PHIC from phenix.fmodel; no coordinate movement, bulk solvent included."""
+    binary=Path(phenix_bin)/'phenix.fmodel'
+    if not binary.is_file():raise ValueError('phenix.fmodel is missing in '+str(phenix_bin))
+    source=gemmi.read_mtz_file(str(staged));labels=source.column_labels()
+    base=np.array(source,copy=True)
+    fc_mtz=Path(destination).with_suffix('.fmodel.mtz')
+    completed=subprocess.run([str(binary),str(model_pdb),'high_resolution=%.4f'%source.resolution_high(),
+                   'output.file_name='+str(fc_mtz)],
+                   stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+    if completed.returncode or not fc_mtz.is_file():
+        raise RuntimeError('phenix.fmodel Fcalc pass failed for '+str(model_pdb))
+    model_mtz=gemmi.read_mtz_file(str(fc_mtz));ml=model_mtz.column_labels();ma=np.array(model_mtz)
+    lookup={tuple(int(v) for v in row[:3]):row for row in ma}
+    fcs=np.zeros(source.nreflections);phis=np.zeros(source.nreflections)
+    for i,row in enumerate(base):
+        match=lookup.get(tuple(int(v) for v in row[:3]))
+        if match is None:continue
+        fcs[i]=match[ml.index('FMODEL')];phis[i]=match[ml.index('PHIFMODEL')]
+    source.add_column('FC','F');source.add_column('PHIC','P')
+    source.set_data(np.column_stack([base,fcs,phis]).astype(np.float32))
+    source.write_to_file(str(destination))
+    return {'engine':'phenix.fmodel','binary':str(binary)}

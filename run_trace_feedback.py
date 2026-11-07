@@ -45,7 +45,9 @@ def main():
         trace_resolution=float(cfg.get('trace_resolution',2.0)),
         mask_radius=float(cfg.get('dm_mask_radius',3.0)),
         anisotropy=bool(cfg.get('dm_anisotropy',True)),
-        executable=cfg.get('dm_executable') or None,progress=lambda m:print(m,flush=True))
+        executable=cfg.get('dm_executable') or None,
+        phenix_bin=(cfg.get('phenix_bin') or None) or None,
+        progress=lambda m:print(m,flush=True))
     report.update(solvent_source='user' if cfg.get('dm_solvent') is not None else 'sequence_estimate',
         original_prior=fingerprint(prior),
         map_formula='FWT=|FP|*FOM, PHWT=PHIB from the final Parrot HL quartet; work reflections only',
