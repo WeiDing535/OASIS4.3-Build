@@ -94,7 +94,7 @@ def merge_phase_map(work_mtz, dm_mtz, destination, *, free_value=0):
 
 def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cycles=20,
         feedback_cycles=1, trace_resolution=2.0, mask_radius=3.0, anisotropy=True,
-        executable=None, trace_cycles=5, progress=print, phenix_bin=None):
+        executable=None, trace_cycles=5, progress=print, phenix_bin=None, fcalc='fc_all'):
     """Iterate external DM and work-only tracing; persist every cycle."""
     from . import parrot_dm
     out=Path(output);out.mkdir(parents=True,exist_ok=True)
@@ -108,7 +108,7 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cyc
         dm_path=folder/'dm.mtz'
         info=parrot_dm.run(merged,prior_mtz,dm_path,solvent_fraction,cycles=cycles,
             mask_radius=mask_radius,anisotropy=anisotropy,model_pdb=model,executable=executable,
-            runtime=runtime,scratch=folder/'scratch',phenix_bin=phenix_bin)
+            runtime=runtime,scratch=folder/'scratch',phenix_bin=phenix_bin,fcalc=fcalc)
         row={'cycle':cycle+1,'dm':str(dm_path),'dm_info':info}
         if cycle<feedback_cycles:
             trace_in=folder/'trace_input.mtz'

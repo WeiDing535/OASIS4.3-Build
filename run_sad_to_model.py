@@ -53,6 +53,7 @@ def main(argv=None):
     p.add_argument('--feedback-cycles',type=int,default=0,help='Work-only trace -> model Fcalc -> density-modification feedback cycles')
     p.add_argument('--trace-resolution',type=float,default=2.0,help='Resolution used for the partial-model tracing step')
     p.add_argument('--dm-executable',default='',help='Explicit cparrot path; blank searches the runtime and PATH')
+    p.add_argument('--fcalc',choices=['fc','fc_all','refined'],default='fc_all',help='Partial-model structure factors used by the trace feedback: FC/PHIC or FC_ALL/PHIC_ALL (bulk solvent included)')
     p.add_argument('--build-semet',action='store_true')
     for name,default in [('copies',1),('phase-cycles',5),('dm-cycles',5),('rounds',5),('cycles',10),('free-value',0),('seed',20261023)]:
         p.add_argument('--'+name,type=int,default=default)

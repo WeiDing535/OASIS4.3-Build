@@ -47,6 +47,7 @@ def main():
         anisotropy=bool(cfg.get('dm_anisotropy',True)),
         executable=cfg.get('dm_executable') or None,
         phenix_bin=(cfg.get('phenix_bin') or None) or None,
+        fcalc=cfg.get('fcalc','fc_all'),
         progress=lambda m:print(m,flush=True))
     report.update(solvent_source='user' if cfg.get('dm_solvent') is not None else 'sequence_estimate',
         original_prior=fingerprint(prior),

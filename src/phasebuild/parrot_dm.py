@@ -92,7 +92,7 @@ def to_phifom(source,destination):
 
 def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20, mask_radius=3.0,
         anisotropy=True, model_pdb=None, executable=None, runtime=None, metadata=None,
-        scratch=None, timeout=3600, phenix_bin=None):
+        scratch=None, timeout=3600, phenix_bin=None, fcalc='fc_all'):
     """Run Parrot on the work-only data and write the pipeline map schema.
 
     ``work_mtz`` must contain FP/SIGFP and FreeR_flag; free reflections are never
@@ -134,7 +134,7 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20, mask_radiu
         if not Path(model_pdb).is_file():raise ValueError('Feedback model is missing')
         command+=['-colin-fc','/*/*/[FC,PHIC]']
         work_with_fc=Path(output_mtz).parent/'parrot_with_model.mtz'
-        _attach_fc(staged,model_pdb,work_with_fc,phenix_bin,runtime)
+        _attach_fc(staged,model_pdb,work_with_fc,phenix_bin,runtime,fcalc)
         command[command.index('-mtzin')+1]=str(work_with_fc)
     log_path=Path(output_mtz).parent/'parrot.log'
     with log_path.open('w') as log:
@@ -151,7 +151,7 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20, mask_radiu
             **(metadata or {}), **info}
 
 
-def _attach_fc(staged, model_pdb, destination, phenix_bin=None, runtime=None):
+def _attach_fc(staged, model_pdb, destination, phenix_bin=None, runtime=None, fcalc='fc_all'):
     """Attach bulk-solvent-corrected FC/PHIC to the staged MTZ.
 
     Both paths compute structure factors without moving any atom, so the traced
@@ -162,12 +162,12 @@ def _attach_fc(staged, model_pdb, destination, phenix_bin=None, runtime=None):
     """
     if phenix_bin:
         return _attach_fc_phenix(staged,model_pdb,destination,phenix_bin)
-    return _attach_fc_refmac0(staged,model_pdb,destination,runtime)
+    return _attach_fc_refmac0(staged,model_pdb,destination,runtime,fcalc)
 
 
-def _refmac_fc_keywords():
+def _refmac_fc_keywords(cycles=0):
     return ("title fcalc\n"
-            "ncyc 0\n"
+            "ncyc %d\n"%int(cycles) +
             "labin -\n  FP=FP SIGFP=SIGFP -\n  FREE=FreeR_flag\n"
             "weight AUTO\n"
             "make check NONE\n"
@@ -179,7 +179,8 @@ def _refmac_fc_keywords():
             "PHOUT\nPNAME buccaneer\nDNAME buccaneer\nEND\n")
 
 
-def _attach_fc_refmac0(staged, model_pdb, destination, runtime=None):
+def _attach_fc_refmac0(staged, model_pdb, destination, runtime=None, fcalc='fc_all'):
+    if fcalc not in ('fc','fc_all','refined'):raise ValueError('fcalc must be fc, fc_all or refined')
     """FC/PHIC from a zero-cycle REFMAC pass with the bundled runtime."""
     if runtime is None:raise ValueError('A runtime directory is required for the bundled REFMAC Fcalc pass')
     executable=Path(runtime)/'bin'/'refmac5'
@@ -209,7 +210,8 @@ def _attach_fc_refmac0(staged, model_pdb, destination, runtime=None):
     (work/'scratch').mkdir(exist_ok=True)
     with (work/'refmac.log').open('w') as log:
         completed=subprocess.run([str(executable),'HKLIN',str(native),'XYZIN',str(Path(model_pdb).resolve()),
-            'HKLOUT',str(fc_mtz),'XYZOUT',str(fc_pdb)],input=_refmac_fc_keywords(),text=True,
+            'HKLOUT',str(fc_mtz),'XYZOUT',str(fc_pdb)],
+            input=_refmac_fc_keywords(1 if fcalc=='refined' else 0),text=True,
             stdout=log,stderr=subprocess.STDOUT,env=environment,cwd=str(work))
     if completed.returncode or not fc_mtz.is_file():
         raise RuntimeError('REFMAC Fcalc pass failed for '+str(model_pdb))
@@ -219,7 +221,8 @@ def _attach_fc_refmac0(staged, model_pdb, destination, runtime=None):
     for i,row in enumerate(base):
         match=lookup.get(tuple(int(v) for v in row[:3]))
         if match is None:continue
-        fcs[i]=match[ml.index('FC_ALL')];phis[i]=match[ml.index('PHIC_ALL')]
+        columns=('FC_ALL','PHIC_ALL') if fcalc=='fc_all' else ('FC','PHIC')
+        fcs[i]=match[ml.index(columns[0])];phis[i]=match[ml.index(columns[1])]
     source.add_column('FC','F');source.add_column('PHIC','P')
     source.set_data(np.column_stack([base,fcs,phis]).astype(np.float32))
     source.write_to_file(str(destination))

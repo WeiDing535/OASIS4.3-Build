@@ -20,7 +20,7 @@ DEFAULTS = dict(copies=1, phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
                 triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True,
                 observation_prior='', composition_sequence='', phenix_bin='', trust_kl=.0005, trust_cleanup=True, trust_stability=False, trust_partial_cleanup=False, trust_work_weight=False, trust_wang_radius=14., wavelength=None,
-                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='resolve',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='')
+                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='resolve',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all')
 
 
 def validate(config, inspect=True):
@@ -97,6 +97,7 @@ def validate(config, inspect=True):
     if not isinstance(cfg['dm_anisotropy'],bool):raise ValueError('dm_anisotropy must be boolean')
     if isinstance(cfg['feedback_cycles'],bool) or not isinstance(cfg['feedback_cycles'],int) or not 0<=cfg['feedback_cycles']<=8:
         raise ValueError('feedback_cycles must be 0-8')
+    if cfg['fcalc'] not in ('fc','fc_all','refined'):raise ValueError('fcalc must be fc, fc_all or refined')
     if cfg['feedback_cycles'] and cfg['dm_engine']!='parrot':
         raise ValueError('Trace feedback requires the Parrot density-modification engine')
     if config.get('trace_resolution') is not None:
