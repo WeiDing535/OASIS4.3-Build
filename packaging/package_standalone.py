@@ -231,15 +231,36 @@ def main(argv=None):
         with zipfile.ZipFile(archive,'x',zipfile.ZIP_DEFLATED,compresslevel=6) as z:
             for path in sorted(output.rglob('*')):
                 z.write(path,str(output.name)+'/'+str(path.relative_to(output)))
-        archive.with_suffix(archive.suffix+'.sha256').write_text(digest(archive)+'  '+archive.name+'\n')
-        print('zip',archive,archive.stat().st_size,flush=True)
+        _finish_archive(archive)
     if args.tar:
         archive=Path(args.tar)
         if archive.exists():raise FileExistsError('Refusing to overwrite archive')
-        with tarfile.open(archive,'x:gz') as tar:tar.add(output,arcname=output.name)
-        archive.with_suffix(archive.suffix+'.sha256').write_text(digest(archive)+'  '+archive.name+'\n')
-        print('tar',archive,archive.stat().st_size,flush=True)
+        # Stream through the system tar: Python's tarfile keeps the whole gzip
+        # stream open in one process and produced truncated archives on this host.
+        completed=subprocess.run(['tar','-czf',str(archive),'-C',str(output.parent),output.name],
+                                 capture_output=True,text=True)
+        if completed.returncode:
+            raise RuntimeError('tar failed: '+(completed.stderr or '')[:500])
+        _finish_archive(archive)
 
 
-if __name__=='__main__':
-    main()
+def _finish_archive(archive):
+    """Verify the archive really decompresses before publishing its checksum."""
+    archive=Path(archive)
+    with archive.open('rb') as handle:
+        head=handle.read(2)
+    if head!=b'\x1f\x8b':
+        raise RuntimeError('Archive is not gzip: '+str(archive))
+    if archive.name.endswith(('.tar.gz','.tgz')):
+        test=subprocess.run(['gzip','-t',str(archive)],capture_output=True,text=True)
+        if test.returncode:
+            raise RuntimeError('Archive is truncated: '+(test.stderr or '').strip()[:300])
+        listing=subprocess.run(['tar','-tzf',str(archive)],capture_output=True,text=True)
+        if listing.returncode:raise RuntimeError('Archive listing failed')
+        entries=len(listing.stdout.splitlines())
+    else:
+        with zipfile.ZipFile(archive) as z:
+            if z.testzip() is not None:raise RuntimeError('ZIP integrity check failed')
+            entries=len(z.namelist())
+    Path(str(archive)+'.sha256').write_text(digest(archive)+'  '+archive.name+'\n')
+    print('archive %s entries=%d bytes=%d'%(archive,entries,archive.stat().st_size),flush=True)
