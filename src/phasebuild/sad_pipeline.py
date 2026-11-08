@@ -64,7 +64,9 @@ def validate(config, inspect=True):
         cfg.update(phenix_bin='',phase_cycles=100)
         if cfg.get('observation_prior'):raise ValueError('内部 P+ 不接受外部 Phaser 先验')
     if bundled:
-        cfg.update(phenix_bin='',phase_cycles=100,dm_cycles=40)
+        # 40 是自带模式的默认轮数；显式给出的非默认值应当被尊重。
+        if int(cfg.get('dm_cycles',40))==int(DEFAULTS['dm_cycles']):cfg['dm_cycles']=40
+        cfg.update(phenix_bin='',phase_cycles=100)
         if cfg.get('observation_prior'):raise ValueError('自带模式不接受外部相位文件')
         cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None))
         from .bundled_pplus import engine_layout
@@ -128,6 +130,16 @@ def validate(config, inspect=True):
         value=cfg['solvent_fraction']
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not 0<value<1:
             raise ValueError('Solvent fraction must be between 0 and 1, or blank for sequence estimate')
+    if isinstance(cfg.get('copies'),str):
+        if cfg['copies']!='auto':raise ValueError('copies 只能是正整数或 auto')
+        sequence=cfg.get('sequence');sad=cfg.get('sad')
+        if not sequence or not sad:raise ValueError('copies=auto 需要同时提供 --sequence 与 --sad')
+        import gemmi as _gemmi
+        from oasis_py.sequence import resolve_copies
+        reference=_gemmi.read_mtz_file(str(Path(sad).expanduser().resolve()))
+        cfg['copies']=resolve_copies(str(Path(sequence).expanduser().resolve()),
+                                     reference.cell,reference.spacegroup,'auto')
+        cfg['copies_source']='auto_matthews'
     for key,low,high in [('copies',1,100),('phase_cycles',1,100),('dm_cycles',1,100),
                          ('rounds',1,20),('cycles',1,200),('free_value',0,999),('seed',0,2147483647),
                          ('max_neighbors',0,10000),('max_per_target',0,4096)]:

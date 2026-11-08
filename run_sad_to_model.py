@@ -55,11 +55,15 @@ def main(argv=None):
     p.add_argument('--dm-executable',default='',help='Explicit cparrot path; blank searches the runtime and PATH')
     p.add_argument('--fcalc',choices=['fc','fc_all','refined'],default='fc_all',help='Partial-model structure factors used by the trace feedback: FC/PHIC or FC_ALL/PHIC_ALL (bulk solvent included)')
     p.add_argument('--build-semet',action='store_true')
-    for name,default in [('copies',1),('phase-cycles',5),('dm-cycles',5),('rounds',5),('cycles',10),('free-value',0),('seed',20261023)]:
+    p.add_argument('--copies',default='1',help='ASU 中序列文件的份数：正整数，或 auto（按 Matthews 溶剂含量取最小可行值）')
+    for name,default in [('phase-cycles',5),('dm-cycles',5),('rounds',5),('cycles',10),('free-value',0),('seed',20261023)]:
         p.add_argument('--'+name,type=int,default=default)
     p.add_argument('--resume',action='store_true')
     p.add_argument('--check',action='store_true',help='Read-only preflight and plan; create no output')
     args=vars(p.parse_args(argv));resume=args.pop('resume');check=args.pop('check')
+    if args['copies']!='auto':
+        try:args['copies']=int(args['copies'])
+        except ValueError:p.error('--copies 必须是正整数或 auto')
     new_default=args['method'] is None
     if new_default:args['method']='pplus_bundled'
     profile=args['method']=='pplus_bundled' and (new_default or bool(args['elements']) or args['auto_fpp'])

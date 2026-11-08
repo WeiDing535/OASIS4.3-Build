@@ -21,7 +21,8 @@ def _environment(executable, scratch):
     env=dict(os.environ)
     env.update({'PATH':str(binary.parent)+':'+env.get('PATH','/usr/bin:/bin'),'CCP4':str(base),
         'CCP4_SCR':str(scratch),'CLIBD':str(base/'lib/data'),
-        'CLIBD_MON':str(base/'lib/data/monomers')+'/','SYMINFO':str(base/'lib/data/syminfo.lib'),
+        'CLIBD_MON':str(base/'lib/data/monomers')+'/','CINCL':str(base/'include'),
+        'SYMINFO':str(base/'lib/data/syminfo.lib'),
         'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1','MKL_NUM_THREADS':'1',
         'VECLIB_MAXIMUM_THREADS':'1'})
     Path(scratch).mkdir(parents=True,exist_ok=True)

@@ -68,6 +68,39 @@ def protein_sequence(path):
         chains_per_copy=len(chains),residues_per_copy=total,composition_per_copy=composition,mass_per_copy_da=weight)
 
 
+MATTHEWS_SOLVENT_RANGE=(0.20,0.65)
+
+
+def plausible_copies(path,cell,spacegroup,maximum=8):
+    """Copy numbers giving a Matthews-plausible solvent fraction.
+
+    Uses only the sequence, unit cell and space-group multiplicity: no
+    experimental phases, reference coordinates or free-set information.
+    """
+    info=protein_sequence(path);nsym=len(spacegroup.operations())
+    results=[]
+    for copies in range(1,int(maximum)+1):
+        mass=info['mass_per_copy_da']*copies
+        vm=cell.volume/(nsym*mass)
+        solvent=1-1.23/vm
+        results.append(dict(copies=copies,vm=vm,solvent=solvent,
+            plausible=bool(MATTHEWS_SOLVENT_RANGE[0]<=solvent<=MATTHEWS_SOLVENT_RANGE[1])))
+    return results
+
+
+def resolve_copies(path,cell,spacegroup,value):
+    """Resolve 'auto' to the smallest Matthews-plausible copy number.
+
+    An explicit integer is returned unchanged; ``auto`` falls back to 1 when no
+    copy number lies in the plausible range so a diagnostic warning, not a
+    silent guess, drives the user's decision.
+    """
+    if value!='auto':return value
+    candidates=plausible_copies(path,cell,spacegroup)
+    chosen=[row for row in candidates if row['plausible']]
+    return chosen[0]['copies'] if chosen else 1
+
+
 def sequence_asu(path,copies,cell,spacegroup):
     if isinstance(copies,bool) or not isinstance(copies,int) or copies<1:
         raise ValueError('ASU copies 必须是正整数，表示整个序列文件在一个 ASU 中重复的份数')
@@ -79,6 +112,11 @@ def sequence_asu(path,copies,cell,spacegroup):
         raise ValueError(f'序列/copies 与晶胞不相容：估算溶剂含量 {solvent:.1%}，请检查 copies、序列和空间群')
     warnings=[]
     if solvent<.2 or solvent>.85:warnings.append('估算溶剂含量偏离常见蛋白晶体范围，请核对序列与 copies；程序未自动改变 copies')
+    elif not MATTHEWS_SOLVENT_RANGE[0]<=solvent<=MATTHEWS_SOLVENT_RANGE[1]:
+        plausible=[row for row in plausible_copies(path,cell,spacegroup) if row['plausible']]
+        hint=', '.join('%d 份→溶剂 %.0f%%'%(row['copies'],100*row['solvent']) for row in plausible[:3])
+        warnings.append('当前 copies=%d 估算溶剂 %.0f%% 偏高；可能缺少 ASU 拷贝（%s）。可用 --copies auto 或显式指定'
+                        %(copies,100*solvent,hint or '无合适拷贝数'))
     if any(k in info['composition_per_copy'] for k in ['Se']):warnings.append('硒代残基使用显式序列标记计算组成')
     return {**info,'copies':copies,'asu_residues':info['residues_per_copy']*copies,
         'asu_chains':info['chains_per_copy']*copies,'asu_mass_da':mass,

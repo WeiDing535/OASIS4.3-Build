@@ -206,6 +206,7 @@ def _attach_fc_refmac0(staged, model_pdb, destination, runtime=None, fcalc='fc_a
     environment.update({'PATH':str(executable.parent)+':'+environment.get('PATH','/usr/bin:/bin'),
         'CCP4':str(Path(runtime).resolve()),'CCP4_SCR':str(work/'scratch'),
         'CLIBD':str(Path(runtime)/'lib/data'),'CLIBD_MON':str(Path(runtime)/'lib/data/monomers')+'/',
+        'CINCL':str(Path(runtime)/'include'),
         'SYMINFO':str(Path(runtime)/'lib/data/syminfo.lib')})
     (work/'scratch').mkdir(exist_ok=True)
     with (work/'refmac.log').open('w') as log:
