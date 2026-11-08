@@ -264,3 +264,7 @@ def _finish_archive(archive):
             entries=len(z.namelist())
     Path(str(archive)+'.sha256').write_text(digest(archive)+'  '+archive.name+'\n')
     print('archive %s entries=%d bytes=%d'%(archive,entries,archive.stat().st_size),flush=True)
+
+
+if __name__=='__main__':
+    main()
