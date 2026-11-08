@@ -71,6 +71,47 @@ def protein_sequence(path):
 MATTHEWS_SOLVENT_RANGE=(0.20,0.65)
 
 
+CHAIN_DECLARATION=re.compile(r'Chains?\s+([A-Za-z0-9]+(?:[,\s]+[A-Za-z0-9]+)*)')
+
+
+def declared_copies(path):
+    """Number of chains declared in the RCSB FASTA header, if present.
+
+    A header such as ``>6HF7_1|Chains A, B, C|...`` states that the deposited
+    asymmetric unit holds three copies of this sequence. This is an input
+    annotation, not a reference structure: it is read from the sequence file the
+    user supplied.
+    """
+    path=Path(path).expanduser().resolve()
+    text=path.read_text(errors='ignore')
+    total=0;found=False
+    for record in gemmi.read_pir_or_fasta(text if text.startswith('>') else '>sequence\n'+text):
+        header=(record.header or '').replace('\r','')
+        match=CHAIN_DECLARATION.search(header)
+        if not match:continue
+        letters=[token for token in re.split(r'[,\s]+',match.group(1)) if token]
+        if letters:
+            total+=len(letters);found=True
+    return total if found else None
+
+
+def infer_copies(path,cell,spacegroup,maximum=8):
+    """Copies plus the evidence used: FASTA chain annotation or Matthews range."""
+    declared=declared_copies(path)
+    candidates=plausible_copies(path,cell,spacegroup,maximum)
+    if declared is not None:
+        row=next((item for item in candidates if item['copies']==declared),None)
+        return dict(copies=declared,source='fasta_chain_annotation',
+                    solvent=row['solvent'] if row else None,
+                    matthews_plausible=bool(row and row['plausible']),
+                    candidates=candidates)
+    plausible=[item for item in candidates if item['plausible']]
+    chosen=plausible[0]['copies'] if plausible else 1
+    return dict(copies=chosen,source='matthews_plausible_range',
+                solvent=next(item['solvent'] for item in candidates if item['copies']==chosen),
+                matthews_plausible=bool(plausible),candidates=candidates)
+
+
 def plausible_copies(path,cell,spacegroup,maximum=8):
     """Copy numbers giving a Matthews-plausible solvent fraction.
 
@@ -89,16 +130,14 @@ def plausible_copies(path,cell,spacegroup,maximum=8):
 
 
 def resolve_copies(path,cell,spacegroup,value):
-    """Resolve 'auto' to the smallest Matthews-plausible copy number.
+    """Resolve 'auto' using the FASTA chain annotation, else the Matthews range.
 
-    An explicit integer is returned unchanged; ``auto`` falls back to 1 when no
-    copy number lies in the plausible range so a diagnostic warning, not a
-    silent guess, drives the user's decision.
+    An explicit integer is returned unchanged; ``auto`` falls back to 1 when
+    neither source is available so a warning, not a silent guess, drives the
+    user's decision.
     """
     if value!='auto':return value
-    candidates=plausible_copies(path,cell,spacegroup)
-    chosen=[row for row in candidates if row['plausible']]
-    return chosen[0]['copies'] if chosen else 1
+    return infer_copies(path,cell,spacegroup)['copies']
 
 
 def sequence_asu(path,copies,cell,spacegroup):

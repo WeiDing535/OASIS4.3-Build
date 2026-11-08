@@ -135,11 +135,13 @@ def validate(config, inspect=True):
         sequence=cfg.get('sequence');sad=cfg.get('sad')
         if not sequence or not sad:raise ValueError('copies=auto 需要同时提供 --sequence 与 --sad')
         import gemmi as _gemmi
-        from oasis_py.sequence import resolve_copies
+        from oasis_py.sequence import infer_copies
         reference=_gemmi.read_mtz_file(str(Path(sad).expanduser().resolve()))
-        cfg['copies']=resolve_copies(str(Path(sequence).expanduser().resolve()),
-                                     reference.cell,reference.spacegroup,'auto')
-        cfg['copies_source']='auto_matthews'
+        inferred=infer_copies(str(Path(sequence).expanduser().resolve()),
+                              reference.cell,reference.spacegroup)
+        cfg['copies']=inferred['copies']
+        cfg['copies_source']=inferred['source']
+        cfg['copies_inference']={k:v for k,v in inferred.items() if k!='candidates'}
     for key,low,high in [('copies',1,100),('phase_cycles',1,100),('dm_cycles',1,100),
                          ('rounds',1,20),('cycles',1,200),('free_value',0,999),('seed',0,2147483647),
                          ('max_neighbors',0,10000),('max_per_target',0,4096)]:
