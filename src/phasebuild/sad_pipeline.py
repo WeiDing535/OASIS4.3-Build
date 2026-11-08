@@ -255,7 +255,7 @@ def stage_plan(cfg, python=None):
             command=[python,'-u',str(root/'run_hand_preselection.py'),'--config',str(out/'pipeline_report.json'),'--output',str(hand)],
             outputs=[str(hand/name) for name in ('hand_selection.json','selected_native.mtz','selected_sad.mtz','refined_heavy.pdb')]))
     if cfg.get('building_recipe')=='pipeline' and cfg.get('build_model',True):
-        stages[4].update(name='CCP4 buccaneer_pipeline（与对照流程同一构建器）',
+        stages[4].update(name='内置 Buccaneer+REFMAC 构建循环（与对照流程同一协议）',
             command=[python,'-u',str(root/'run_build_pipeline.py'),'--map',str(dm/'map_phases.mtz'),
                      '--native',str(hand/'selected_native.mtz') if scout else (str(phase/'selected_native.mtz') if cfg.get('auto_hand') else (str(prepare/'native.mtz') if cfg.get('input_columns') else cfg['native'])),
                      '--sequence',str(prepare/'building.fasta'),'--runtime',cfg['runtime'],

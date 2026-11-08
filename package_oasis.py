@@ -4,10 +4,11 @@ import ast
 import hashlib
 import json
 from pathlib import Path
+import tomllib
 import zipfile
 
 ROOT=Path(__file__).resolve().parent
-SCRIPTS=['run_gui.py','run_sad_to_model.py','run_oasis_stage.py','run_build_from_phases.py']
+SCRIPTS=['run_gui.py','run_sad_to_model.py','run_oasis_stage.py','run_build_from_phases.py','run_build_pipeline.py','run_trace_feedback.py','run_pplus_trust_stage.py','run_hand_preselection.py','run_sad_portfolio.py']
 # This compatibility adapter is only used by the old workbench in the development
 # repository. The focused server always receives oasis_workflow explicitly.
 LEGACY_ONLY={'phasebuild.gui_workflow'}
@@ -45,9 +46,10 @@ def source_files(root=ROOT):
             elif isinstance(item,ast.Import):
                 for alias in item.names:
                     if alias.name.split('.')[0] in ('phasebuild','oasis_py'):include(alias.name)
+    paths.add(src/'phasebuild/resolve_driver.py')
     paths.update((src/'phasebuild/oasis_assets').glob('*'))
     paths.update(p for p in (src/'oasis_py/resources').rglob('*') if p.is_file())
-    paths.update(root/p for p in ['OASIS4.3.command','environment.yml','LICENSE','AUTHORS.md','CITATION.cff','docs/OASIS4.3.md',
+    paths.update(root/p for p in ['OASIS4.3.command','environment.yml','LICENSE','AUTHORS.md','CITATION.cff','docs/OASIS4.3.md','docs/VERSIONING.md','docs/INSULIN_DIAGNOSIS_20261023.md','docs/NSF_D2_IMPROVEMENT_20261026.md','docs/PORTFOLIO_20261027.md','docs/GUI_PORTFOLIO_RELEASE_20261027.md','docs/DEFAULT_W8_AUTO_FPP_20261027.md','docs/MTZ_INPUT_SELECTION_20261027.md','docs/DUAL_HAND_AND_PHASE_RESTRAINTS_20261028.md','docs/FOUR_MODES_20261028.md','docs/METHOD_SELECTION_20261028.md','docs/PHASE_CONFIDENCE_DIAGNOSTIC_20261028.md','docs/ITERATIVE_CLEANUP_NSF_20261028.md','docs/AUTO_HAND_ALL_METHODS_20261028.md',
                    'vendor/oasis43/LICENSE','vendor/oasis43/UPSTREAM.json','vendor/oasis43/TEST_PATCHES.md'])
     return sorted(paths)
 
@@ -59,17 +61,20 @@ def main(argv=None):
     target.parent.mkdir(parents=True,exist_ok=True)
     prefix='OASIS4.3-focused-development'
     files=source_files()
+    project=tomllib.loads((ROOT/'pyproject.toml').read_text())
+    version=project['tool']['oasis43']['version']
     manifest=dict(product='OASIS4.3',distribution='focused source development',
-                  entrypoints=SCRIPTS,methods=['likelihood','pplus'],external_runtime_bundled=False,files=[])
-    metadata='''[build-system]
+                  version=version,
+                  entrypoints=SCRIPTS,methods=['likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'],external_runtime_bundled=False,files=[])
+    metadata=f'''[build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "oasis43"
-version = "4.3.0.dev1"
-description = "OASIS4.3: two SAD phase methods, density modification, Buccaneer and REFMAC"
-requires-python = ">=3.12,<3.13"
-dependencies = ["gemmi==0.7.5", "numpy>=1.26,<2", "scipy>=1.12"]
+version = {json.dumps(version)}
+description = "OASIS4.3: trusted P+ and legacy SAD workflows, density modification, Buccaneer and REFMAC"
+requires-python = {json.dumps(project['project']['requires-python'])}
+dependencies = {json.dumps(project['project']['dependencies'])}
 [tool.setuptools.packages.find]
 where = ["src"]
 [tool.setuptools.package-data]

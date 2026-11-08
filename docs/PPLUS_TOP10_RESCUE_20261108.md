@@ -108,9 +108,10 @@ run_sad_to_model.py --sad ... --native ... --sequence ... --heavy ... \
 
 ## 5. 局限与风险
 
-- **Parrot 是外部引擎**（本机 CCP4-9）。自带 runtime 未含 `cparrot`；若要维持完全自洽的产品形态，
-  需要把 `oasis_py/native_density.py` 的掩膜与各向异性处理升级到同等水平——当前内部实现在
-  6ZPP 上只有 57.3°。`--dm-engine resolve` 保留旧路径。
+- **Parrot 已可随包分发**：`cparrot` 已装入自带 runtime，构建循环与反馈 Fcalc 也改为只用自带
+  `cbuccaneer`/`refmac5`；完整独立包的构建与验证见
+  [独立安装包](STANDALONE_SELF_CONTAINED_20261108.md)。纯内部 DM（`--dm-engine resolve`）仍是旧路径，
+  在 6ZPP 上只有 57.3°。
 - 相位误差在高分辨率仍偏高（6ZPP 1.5 Å 处约 46°，SHELXE 约 28°）。
   继续缩小差距需要更强的独立链追踪器，而不是继续调密度修饰参数。
 - 元素逐位点标注（6HF7）是假设性输入修复，需实验核对。
