@@ -148,6 +148,7 @@ def describe_plan(cfg):
     from .refinement import reflection_partition
     data=gemmi.read_mtz_file(cfg['sad'])
     sample=sequence_asu(cfg['sequence'],cfg['copies'],data.cell,data.spacegroup)
+    if active.get('copies')=='auto':active['copies']=sample['copies']
     if cfg['method'] in ('pplus_trust','pplus_internal','pplus_bundled'):
         from .trust_workflow import sample_info
         sample=sample_info(cfg,data)

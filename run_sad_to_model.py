@@ -55,7 +55,7 @@ def main(argv=None):
     p.add_argument('--dm-executable',default='',help='Explicit cparrot path; blank searches the runtime and PATH')
     p.add_argument('--fcalc',choices=['fc','fc_all','refined'],default='fc_all',help='Partial-model structure factors used by the trace feedback: FC/PHIC or FC_ALL/PHIC_ALL (bulk solvent included)')
     p.add_argument('--build-semet',action='store_true')
-    p.add_argument('--copies',default='auto',help='ASU 中序列文件的份数：正整数，或 auto（按 Matthews 溶剂含量取最小可行值）')
+    p.add_argument('--copies',default='auto',help='ASU 中序列文件的份数：正整数，或 auto（默认；先读 RCSB FASTA 头的 Chains 注释，否则取 Matthews 溶剂含量 20–65% 的最小拷贝数）')
     for name,default in [('phase-cycles',5),('dm-cycles',5),('rounds',5),('cycles',10),('free-value',0),('seed',20261023)]:
         p.add_argument('--'+name,type=int,default=default)
     p.add_argument('--resume',action='store_true')
