@@ -189,6 +189,10 @@ def main(argv=None):
     parser.add_argument('--runtime-source',type=Path,required=True)
     parser.add_argument('--parrot-binary',type=Path)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--keep-optional',action='store_true',
+                        help='keep GUI/plotting/validation payloads (adds ~1.4 GB)')
+    parser.add_argument('--keep-all-monomers',action='store_true',
+                        help='keep every ligand dictionary (adds ~660 MB)')
     archives=parser.add_mutually_exclusive_group()
     archives.add_argument('--zip',type=Path)
     archives.add_argument('--tar',type=Path)
@@ -222,6 +226,19 @@ def main(argv=None):
     write_launcher(output)
     (output/'使用说明.txt').write_text(USAGE)
     if (source_root/'LICENSE').is_file():shutil.copy2(source_root/'LICENSE',output/'LICENSE')
+    if not args.keep_optional:
+        print('Prune optional components',flush=True)
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('oasis_prune',Path(__file__).with_name('prune_bundle.py'))
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        removed=module.prune(output)
+        if not args.keep_all_monomers:removed+=module.prune_monomers(output)
+        for name in ('runtime/runtime_manifest.json','python/python_manifest.json'):
+            kept,dropped=module.refresh_manifest(output/Path(name).parent,Path(name).name)
+            report['validation'].setdefault('manifests',{})[name]={'rows_kept':kept,'rows_dropped':dropped}
+        report['pruned_bytes']=sum(item['bytes'] for item in removed)
+        report['pruned_items']=len(removed)
+        print('Pruned %d items, %.0f MB'%(len(removed),report['pruned_bytes']/1e6),flush=True)
     print('Verify bundle',flush=True)
     report['validation']['bundle']=verify_bundle(output)
     report['status']='assembled-and-verified'

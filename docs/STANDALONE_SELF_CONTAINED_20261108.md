@@ -240,6 +240,38 @@ RCSB FASTA 头直接写明了 ASU 里的链数，这是输入文件自带的注�
 （例如 6ZPP 的 auto/fb2 是 32.78%，而 0.50/fb2 是 31.31%）。这是刻意保留的选择规则：
 运行终点不依赖 R-free 信息。
 
+
+## 精简打包（2026-11-09）
+
+原始独立包 3.8 GB / 压缩后 1.19 GB，其中大部分是 SAD 流程从不加载的组件。
+新增 `packaging/prune_bundle.py`，把下列内容删掉并同步刷新 `runtime_manifest.json`、
+`python_manifest.json`（否则运行时完整性校验会因为文件缺失而报错）：
+
+| 删除内容 | 大小 | 理由 |
+|---|---:|---|
+| `density/conda_base/lib/libQt5WebEngine*.dylib`（4 份） | 350 MB | 只给 Qt GUI 用 |
+| `density/conda_base/.../site-packages/{bokeh,PySide2,wx*,matplotlib,pandas,sklearn,babel}` | ~280 MB | 绘图/GUI/数据框，RESOLVE 不 import |
+| `runtime/lib/data/nucleofind_models` | 152 MB | 糖/核苷酸校验程序 |
+| `runtime/lib/data/privateer_data` | 52 MB | 同上 |
+| `runtime/lib/data/reference_structures`（保留 `reference-1tqw.mtz/.pdb`） | 190 MB | 其余是 RESOLVE 的演示参考 |
+| `runtime/lib/data/monomers/*`（保留 20 种标准氨基酸、UNK、水、常见离子与小分子） | 630 MB | 35649 个配体字典，蛋白 SAD 建模用不到 |
+| `python3.12` 的 pip/setuptools/pygments/pytest/idlelib/ensurepip/test 与 `__pycache__` | ~30 MB | 安装器与测试工具 |
+
+结果：
+
+| | 目录 | 压缩包 |
+|---|---:|---:|
+| 精简前 | 3.8 GB | 1.19 GB |
+| 精简后 | **1.9 GB** | **501 MB** |
+
+验证方式不是只看文件大小：用精简后的包对 7ENM 跑完整流程（Phaser → P+ → Parrot → Buccaneer →
+REFMAC），结果 **Rfree 31.47%、Rwork 28.34%，与精简前完全一致**，REFMAC 日志里没有任何
+`no dictionary` 警告。
+
+**限制**：配体字典被裁到常见集合。如果晶体里含有非标准配体，REFMAC 需要对应 `.cif`；
+用 `--keep-all-monomers` 重新打包即可恢复全部 35649 个字典（+660 MB）。
+`--keep-optional` 则保留全部 GUI/绘图组件。
+
 ## 限制（必须如实告知用户）
 
 - **平台**：本包是 macOS **x86_64**（Intel 二进制，在 Apple Silicon 上经 Rosetta 运行）。
