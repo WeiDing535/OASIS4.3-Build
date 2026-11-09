@@ -76,7 +76,7 @@ def validate(config, inspect=True):
             cfg['feedback_cycles']=2
         # 标定配方固定使用 0.50 溶剂含量：Parrot 的掩膜对 1% 的差异敏感，
         # 7TFQ 在序列估计值 0.493 下从 36.9% 恶化到 49.1%。显式值优先。
-        if cfg.get('dm_engine')=='parrot' and cfg.get('dm_solvent') is None:
+        if cfg.get('dm_engine')=='parrot' and cfg.get('dm_solvent') is None and not cfg.get('dm_solvent_auto'):
             cfg['dm_solvent']=0.5;cfg['dm_solvent_source']='calibrated_protocol_constant'
         cfg['_auto_dm_cycles']=auto_cycles
         cfg.update(phenix_bin='',phase_cycles=100)
@@ -103,6 +103,9 @@ def validate(config, inspect=True):
     if cfg['dm_engine'] not in ('resolve','parrot'):raise ValueError('Unknown density-modification engine')
     if cfg['dm_engine']=='parrot' and cfg['method'] not in ('pplus_trust','pplus_internal','pplus_bundled'):
         raise ValueError('The Parrot engine currently requires a P+ phasing method')
+    if cfg['dm_solvent']=='auto':
+        # 显式要求按序列估算：不要被标定的 0.50 常数覆盖。
+        cfg['dm_solvent']=None;cfg['dm_solvent_auto']=True
     if cfg['dm_solvent'] is not None:
         value=cfg['dm_solvent']
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) or not 0<value<1:

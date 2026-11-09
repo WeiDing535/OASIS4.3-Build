@@ -101,7 +101,7 @@ def main(argv=None):
     grid=[(fb,solvent) for fb in endpoints for solvent in (solvents or [cfg.get('dm_solvent')])]
     for feedback,solvent in grid:
         sub=dict(cfg);sub['feedback_cycles']=feedback
-        if solvent is not None:sub['dm_solvent']=solvent
+        sub['dm_solvent']=solvent if solvent is not None else 'auto'
         tag='endpoint_fb%d%s'%(feedback,'' if solvent is None else '_s%s'%('%.2f'%solvent))
         sub['output']=str(root/tag)
         print(json.dumps({'event':'endpoint','feedback':feedback,'solvent':solvent,
