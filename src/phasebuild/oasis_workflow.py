@@ -10,6 +10,27 @@ from .data import fingerprint
 METHODS={'likelihood':('连续 SAD','MLHL-best'),'pplus':('旧版直接法 P+','Legacy'),'pplus_trust':('外部对照（Phaser SAD 前端）','Wang14 + classic40'),'pplus_internal':('内部 P+（实验性）','内部 MLHL-best'),'pplus_bundled':('P+ 自带引擎版','自带 RESOLVE + CCTBX')}
 
 
+_CLI_CACHE={}
+
+
+def cli_options(project):
+    """Every --flag run_sad_to_model.py actually accepts.
+
+    The GUI turns the whole validated config into argv, so any bookkeeping key
+    added to the config (copies_source, dm_solvent_source, ...) would otherwise be
+    passed as an unknown flag and abort the run.
+    """
+    script=Path(project).resolve()/'run_sad_to_model.py'
+    cached=_CLI_CACHE.get(str(script))
+    if cached is not None:return cached
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('oasis_cli_interface',script)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    options=set(module.build_parser()._option_string_actions)
+    _CLI_CACHE[str(script)]=options
+    return options
+
+
 def defaults(project):
     project=Path(project)
     candidates=[project/'runtime',project/'dist/OASIS4.3-dev12-portable local/runtime',project/'dist/OASIS4.3-dev11-portable local/runtime',project/'dist/OASIS4.3-dev10-portable local/runtime',project/'dist/OASIS4.3-dev9-portable local/runtime',project/'dist/OASIS4.3-dev8-portable local/runtime',project/'dist/OASIS4.3-dev7-portable local/runtime',project/'dist/OASIS4.3-dev6-portable local/runtime',project/'dist/OASIS4.3-dev5d-portable local/runtime',project/'dist/OASIS4.3-dev5-portable local/runtime',project/'dist/OASIS4.3-Build-macOS-Intel-0.8.3-local/runtime']
@@ -71,7 +92,9 @@ def make_plan(config, project, python=None, inspect=True):
         if protocol is not None:checked['protocol']=protocol
         return checked,[dict(name='P+ 多流程探索与候选推荐',kind='sad_portfolio',output=str(outer/'00_portfolio'),command=command)]
     command=[python or sys.executable,'-u',str(Path(project).resolve()/'run_sad_to_model.py')]
+    supported=cli_options(project)
     for key,value in checked.items():
+        if '--'+key.replace('_','-') not in supported:continue
         if key=='build_semet':
             if value:command.append('--build-semet')
         elif key in ('trust_cleanup','trust_stability','trust_partial_cleanup','trust_work_weight','auto_fpp','input_columns','auto_hand','canonical_dm_seed','per_round_cleanup','dm_anisotropy'):command.append('--'+key.replace('_','-') if value else '--no-'+key.replace('_','-'))

@@ -9,7 +9,7 @@ for _thread_key in ['OMP_NUM_THREADS','OPENBLAS_NUM_THREADS','MKL_NUM_THREADS','
 sys.path.insert(0,str(Path(__file__).resolve().parent/'src'))
 
 
-def main(argv=None):
+def build_parser():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ['sad','sequence','heavy','output']:p.add_argument('--'+name,required=True)
     p.add_argument('--native',default='',help='Optional original mean observations; blank uses selected SAD observations')
@@ -62,6 +62,11 @@ def main(argv=None):
     p.add_argument('--dm-solvents',default='',help='与 --feedback-endpoints 组合的溶剂含量，逗号分隔，auto 表示按序列估算（例如 auto,0.5）')
     p.add_argument('--resume',action='store_true')
     p.add_argument('--check',action='store_true',help='Read-only preflight and plan; create no output')
+    return p
+
+
+def main(argv=None):
+    p=build_parser()
     args=vars(p.parse_args(argv));resume=args.pop('resume');check=args.pop('check')
     endpoints=[int(x) for x in str(args.pop('feedback_endpoints') or '').replace(' ','').split(',') if x]
     solvents=[]
