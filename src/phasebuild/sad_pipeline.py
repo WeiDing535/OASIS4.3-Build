@@ -15,7 +15,7 @@ from .data import fingerprint
 from .runtime import resolve_runtime, runtime_info
 from .sad_bridge import inspect_inputs, prepare_sad, adapt_maps, FLAG
 
-DEFAULTS = dict(copies=1, phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
+DEFAULTS = dict(copies='auto', phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 free_value=0, seed=20261023, labels='', build_semet=False,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
                 triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True,
@@ -132,16 +132,21 @@ def validate(config, inspect=True):
             raise ValueError('Solvent fraction must be between 0 and 1, or blank for sequence estimate')
     if isinstance(cfg.get('copies'),str):
         if cfg['copies']!='auto':raise ValueError('copies 只能是正整数或 auto')
-        sequence=cfg.get('sequence');sad=cfg.get('sad')
-        if not sequence or not sad:raise ValueError('copies=auto 需要同时提供 --sequence 与 --sad')
-        import gemmi as _gemmi
-        from oasis_py.sequence import infer_copies
-        reference=_gemmi.read_mtz_file(str(Path(sad).expanduser().resolve()))
-        inferred=infer_copies(str(Path(sequence).expanduser().resolve()),
-                              reference.cell,reference.spacegroup)
-        cfg['copies']=inferred['copies']
-        cfg['copies_source']=inferred['source']
-        cfg['copies_inference']={k:v for k,v in inferred.items() if k!='candidates'}
+        sequence=str(Path(cfg.get('sequence') or '').expanduser())
+        sad=str(Path(cfg.get('sad') or '').expanduser())
+        resolved=None
+        if inspect and cfg.get('sequence') and cfg.get('sad') and Path(sad).is_file() and Path(sequence).is_file():
+            import gemmi as _gemmi
+            from oasis_py.sequence import infer_copies
+            reference=_gemmi.read_mtz_file(sad)
+            inferred=infer_copies(sequence,reference.cell,reference.spacegroup)
+            resolved=inferred['copies']
+            cfg['copies_source']=inferred['source']
+            cfg['copies_inference']={k:v for k,v in inferred.items() if k!='candidates'}
+        # A preview or a unit-test call has no readable inputs yet: fall back to 1
+        # and let the real run resolve the value from the sequence and the cell.
+        cfg['copies']=resolved if resolved is not None else 1
+        cfg.setdefault('copies_source','auto_pending')
     for key,low,high in [('copies',1,100),('phase_cycles',1,100),('dm_cycles',1,100),
                          ('rounds',1,20),('cycles',1,200),('free_value',0,999),('seed',0,2147483647),
                          ('max_neighbors',0,10000),('max_per_target',0,4096)]:

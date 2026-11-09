@@ -127,6 +127,9 @@ USAGE='''OASIS4.3 独立安装包
      --method pplus_bundled --dm-engine parrot --feedback-cycles 2 \\
      --dm-solvent 0.5 --building-recipe pipeline --output NEW_DIR
 
+ASU 拷贝数默认自动判定（--copies auto）：先读 RCSB FASTA 头里的 Chains A, B, C，
+没有该注释时取 Matthews 溶剂含量 20-65% 的最小拷贝数；也可用 --copies 3 显式指定。
+
 说明：
 - 输出总是写入新目录，不覆盖已有结果。
 - 每个案例的关系上限（--max-per-target）过大时程序会提示内存预算不足，按提示调小即可。

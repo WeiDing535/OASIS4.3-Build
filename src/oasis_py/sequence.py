@@ -141,6 +141,8 @@ def resolve_copies(path,cell,spacegroup,value):
 
 
 def sequence_asu(path,copies,cell,spacegroup):
+    if copies=='auto':
+        copies=resolve_copies(path,cell,spacegroup,'auto')
     if isinstance(copies,bool) or not isinstance(copies,int) or copies<1:
         raise ValueError('ASU copies 必须是正整数，表示整个序列文件在一个 ASU 中重复的份数')
     if spacegroup is None or not cell.is_crystal() or not math.isfinite(cell.volume) or cell.volume<=0:

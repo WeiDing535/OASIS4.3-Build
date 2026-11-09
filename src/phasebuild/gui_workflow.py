@@ -13,7 +13,7 @@ INTEGRATED_ENGINES = ('hybrid-phasebuild-seeded-external-buccaneer-refmac',
 
 def defaults(project):
     project = Path(project)
-    return dict(sad_input='', heavy='', fpp='', copies=1, phase_cycles=5, dm_cycles=5, sad_labels='',
+    return dict(sad_input='', heavy='', fpp='', copies='auto', phase_cycles=5, dm_cycles=5, sad_labels='',
                 dm_reference=str(Path(default_runtime())/'lib/data/reference_structures/reference-1tqw.mtz') if default_runtime() else '',
                 mode='fresh', map='', native='', sequence='', model='', sequence_report='',
                 phase_prior='', build_semet=False,
