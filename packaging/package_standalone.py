@@ -100,6 +100,9 @@ export CLIBD_MON="$HERE/runtime/lib/data/monomers/"
 export SYMINFO="$HERE/runtime/lib/data/syminfo.lib"
 export CINCL="$HERE/runtime/include"
 export CCP4_SCR="${TMPDIR:-/tmp}/oasis43-scratch"
+# Fail loudly on a missing bundled file instead of silently using a local CCP4.
+export PHASEBUILD_STANDALONE=1
+export PHASEBUILD_RUNTIME="$HERE/runtime"
 mkdir -p "$CCP4_SCR"
 if [ "$#" -gt 0 ]; then
   exec "$HERE/python/bin/python3" -u "$HERE/app/$1" "${@:2}"
