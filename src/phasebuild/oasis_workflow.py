@@ -18,7 +18,8 @@ def defaults(project):
     cfg=dict(DEFAULTS)
     cfg['phenix_bin']=''
     cfg['method']='pplus_bundled'
-    cfg['dm_cycles']=20
+    # 标定配方：Parrot 密度修饰 + 2 轮 trace/Fcalc 反馈 + 40 轮修饰。
+    cfg.update(dm_engine='parrot',dm_cycles=40,feedback_cycles=2,max_per_target=48)
     cfg.update(sad='',native='',sequence='',heavy='',fpp='',runtime=runtime,
                reference=str(Path(runtime)/'lib/data/reference_structures/reference-1tqw.mtz') if runtime else '',
                output=str(project/'runs/oasis_run'),mode='sad_to_model',
