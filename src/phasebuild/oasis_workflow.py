@@ -18,11 +18,11 @@ def defaults(project):
     cfg=dict(DEFAULTS)
     cfg['phenix_bin']=''
     cfg['method']='pplus_bundled'
-    cfg['dm_cycles']=40
+    cfg['dm_cycles']=20
     cfg.update(sad='',native='',sequence='',heavy='',fpp='',runtime=runtime,
                reference=str(Path(runtime)/'lib/data/reference_structures/reference-1tqw.mtz') if runtime else '',
                output=str(project/'runs/oasis_run'),mode='sad_to_model',
-               explore=False,explore_workers=2,protocol='pplus_w8_weight',elements='',auto_fpp=True,input_columns=True,native_labels='',auto_hand=True,building_recipe='ccp4',refinement_prior='dm_phifom',
+               explore=False,explore_workers=2,protocol='pplus_w8_weight',elements='',auto_fpp=True,input_columns=True,native_labels='',auto_hand=True,building_recipe='pipeline',refinement_prior='dm_phifom',
                trust_wang_radius=8.,trust_partial_cleanup=True,trust_work_weight=True,trust_stability=False)
     return cfg
 

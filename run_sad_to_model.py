@@ -70,12 +70,12 @@ def main(argv=None):
     if new_default:args['input_columns']=True
     if args['auto_hand'] is None:args['auto_hand']=profile and args['build_model']
     if args['refinement_prior'] is None:args['refinement_prior']='dm_phifom' if profile else 'original_sad'
-    if args['building_recipe'] is None:args['building_recipe']='ccp4' if profile else 'legacy'
+    if args['building_recipe'] is None:args['building_recipe']='pipeline' if profile else 'legacy'
+    if args['dm_engine'] is None:args['dm_engine']='parrot' if profile else 'resolve'
     if profile and not args['fpp']:args['auto_fpp']=True
     for flag in ['trust_work_weight','trust_partial_cleanup']:
         if args[flag] is None:args[flag]=profile and args['build_model']
     if args['trust_wang_radius'] is None:args['trust_wang_radius']=8. if profile else 14.
-    if args['dm_engine'] is None:args['dm_engine']='resolve'
     from phasebuild.sad_pipeline import validate,stage_plan,run_pipeline
     cfg=validate(args)
     if check:
