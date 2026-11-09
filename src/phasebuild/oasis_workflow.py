@@ -21,6 +21,7 @@ def cli_options(project):
     passed as an unknown flag and abort the run.
     """
     script=Path(project).resolve()/'run_sad_to_model.py'
+    if not script.is_file():script=Path(__file__).resolve().parents[2]/'run_sad_to_model.py'
     cached=_CLI_CACHE.get(str(script))
     if cached is not None:return cached
     import importlib.util
@@ -39,7 +40,7 @@ def defaults(project):
     cfg=dict(DEFAULTS)
     cfg['phenix_bin']=''
     cfg['method']='pplus_bundled'
-    # 标定配方：Parrot 密度修饰 + 2 轮 trace/Fcalc 反馈 + 40 轮修饰。
+    # 标定配方：Parrot 密度修饰 + 2 轮反馈 + 40 轮修饰；非 P+ 方法会被降级为 RESOLVE。
     cfg.update(dm_engine='parrot',dm_cycles=40,feedback_cycles=2,max_per_target=48)
     cfg.update(sad='',native='',sequence='',heavy='',fpp='',runtime=runtime,
                reference=str(Path(runtime)/'lib/data/reference_structures/reference-1tqw.mtz') if runtime else '',
@@ -72,6 +73,11 @@ def make_plan(config, project, python=None, inspect=True):
             if key not in config and protocol is None:cfg[key]=DEFAULTS[key]
     if protocol is not None and not cfg['build_model']:cfg.update(trust_work_weight=False,trust_partial_cleanup=False)
     if 'method' not in config:cfg['method']='pplus_bundled' if protocol is not None else DEFAULTS['method'] # old saved configs retain their historical route
+    if cfg.get('dm_engine')=='parrot' and cfg.get('method') not in ('pplus_trust','pplus_internal','pplus_bundled'):
+        # Parrot 只在 P+ 流程里有意义；其他定相方式退回内部 RESOLVE 引擎并记录原因。
+        cfg['dm_engine']='resolve'
+        cfg['feedback_cycles']=0
+        cfg['dm_engine_fallback']='parrot requires a P+ phasing method'
     if 'explore' not in config:cfg['explore']=False # never silently migrate saved single-run configs
     explore=cfg.pop('explore');workers=cfg.pop('explore_workers')
     if not isinstance(explore,bool):raise ValueError('多流程探索选项必须为布尔值')
@@ -246,14 +252,25 @@ def collect_results(directory):
         if status=='completed' and key=='build' and state.get('status')!='completed':status='running'
         stages.append(dict(id=key,name=label,status=status))
     metrics=[]
-    for number in range(1,(cfg.get('rounds',0) if building else 0)+1):
-        folder=pipe/'05_build'/('round_%02d_refine'%number)
-        ref=read_json(folder/'refinement_report.json')
-        if ref.get('status')!='success':continue
-        stats=ref.get('statistics',{}).get('final',{})
-        metrics.append(dict(stage='第 %d 轮'%number,round=number,r_work=stats.get('r_work'),r_free=stats.get('r_free'),
-            cycles=ref.get('requested_cycles'),free_preserved=ref.get('free_flags_preserved'),
-            engine='REFMAC · '+prior_label,model=str((folder/'model.cif').relative_to(root))))
+    # Two builder layouts exist: the in-package pipeline writes hybrid_report.json
+    # with one entry per Buccaneer/REFMAC cycle, the older route writes one folder
+    # per refinement round.
+    build_report=read_json(pipe/'05_build/hybrid_report.json') if building else {}
+    if build_report.get('status')=='completed' and build_report.get('cycles'):
+        for row in build_report['cycles']:
+            number=row.get('cycle')
+            metrics.append(dict(stage='第 %s 轮'%number,round=number,r_work=row.get('r_work'),r_free=row.get('r_free'),
+                cycles=row.get('refmac_cycles'),free_preserved=build_report.get('free_flags_preserved'),
+                engine='Buccaneer + REFMAC',model=str((pipe/'05_build/primary_model.cif').relative_to(root))))
+    else:
+        for number in range(1,(cfg.get('rounds',0) if building else 0)+1):
+            folder=pipe/'05_build'/('round_%02d_refine'%number)
+            ref=read_json(folder/'refinement_report.json')
+            if ref.get('status')!='success':continue
+            stats=ref.get('statistics',{}).get('final',{})
+            metrics.append(dict(stage='第 %d 轮'%number,round=number,r_work=stats.get('r_work'),r_free=stats.get('r_free'),
+                cycles=ref.get('requested_cycles'),free_preserved=ref.get('free_flags_preserved'),
+                engine='REFMAC · '+prior_label,model=str((folder/'model.cif').relative_to(root))))
     endpoint=read_json(pipe/'06_finish/endpoint.json') if cfg.get('method') in ('pplus_trust','pplus_internal','pplus_bundled') else {}
     post_label='部分模型去重后精修' if endpoint.get('cleanup_kind')=='explicit-single-copy-sequence-anchored-partial-model-reduction' else '完整链后精修'
     if endpoint.get('cleanup_status')=='completed' and 'finish' in completed:
@@ -294,7 +311,9 @@ def collect_results(directory):
                          ('bridge','04_bridge/building.mtz','初始 Buccaneer 建模地图')]:
         if key in completed:add(pipe/name,'最终密度修饰相位与 FOM' if key=='dm' and not building and pipeline_complete else 'P+ 更新相位 / FOM / 概率（不含 HL）' if key=='sad' and name.endswith('experimental.mtz') and cfg.get('method') in ('pplus_trust','pplus_internal','pplus_bundled') else role,
                               '主要结果' if key=='dm' and not building and pipeline_complete else '相位与地图')
-    if complete:add(pipe/'05_build'/('round_%02d_refine'%cfg['rounds'])/'refined.mtz','最后一轮精修地图','主要结果')
+    if complete:
+        last=pipe/'05_build'/(('cycle_%02d'%cfg['rounds']) if build_report.get('status')=='completed' else ('round_%02d_refine'%cfg['rounds']))
+        add(last/(('refine.mtz') if build_report.get('status')=='completed' else 'refined.mtz'),'最后一轮精修地图','主要结果')
     if cfg.get('method') in ('pplus_trust','pplus_bundled'):
         for name in ['resolve.log','classic.log','resolve.inp','seedmap.mtz']:
             add(pipe/'03_dm'/name,name,'日志' if name.endswith('.log') else '相位与地图')
