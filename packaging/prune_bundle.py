@@ -6,7 +6,7 @@ validation tool that the bundled engines (phaser, refmac5, cbuccaneer, cparrot,
 RESOLVE through oasis-density-python) never import. Anything the pipeline needs
 is kept, and package_standalone re-runs its smoke tests after pruning.
 """
-import hashlib, json, shutil, sys
+import hashlib, json, os, shutil, sys
 from pathlib import Path
 
 SITE_PACKAGES_27 = 'runtime/density/conda_base/lib/python2.7/site-packages'
@@ -51,6 +51,7 @@ DROP = [
 ]
 
 def _expand(root, pattern):
+    root = Path(root)
     if any(ch in pattern for ch in '*?['):
         return sorted(root.glob(pattern))
     path = root / pattern
@@ -82,6 +83,76 @@ def prune(bundle, keep_reference=True):
         shutil.rmtree(path)
         removed.append(dict(path=str(path.relative_to(root)), bytes=size, why='byte-code cache'))
     return removed
+
+# Payloads that ship with the RESOLVE environment but no bundled program loads.
+DROP_LATE = [
+    ('runtime/density/conda_base/lib/libLLVM-9.dylib', 'LLVM (no llvmlite/numba present)'),
+    ('runtime/density/conda_base/lib/python2.7/site-packages/sphinx', 'documentation builder'),
+    ('runtime/density/conda_base/lib/python2.7/site-packages/OpenGL', 'OpenGL bindings'),
+    ('runtime/density/conda_base/lib/python2.7/site-packages/py2app', 'app bundler'),
+    ('runtime/density/conda_base/lib/python2.7/site-packages/pip', 'installer'),
+    ('runtime/density/conda_base/lib/python2.7/site-packages/pygments', 'syntax highlighting'),
+    ('runtime/density/conda_base/lib/python2.7/site-packages/google', 'cloud client stubs'),
+    ('runtime/density/conda_base/lib/python2.7/site-packages/setuptools', 'installer'),
+    ('runtime/density/modules/solve_resolve/ext_ref_files/segments', 'alternative RESOLVE segment library'),
+    ('runtime/density/modules/solve_resolve/ext_ref_files/segments_em', 'electron-microscopy segment library'),
+    ('runtime/density/modules/solve_resolve/ext_ref_files/segments_rich_small', 'alternative RESOLVE segment library'),
+    ('runtime/density/modules/solve_resolve/ext_ref_files/patterns/patterns_txt', 'text dump of the pattern library'),
+]
+
+
+def prune_late(root):
+    removed = []
+    for pattern, why in DROP_LATE:
+        for path in _expand(root, pattern):
+            if not path.exists():
+                continue
+            size = sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) if path.is_dir() else path.stat().st_size
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+            removed.append(dict(path=str(path.relative_to(root)), bytes=size, why=why))
+    return removed
+
+
+def dedupe(root, min_size=200_000):
+    """Replace byte-identical payloads with relative symlinks.
+
+    The conda environment ships eight identical BLAS/LAPACK libraries and repeats
+    several data files; linking them keeps every embedded path working while
+    removing the copies.
+    """
+    root = Path(root)
+    groups = {}
+    for dirpath, dirs, files in os.walk(root):
+        for name in files:
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                continue
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            if size >= min_size:
+                groups.setdefault(size, []).append(path)
+    saved = 0
+    linked = 0
+    for size, paths in groups.items():
+        if len(paths) < 2:
+            continue
+        buckets = {}
+        for path in paths:
+            buckets.setdefault(_digest(path), []).append(path)
+        for digest, same in buckets.items():
+            if len(same) < 2:
+                continue
+            canonical = same[0]
+            for duplicate in same[1:]:
+                relative = os.path.relpath(canonical, duplicate.parent)
+                duplicate.unlink()
+                os.symlink(relative, duplicate)
+                saved += size
+                linked += 1
+    return saved, linked
+
 
 # Monomer dictionaries for the residues a SAD phasing run actually builds, plus
 # the common ions and cryo additives found in protein crystals.
@@ -148,12 +219,18 @@ def main():
     parser.add_argument('--json')
     parser.add_argument('--keep-all-monomers', action='store_true',
                         help='retain every ligand dictionary (adds ~670 MB)')
+    parser.add_argument('--keep-optional', action='store_true',
+                        help='retain GUI/plotting payloads and keep duplicate files')
     args = parser.parse_args()
     removed = prune(args.bundle)
     if not args.keep_all_monomers:
         removed += prune_monomers(args.bundle)
-    total = sum(item['bytes'] for item in removed)
-    print('removed %d items, %.1f MB' % (len(removed), total / 1e6))
+    if not args.keep_optional:
+        removed += prune_late(args.bundle)
+    saved, linked = (0, 0) if args.keep_optional else dedupe(args.bundle)
+    total = sum(item['bytes'] for item in removed) + saved
+    print('removed %d items, %.1f MB (dedupe: %d links, %.1f MB)' % (
+        len(removed), sum(item['bytes'] for item in removed) / 1e6, linked, saved / 1e6))
     for name in ('runtime/runtime_manifest.json', 'python/python_manifest.json'):
         kept, dropped = refresh_manifest(Path(args.bundle) / Path(name).parent, Path(name).name)
         if kept or dropped:

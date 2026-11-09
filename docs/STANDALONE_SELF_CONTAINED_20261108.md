@@ -272,6 +272,33 @@ REFMAC），结果 **Rfree 31.47%、Rwork 28.34%，与精简前完全一致**，
 用 `--keep-all-monomers` 重新打包即可恢复全部 35649 个字典（+660 MB）。
 `--keep-optional` 则保留全部 GUI/绘图组件。
 
+
+### 第二轮：CCTBX 环境内的死重量（2026-11-09）
+
+第一轮把包降到 1.9 GB 后，`runtime/density`（RESOLVE/P+ 用的 CCTBX 环境）仍占 1.5 GB。
+逐项核对后又能安全删掉：
+
+| 删除内容 | 大小 | 理由 |
+|---|---:|---|
+| `libopenblas/libblas/liblapack/libcblas` 的 7 个重复副本 | 446 MB | 8 个文件字节完全相同（sha256 一致），改成指向同一份的相对符号链接 |
+| `conda_base/lib/libLLVM-9.dylib` | 73 MB | 包里没有 llvmlite/numba，没有任何程序加载它 |
+| `solve_resolve/ext_ref_files/{segments,segments_em,segments_rich_small,patterns_txt}` | 105 MB | RESOLVE 只用 `segments_rich` 与 `patterns` |
+| py2.7 环境里的 sphinx/OpenGL/py2app/pip/pygments/google/setuptools | 35 MB | 文档、GUI 与安装器 |
+| 全包范围内字节相同的文件 → 相对符号链接 | 519 MB | 63 个重复文件，统一去重 |
+
+去重后清单哈希仍按内容计算（`fingerprint` 会跟随符号链接），所以
+`runtime_identity` 的校验照常通过，`runtime_manifest.json` 只需丢弃被删文件的行。
+
+三轮体积：
+
+| 阶段 | 目录 | 压缩包 |
+|---|---:|---:|
+| 原始 | 3.8 GB | 1.19 GB |
+| 第一轮（GUI/配体/参考/安装器） | 1.9 GB | 501 MB |
+| **第二轮（去重 + CCTBX 死重量）** | **1.2 GB** | **348 MB** |
+
+每一轮都用 7ENM 跑完整流程复核，三次结果完全相同：**Rwork 28.34%，Rfree 31.47%**。
+
 ## 限制（必须如实告知用户）
 
 - **平台**：本包是 macOS **x86_64**（Intel 二进制，在 Apple Silicon 上经 Rosetta 运行）。

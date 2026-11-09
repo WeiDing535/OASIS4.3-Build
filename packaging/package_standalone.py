@@ -233,10 +233,13 @@ def main(argv=None):
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
         removed=module.prune(output)
         if not args.keep_all_monomers:removed+=module.prune_monomers(output)
+        removed+=module.prune_late(output)
+        saved,linked=module.dedupe(output)
+        report['deduplicated_links']=linked
         for name in ('runtime/runtime_manifest.json','python/python_manifest.json'):
             kept,dropped=module.refresh_manifest(output/Path(name).parent,Path(name).name)
             report['validation'].setdefault('manifests',{})[name]={'rows_kept':kept,'rows_dropped':dropped}
-        report['pruned_bytes']=sum(item['bytes'] for item in removed)
+        report['pruned_bytes']=sum(item['bytes'] for item in removed)+saved
         report['pruned_items']=len(removed)
         print('Pruned %d items, %.0f MB'%(len(removed),report['pruned_bytes']/1e6),flush=True)
     print('Verify bundle',flush=True)
