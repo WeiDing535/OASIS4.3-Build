@@ -6,9 +6,9 @@
 
 | 项目 | 值 |
 | --- | --- |
-| 产物 | `dist/OASIS4.3-standalone-20261108.tar.gz` |
-| SHA-256 | `485799f2f22f98b57294ea328874476d5ce2906b54b7b98bf9ddc3d9c36f44c4` |
-| 大小 / 条目 | 347,770,231 字节 / 28,707 |
+| 产物 | `dist/OASIS4.3-standalone-20261108.tar.gz`（重打后） |
+| SHA-256 | `ecd8014c5cca6a232bac97e77c3b0e9eb74c19c72f8183661b7c5607812c44dc` |
+| 大小 / 条目 | 355,884,001 字节 / 28,811 |
 | 解压位置 | `work/exp/pkg10/extract/OASIS4.3-standalone-20261108/` |
 | 启动方式 | `./OASIS4.3.command run_sad_to_model.py …` |
 | 运行环境 | `env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp LANG=C LC_ALL=C` |
@@ -67,12 +67,26 @@
 
 十个案例全部由 `--copies auto` 自动定出，来源均为 `matthews_plausible_range`：6ZPP 1、6HF7 3、5D9D 1、7TJ1 3、7E1D 2、7TFQ 1、5HHK 2、3O2E 1、7ENM 1、7TBS 1。7TJ1 开发树按 FASTA 头标推断为 4，此处按 Matthews 得 3，R-free 31.08 与开发树的 31.00 相当，说明该案例对拷贝数不敏感。
 
-## 6. 本次修的两处打包问题
+## 6. 本次修的打包问题
 
 1. 打包版 GUI 的默认溶剂分数仍是 `auto`，用界面直接开跑 7ENM 只到 38.73%，与文档协议的 31.5% 不符。已把 `dm_solvent` 默认改为标定常数 0.5。
 2. 启动器没有导出 `PHASEBUILD_STANDALONE=1`，包内若缺某个二进制会静默回退到本机 `/Applications/ccp4-9`，掩盖打包不完整。已在启动器中固定该变量与 `PHASEBUILD_RUNTIME`。
+3. **裁剪脚本把 RESOLVE 的参考密度库 `ext_ref_files/segments/` 当"备选库"删掉了**（35 MB）。批量跑十个案例时用的是 `--no-auto-hand`，绕过了双手判别，所以十例全过；而界面默认 `auto_hand=True`，一旦要走"双手 P+ / Wang8 密度修饰与工作集测序判别"就会调 RESOLVE，它在读 `rho.list` / `Richardson_rho.dat` / `side_chains_rho.dat` 时直接失败：
 
-两项修改后重新打包，`app/` 与上一版逐文件比较只差 `oasis_workflow.py` 一行默认值，并清除了残留的 `__pycache__`。
+   ```
+   Sorry, cannot find density file?
+   Sorry, cannot find model density file?
+   RESOLVE_API_STATUS 1
+   ```
+
+   两个界面作业（`work/exp/gui_run3`、`gui_run4`）都卡在这一步。已把 `segments/` 从裁剪清单移除（`segments_em`、`segments_rich_small` 仍删），并在 `verify_bundle()` 里加了 `rho.list`、`Richardson_rho.dat`、`side_chains_rho.dat`、`gap_library.dat` 的存在性与大小检查，让这类"删了才炸"的裁剪在打包阶段就报错。
+4. 补上密度库之后暴露出第二个只在自动判别手上才走到的缺陷：手性判别的 pilot 构建把流水线级配方名 `building_recipe='pipeline'` 原样传给 Buccaneer 命令行构造器，而后者只认 `legacy` / `ccp4`，于是抛 `ValueError: Unknown construction recipe`（`work/exp/gui_run5`）。已在 `hybrid_recycle` 里加 `concrete_recipe()`，把 `pipeline` 映射到 `ccp4` 构建，并补了回归测试。
+
+5. 结果面板把 `dm_engine` 直接印成方法的**默认**引擎名（`自带 RESOLVE + CCTBX`），而本次实际跑的是 Parrot；溶剂分数也因为 Parrot 路径的 `map_phases.json` 没有 `solvent_fraction_used` 而显示为空。现在改为读实际执行记录，界面显示 `CCP4 Parrot + 2 轮 trace 反馈`、溶剂 0.5。
+
+前三项修改后重新打包，`app/` 与上一版逐文件比较只差 `oasis_workflow.py` 一行默认值，并清除了残留的 `__pycache__`；第三项使包体增加约 8 MB 压缩后体积（35 MB 原始）。
+
+修完之后用打包版界面的默认参数（自动判手、`dm_solvent=0.5`、Parrot 40 轮、2 轮反馈）重跑 7ENM（`work/exp/gui_run6`），6/6 阶段完成，得到 R-work 28.34 / **R-free 31.47**，与批量结果和开发树逐位一致；手性判别选中 `input_hand`，判别依据是唯一测序残基数（不用 R-free、不用参考坐标）。这说明十个案例的成绩不是靠绕过自动判手拿到的：走完整默认路径同样得到 31.47。
 
 ## 7. 边界与未决
 

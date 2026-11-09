@@ -229,6 +229,13 @@ def phase_statistics(path):
                 resolution=m.resolution_high(),spacegroup=m.spacegroup.xhm())
 
 
+def _engine_label(method,cfg,dm_meta):
+ """Report the density-modification engine that actually ran, not the method default."""
+ engine=(dm_meta.get('parameters') or {}).get('engine') or cfg.get('dm_engine')
+ if engine=='parrot':return 'CCP4 Parrot + %d 轮 trace 反馈'%cfg['feedback_cycles'] if cfg.get('feedback_cycles') else 'CCP4 Parrot'
+ return METHODS[method][1]
+
+
 def collect_results(directory):
     root=Path(directory).resolve()
     if not root.is_dir():raise ValueError('结果目录不存在')
@@ -361,8 +368,8 @@ def collect_results(directory):
     method=cfg.get('method','likelihood')
     return dict(root=str(root),status=state.get('status','waiting'),method=method,
                 hand_selection=read_json(pipe/'02_sad/hand_selection.json') or read_json(pipe/'02_hand/hand_selection.json'),
-                method_name='P+ Wang8 + 精修权重搜索' if method=='pplus_bundled' and cfg.get('trust_wang_radius')==8 and cfg.get('trust_work_weight') and not cfg.get('trust_stability') else METHODS[method][0],dm_engine=METHODS[method][1],config=cfg,
-                stages=stages,sad=raw,dm=dm,dm_history=history,solvent_fraction=dm_meta.get('solvent_fraction_used'),
+                method_name='P+ Wang8 + 精修权重搜索' if method=='pplus_bundled' and cfg.get('trust_wang_radius')==8 and cfg.get('trust_work_weight') and not cfg.get('trust_stability') else METHODS[method][0],dm_engine=_engine_label(method,cfg,dm_meta),config=cfg,
+                stages=stages,sad=raw,dm=dm,dm_history=history,solvent_fraction=dm_meta.get('solvent_fraction_used',(dm_meta.get('parameters') or {}).get('solvent_fraction')),
                 solvent_source=dm_meta.get('solvent_source'),partition=partition,metrics=metrics,
                 sample=raw_meta.get('sequence_asu',{}),anomalous_scattering=state.get('anomalous_scattering'),
                 primary_metric=metrics[-1] if metrics else None,primary_complete=complete,
