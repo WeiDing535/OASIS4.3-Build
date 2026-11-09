@@ -74,6 +74,10 @@ def validate(config, inspect=True):
         # 反馈轮数是本方法的核心步骤；2 轮是十套标定主要终点，未显式给出时启用。
         if cfg.get('dm_engine')=='parrot' and int(cfg.get('feedback_cycles',0))==int(DEFAULTS['feedback_cycles']):
             cfg['feedback_cycles']=2
+        # 标定配方固定使用 0.50 溶剂含量：Parrot 的掩膜对 1% 的差异敏感，
+        # 7TFQ 在序列估计值 0.493 下从 36.9% 恶化到 49.1%。显式值优先。
+        if cfg.get('dm_engine')=='parrot' and cfg.get('dm_solvent') is None:
+            cfg['dm_solvent']=0.5;cfg['dm_solvent_source']='calibrated_protocol_constant'
         cfg['_auto_dm_cycles']=auto_cycles
         cfg.update(phenix_bin='',phase_cycles=100)
         if cfg.get('observation_prior'):raise ValueError('自带模式不接受外部相位文件')

@@ -59,10 +59,18 @@ def main(argv=None):
     for name,default in [('phase-cycles',5),('dm-cycles',5),('rounds',5),('cycles',10),('free-value',0),('seed',20261023)]:
         p.add_argument('--'+name,type=int,default=default)
     p.add_argument('--feedback-endpoints',default='',help='逗号分隔的 feedback 轮数（例如 2,3）：每个值各跑一遍固定协议，再按工作集 R 选择；不读 R-free')
+    p.add_argument('--dm-solvents',default='',help='与 --feedback-endpoints 组合的溶剂含量，逗号分隔，auto 表示按序列估算（例如 auto,0.5）')
     p.add_argument('--resume',action='store_true')
     p.add_argument('--check',action='store_true',help='Read-only preflight and plan; create no output')
     args=vars(p.parse_args(argv));resume=args.pop('resume');check=args.pop('check')
     endpoints=[int(x) for x in str(args.pop('feedback_endpoints') or '').replace(' ','').split(',') if x]
+    solvents=[]
+    for token in str(args.pop('dm_solvents') or '').replace(' ','').split(','):
+        if not token:continue
+        if token=='auto':solvents.append(None)
+        else:
+            try:solvents.append(float(token))
+            except ValueError:p.error('--dm-solvents 必须是 auto 或 0 到 1 之间的数值')
     if args['copies']!='auto':
         try:args['copies']=int(args['copies'])
         except ValueError:p.error('--copies 必须是正整数或 auto')
@@ -90,18 +98,23 @@ def main(argv=None):
     # Fixed-endpoint portfolio: every endpoint is a predeclared protocol, and the
     # retained one is chosen by the final work-set R only.
     root=Path(cfg['output']);runs=[]
-    for feedback in endpoints:
+    grid=[(fb,solvent) for fb in endpoints for solvent in (solvents or [cfg.get('dm_solvent')])]
+    for feedback,solvent in grid:
         sub=dict(cfg);sub['feedback_cycles']=feedback
-        sub['output']=str(root/('endpoint_fb%d'%feedback))
-        print(json.dumps({'event':'endpoint','feedback':feedback,'output':sub['output']}),flush=True)
-        runs.append((feedback,run_pipeline(sub,resume=False)))
-    best_feedback,best=min(runs,key=lambda item: item[1]['primary_metric']['r_work'])
-    selection={'rule':'lowest final work-set R across the predeclared feedback endpoints; R-free never read',
-        'endpoints':[{'feedback':fb,'status':rep['status'],'primary_metric':rep.get('primary_metric'),
-                      'output':str(root/('endpoint_fb%d'%fb))} for fb,rep in runs],
-        'selected_feedback':best_feedback,'selected_metric':best['primary_metric']}
+        if solvent is not None:sub['dm_solvent']=solvent
+        tag='endpoint_fb%d%s'%(feedback,'' if solvent is None else '_s%s'%('%.2f'%solvent))
+        sub['output']=str(root/tag)
+        print(json.dumps({'event':'endpoint','feedback':feedback,'solvent':solvent,
+                          'output':sub['output']}),flush=True)
+        runs.append((feedback,solvent,tag,run_pipeline(sub,resume=False)))
+    best_feedback,best_solvent,best_tag,best=min(runs,key=lambda item: item[3]['primary_metric']['r_work'])
+    selection={'rule':'lowest final work-set R across the predeclared endpoint grid; R-free never read',
+        'endpoints':[{'feedback':fb,'solvent':sol,'status':rep['status'],
+                      'primary_metric':rep.get('primary_metric'),'output':str(root/tag)}
+                     for fb,sol,tag,rep in runs],
+        'selected_feedback':best_feedback,'selected_solvent':best_solvent,'selected_metric':best['primary_metric']}
     (root/'endpoint_selection.json').write_text(json.dumps(selection,indent=2)+'\n')
-    print(json.dumps({'status':best['status'],'selected_feedback':best_feedback,
+    print(json.dumps({'status':best['status'],'selected_feedback':best_feedback,'selected_solvent':best_solvent,
                       'primary_metric':best['primary_metric'],'primary_model':best['primary_model'],
                       'dm_phases':best['dm_phases'],'selection':str(root/'endpoint_selection.json')},indent=2))
     return 0
