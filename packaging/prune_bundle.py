@@ -94,7 +94,9 @@ DROP_LATE = [
     ('runtime/density/conda_base/lib/python2.7/site-packages/pygments', 'syntax highlighting'),
     ('runtime/density/conda_base/lib/python2.7/site-packages/google', 'cloud client stubs'),
     ('runtime/density/conda_base/lib/python2.7/site-packages/setuptools', 'installer'),
-    ('runtime/density/modules/solve_resolve/ext_ref_files/segments', 'alternative RESOLVE segment library'),
+    # segments/ is NOT droppable: RESOLVE reads rho.list, Richardson_rho.dat and
+    # side_chains_rho.dat from it whenever the pipeline has to discriminate the
+    # hand, so dropping it made every auto-hand run die at the P+ stage.
     ('runtime/density/modules/solve_resolve/ext_ref_files/segments_em', 'electron-microscopy segment library'),
     ('runtime/density/modules/solve_resolve/ext_ref_files/segments_rich_small', 'alternative RESOLVE segment library'),
     ('runtime/density/modules/solve_resolve/ext_ref_files/patterns/patterns_txt', 'text dump of the pattern library'),

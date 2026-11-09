@@ -1,15 +1,76 @@
 """Explicit PhaseBuild-seeded external Buccaneer/REFMAC recycling.
 
 This is a composite method, never reported as an autonomous/native tracer.
-No target-reference argument exists. The fixed endpoint is the final round.
+No target-reference argument exists. The default endpoint is the final round;
+bundled P+ can enable a predeclared work-R deterioration guard.
 """
-import json,os,shutil,subprocess,time,signal,threading
+import json,os,shutil,subprocess,time,signal,threading,math
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import gemmi
 from .data import fingerprint,audit
 from .refinement import refmac_refine
 from .runtime import resolve_runtime, runtime_environment, runtime_info
+
+def _construction_phase_columns(info):
+ """Keep probability phases separate from signed difference-map phases.
+
+ REFMAC PHCOMB is the combined centroid phase paired with FOM. Without
+ an experimental prior, PHIC supplies the model phase paired with FOM.
+ FWT/PHWT describes the signed 2mFo-DFc map and can rotate by 180 degrees.
+ Generic workflows with neither centroid nor model phases retain their
+ explicit legacy PHWT/FOM contract.
+ """
+ required={'F':'F','SIGF':'Q','FWT':'F','PHWT':'P','FOM':'W'}
+ for label,kind in required.items():
+  found=[c for c in info['columns'] if c['label']==label]
+  if len(found)!=1 or found[0]['type']!=kind:
+   raise ValueError('Missing/ambiguous required map column '+label)
+ probability={}
+ for label in ['PHCOMB','PHIC']:
+  found=[c for c in info['columns'] if c['label']==label]
+  if found and (len(found)!=1 or found[0]['type']!='P'):
+   raise ValueError('Ambiguous or incorrectly typed probability phase column '+label)
+  probability[label]=bool(found)
+ chosen='PHCOMB' if probability['PHCOMB'] else 'PHIC' if probability['PHIC'] else 'PHWT'
+ contracts={'PHCOMB':'Combined centroid phase paired with FOM',
+            'PHIC':'REFMAC model phase paired with FOM; no PHCOMB supplied',
+            'PHWT':'Explicit legacy PHWT/FOM contract; no PHCOMB or PHIC supplied'}
+ return dict(probability_phase=chosen,
+             probability_fom='FOM',map_amplitude='FWT',map_phase='PHWT',
+             probability_contract=contracts[chosen])
+
+def concrete_recipe(recipe):
+ """Map pipeline-level recipe names onto the two Buccaneer invocations we have.
+
+ 'pipeline' selects the bundled buccaneer_pipeline stage, whose first build is
+ the ccp4-flavoured construction; only the hand pilot used to pass the raw
+ pipeline name straight through and died with 'Unknown construction recipe'.
+ """
+ name='ccp4' if recipe=='pipeline' else recipe
+ if name not in ('legacy','ccp4'):raise ValueError('Unknown construction recipe')
+ return name
+
+def construction_command(binary,library,current,sequence,folder,number,previous,phase_columns,build_semet=False,recipe='legacy',free_value=0):
+ recipe=concrete_recipe(recipe)
+ command=[str(binary),'-mtzin',str(current),'-mtzin-ref',str(library.with_suffix('.mtz')),'-pdbin-ref',str(library.with_suffix('.pdb')),'-colin-ref-fo','/*/*/[FP.F_sigF.F,FP.F_sigF.sigF]','-colin-ref-hl','/*/*/[FC.ABCD.A,FC.ABCD.B,FC.ABCD.C,FC.ABCD.D]','-colin-fo','/*/*/[F,SIGF]']
+ if recipe=='ccp4' and number>1:
+  info=audit(current);quartet=['HLACOMB','HLBCOMB','HLCCOMB','HLDCOMB']
+  present=[c for c in info['columns'] if c['label'] in quartet]
+  if present and (len(present)!=4 or any(sum(c['label']==name and c['type']=='A' for c in present)!=1 for name in quartet)):raise ValueError('Invalid combined HL quartet')
+  if present:command+=['-colin-hl','/*/*/['+','.join(quartet)+']']
+  else:command+=['-colin-phifom','/*/*/[%s,FOM]'%phase_columns['probability_phase']]
+ else:command+=['-colin-phifom','/*/*/[%s,FOM]'%phase_columns['probability_phase']]
+ if recipe=='legacy' or number>1:command+=['-colin-fc','/*/*/[FWT,PHWT]']
+ if previous is not None:command+=['-pdbin',str(previous)]
+ if recipe=='legacy':command+=['-model-filter']
+ elif recipe!='ccp4':raise ValueError('Unknown construction recipe')
+ if recipe=='ccp4' and free_value==0:command+=['-colin-free','/*/*/[FreeR_flag]']
+ command+=['-seqin',str(Path(sequence).resolve()),'-pdbout',str(folder/'model.pdb'),'-xmlout',str(folder/'buccaneer.xml')]
+ command+=['-'+s for s in ['find','grow','join','link','sequence','correct','filter','ncsbuild','prune','rebuild']]+['-cycles','3' if number==1 else '2','-jobs','1','-no-correlation-mode' if number==1 else '-correlation-mode']
+ if recipe=='ccp4':command+=['-anisotropy-correction','-fast','-sequence-reliability','0.95','-new-residue-name','UNK','-resolution','2.0','-model-filter-sigma','3.0','-mr-model-filter-sigma','3.0']
+ if build_semet:command+=['-build-semet']
+ return command
 
 def reuse_first_build(source, destination, expected_command, report):
  """Reuse only a proven completed first construction, never a refined model."""
@@ -42,27 +103,36 @@ def reuse_first_build(source, destination, expected_command, report):
          'files':files,'construction_executed_again':False,
          'execution':'Completed first3cycles copied byte-for-byte; resume at failed first refinement'}
 
-def recycle(mtz,native,model,sequence,output,rounds=5,refine_cycles=10,ccp4=None,build_semet=False,progress=print,existing_first_build=None):
+def select_round_by_work_fit(stages, max_final_work_rise=.01):
+ """Keep the fixed final round unless its work R has clearly deteriorated."""
+ values=[float(s['statistics']['r_work']) for s in stages]
+ if not values or not all(math.isfinite(v) for v in values):raise ValueError('Invalid work R history')
+ best=min(range(len(values)),key=values.__getitem__)
+ return best if values[-1]>values[best]+max_final_work_rise else len(values)-1
+
+def recycle(mtz,native,model,sequence,output,rounds=5,refine_cycles=10,ccp4=None,build_semet=False,progress=print,existing_first_build=None,building_recipe='legacy',free_value=0,work_round_guard=False):
+ building_recipe=concrete_recipe(building_recipe)
  if not isinstance(rounds,int) or not 1<=rounds<=20:raise ValueError('Rounds must be 1..20')
  if not isinstance(refine_cycles,int) or not 1<=refine_cycles<=200:raise ValueError('REFMAC cycles must be 1..200')
- info=audit(mtz);required={'F':'F','SIGF':'Q','FWT':'F','PHWT':'P','FOM':'W'}
- for label,kind in required.items():
-  found=[c for c in info['columns'] if c['label']==label]
-  if len(found)!=1 or found[0]['type']!=kind:raise ValueError('Missing/ambiguous required map column '+label)
+ info=audit(mtz);_construction_phase_columns(info)
  root=resolve_runtime(ccp4,required=('cbuccaneer','refmac5'));library=root/'lib/data/reference_structures/reference-1tqw';binary=root/'bin/cbuccaneer'
  for suffix in ['.mtz','.pdb']:
   if not library.with_suffix(suffix).is_file():raise ValueError('Runtime training resource unavailable: '+str(library.with_suffix(suffix)))
  out=Path(output).resolve();out.mkdir(parents=True,exist_ok=False);previous=Path(model).resolve() if model is not None else None;current=Path(mtz).resolve();started=time.time()
- report=dict(engine='hybrid-phasebuild-seeded-external-buccaneer-refmac',status='running',pid=os.getpid(),parameters=dict(rounds=rounds,refine_cycles=refine_cycles,build_semet=build_semet,model_filter=True),inputs={k:fingerprint(v) for k,v in [('initial_map',mtz),('native',native),('phasebuild_seed_model',model),('sequence',sequence)] if v is not None},binary=fingerprint(binary),training_library=[fingerprint(library.with_suffix(s)) for s in ['.mtz','.pdb']],stages=[],scope='PhaseBuild supplies starting coordinates; external Buccaneer performs all subsequent construction. This is a composite method, not native PhaseBuild. Fixed final round, no Rfree-based model selection.')
+ report=dict(engine='hybrid-phasebuild-seeded-external-buccaneer-refmac',status='running',pid=os.getpid(),parameters=dict(rounds=rounds,refine_cycles=refine_cycles,build_semet=build_semet,model_filter=building_recipe=='legacy',**({'building_recipe':building_recipe} if building_recipe!='legacy' else {})),inputs={k:fingerprint(v) for k,v in [('initial_map',mtz),('native',native),('phasebuild_seed_model',model),('sequence',sequence)] if v is not None},binary=fingerprint(binary),training_library=[fingerprint(library.with_suffix(s)) for s in ['.mtz','.pdb']],stages=[],scope='PhaseBuild supplies starting coordinates; external Buccaneer performs all subsequent construction. This is a composite method, not native PhaseBuild. Fixed final round, no Rfree-based model selection.')
  if model is None:
   report.update(engine='phasebuild-integrated-external-buccaneer-refmac',
    starting_model_source='None; first Buccaneer construction starts from experimental phases',
    scope='OASIS experimental phases initialize external Buccaneer construction without a model seed. PhaseBuild orchestrates external Buccaneer/REFMAC. Fixed final round; no Rfree-based model selection.')
+ if work_round_guard:
+  report['scope']='OASIS/PhaseBuild phases initialize external Buccaneer/REFMAC. Final round is retained unless its work R exceeds the best round by more than 0.01 absolute; no Rfree-based model selection.'
+ report['parameters']['work_round_guard']=work_round_guard
  report['runtime']=runtime_info(root)
  sources=[fingerprint(f) for f in sorted((Path(__file__).parent).glob('*.py'))]
  def save():
   temp=out/'hybrid_report.tmp';temp.write_text(json.dumps(report,indent=2)+'\n');temp.replace(out/'hybrid_report.json')
  save();env=runtime_environment(root,scratch=out/'scratch');env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',VECLIB_MAXIMUM_THREADS='1')
+ report['construction_phase_handoffs']=[]
  proc=None;old_term=None
  if threading.current_thread() is threading.main_thread():
   def stop(signum,frame):raise InterruptedError('Hybrid construction cancelled')
@@ -70,12 +140,10 @@ def recycle(mtz,native,model,sequence,output,rounds=5,refine_cycles=10,ccp4=None
  try:
   for number in range(1,rounds+1):
    folder=out/('round_%02d_build'%number)
+   phase_columns=_construction_phase_columns(info if number==1 else audit(current))
+   report['construction_phase_handoffs'].append(dict(round=number,input=fingerprint(current),**phase_columns))
    # CIF input retains labels for fragments beyond the PDB single-chain alphabet.
-   command=[str(binary),'-mtzin',str(current),'-mtzin-ref',str(library.with_suffix('.mtz')),'-pdbin-ref',str(library.with_suffix('.pdb')),'-colin-ref-fo','/*/*/[FP.F_sigF.F,FP.F_sigF.sigF]','-colin-ref-hl','/*/*/[FC.ABCD.A,FC.ABCD.B,FC.ABCD.C,FC.ABCD.D]','-colin-fo','/*/*/[F,SIGF]','-colin-phifom','/*/*/[PHWT,FOM]','-colin-fc','/*/*/[FWT,PHWT]','-pdbin',str(previous),'-model-filter','-seqin',str(Path(sequence).resolve()),'-pdbout',str(folder/'model.pdb'),'-xmlout',str(folder/'buccaneer.xml')]
-   if previous is None:
-    index=command.index('-pdbin');del command[index:index+2]
-   command+=['-'+s for s in ['find','grow','join','link','sequence','correct','filter','ncsbuild','prune','rebuild']]+['-cycles','3' if number==1 else '2','-jobs','1','-no-correlation-mode' if number==1 else '-correlation-mode']
-   if build_semet:command+=['-build-semet']
+   command=construction_command(binary,library,current,sequence,folder,number,previous,phase_columns,build_semet,building_recipe,free_value)
    if number==1 and existing_first_build is not None:
     report['resumed_first_construction']=reuse_first_build(existing_first_build,folder,command,report)
     report.update(current='reused first construction',current_round=number);save()
@@ -89,11 +157,18 @@ def recycle(mtz,native,model,sequence,output,rounds=5,refine_cycles=10,ccp4=None
      except subprocess.TimeoutExpired:
       os.killpg(proc.pid,signal.SIGTERM);proc.wait(timeout=15);raise
     if code:raise RuntimeError('External Buccaneer failed in round '+str(number))
-    structure=gemmi.read_structure(str(folder/'model.pdb'));structure.make_mmcif_document().write_file(str(folder/'model.cif'));report.pop('child_pid',None)
+    structure=gemmi.read_structure(str(folder/'model.pdb'))
+    if len(structure)!=1 or not any(len(residue) for chain in structure[0] for residue in chain):
+     raise RuntimeError('External Buccaneer produced an empty or invalid model in round %d; inspect %s'%(number,folder/'buccaneer.log'))
+    structure.make_mmcif_document().write_file(str(folder/'model.cif'));report.pop('child_pid',None)
    report['current']='refmac';save();progress('Hybrid REFMAC round %d'%number)
    refinement=out/('round_%02d_refine'%number);ref=refmac_refine(native,folder/'model.cif',refinement,refine_cycles,ccp4,timeout=3600)
    report['stages'].append(dict(round=number,construction='external-Buccaneer',buccaneer_cycles=3 if number==1 else 2,refmac_cycles=refine_cycles,statistics=ref['statistics']['final'],free_flags_preserved=ref['free_flags_preserved']));save();current=refinement/'refined.mtz';previous=refinement/'model.cif'
-  shutil.copyfile(previous,out/'primary_model.cif');report.update(status='completed',primary_model=fingerprint(out/'primary_model.cif'),primary_metric=report['stages'][-1]['statistics'])
+  chosen=select_round_by_work_fit(report['stages']) if work_round_guard else rounds-1
+  selected_model=out/('round_%02d_refine'%(chosen+1))/'model.cif'
+  shutil.copyfile(selected_model,out/'primary_model.cif')
+  report.update(status='completed',primary_model=fingerprint(out/'primary_model.cif'),primary_metric=report['stages'][chosen]['statistics'],
+                selected_round=chosen+1,round_selection='work R deterioration guard: retain fixed last round unless it exceeds the lowest work R by more than 0.01 absolute; no Rfree used' if work_round_guard else 'fixed last round; no Rfree used')
  except BaseException as error:report.update(status='failed',error=str(error));raise
  finally:
   # GUI cancellation targets the CLI process group. Buccaneer has its own
