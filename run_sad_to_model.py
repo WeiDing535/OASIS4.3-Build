@@ -58,9 +58,11 @@ def main(argv=None):
     p.add_argument('--copies',default='auto',help='ASU 中序列文件的份数：正整数，或 auto（默认；先读 RCSB FASTA 头的 Chains 注释，否则取 Matthews 溶剂含量 20–65%% 的最小拷贝数）')
     for name,default in [('phase-cycles',5),('dm-cycles',5),('rounds',5),('cycles',10),('free-value',0),('seed',20261023)]:
         p.add_argument('--'+name,type=int,default=default)
+    p.add_argument('--feedback-endpoints',default='',help='逗号分隔的 feedback 轮数（例如 2,3）：每个值各跑一遍固定协议，再按工作集 R 选择；不读 R-free')
     p.add_argument('--resume',action='store_true')
     p.add_argument('--check',action='store_true',help='Read-only preflight and plan; create no output')
     args=vars(p.parse_args(argv));resume=args.pop('resume');check=args.pop('check')
+    endpoints=[int(x) for x in str(args.pop('feedback_endpoints') or '').replace(' ','').split(',') if x]
     if args['copies']!='auto':
         try:args['copies']=int(args['copies'])
         except ValueError:p.error('--copies 必须是正整数或 auto')
@@ -81,9 +83,28 @@ def main(argv=None):
     if check:
         if Path(cfg['output']).exists() and not resume:p.error('Output exists; choose a new directory')
         print(json.dumps(dict(config=cfg,stages=stage_plan(cfg),output_created=False),indent=2));return 0
-    report=run_pipeline(cfg,resume=resume)
-    print(json.dumps({'status':report['status'],'primary_model':report['primary_model'],
-                      'dm_phases':report['dm_phases']},indent=2));return 0
+    if not endpoints:
+        report=run_pipeline(cfg,resume=resume)
+        print(json.dumps({'status':report['status'],'primary_model':report['primary_model'],
+                          'dm_phases':report['dm_phases']},indent=2));return 0
+    # Fixed-endpoint portfolio: every endpoint is a predeclared protocol, and the
+    # retained one is chosen by the final work-set R only.
+    root=Path(cfg['output']);runs=[]
+    for feedback in endpoints:
+        sub=dict(cfg);sub['feedback_cycles']=feedback
+        sub['output']=str(root/('endpoint_fb%d'%feedback))
+        print(json.dumps({'event':'endpoint','feedback':feedback,'output':sub['output']}),flush=True)
+        runs.append((feedback,run_pipeline(sub,resume=False)))
+    best_feedback,best=min(runs,key=lambda item: item[1]['primary_metric']['r_work'])
+    selection={'rule':'lowest final work-set R across the predeclared feedback endpoints; R-free never read',
+        'endpoints':[{'feedback':fb,'status':rep['status'],'primary_metric':rep.get('primary_metric'),
+                      'output':str(root/('endpoint_fb%d'%fb))} for fb,rep in runs],
+        'selected_feedback':best_feedback,'selected_metric':best['primary_metric']}
+    (root/'endpoint_selection.json').write_text(json.dumps(selection,indent=2)+'\n')
+    print(json.dumps({'status':best['status'],'selected_feedback':best_feedback,
+                      'primary_metric':best['primary_metric'],'primary_model':best['primary_model'],
+                      'dm_phases':best['dm_phases'],'selection':str(root/'endpoint_selection.json')},indent=2))
+    return 0
 
 
 if __name__=='__main__':raise SystemExit(main())

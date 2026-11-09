@@ -67,12 +67,14 @@ def validate(config, inspect=True):
         # 标定终点（外部 Parrot 引擎）：20 轮密度修饰 + 3 轮 trace/Fcalc 反馈。
         # 旧的 RESOLVE/CCTBX 分支保持 40 轮、不启用反馈。显式给出的非默认值应当被尊重
         # ——静默忽略 --dm-cycles/--feedback-cycles 是缺陷。
-        parrot_dm=cfg.get('dm_engine')=='parrot'
+        # 40 轮是本项目十套标定所用值；20 轮只对 7E1D 更好（7TFQ 需要 40 轮），
+        # 因此默认保持 40，由调用方按需显式指定 --dm-cycles。
         auto_cycles=int(cfg.get('dm_cycles',0))==int(DEFAULTS['dm_cycles'])
-        auto_feedback=int(cfg.get('feedback_cycles',0))==int(DEFAULTS['feedback_cycles'])
-        if auto_cycles:cfg['dm_cycles']=20 if parrot_dm else 40
-        if parrot_dm and auto_feedback:cfg['feedback_cycles']=3
-        cfg['_auto_dm_cycles']=auto_cycles;cfg['_auto_feedback_cycles']=auto_feedback
+        if auto_cycles:cfg['dm_cycles']=40
+        # 反馈轮数是本方法的核心步骤；2 轮是十套标定主要终点，未显式给出时启用。
+        if cfg.get('dm_engine')=='parrot' and int(cfg.get('feedback_cycles',0))==int(DEFAULTS['feedback_cycles']):
+            cfg['feedback_cycles']=2
+        cfg['_auto_dm_cycles']=auto_cycles
         cfg.update(phenix_bin='',phase_cycles=100)
         if cfg.get('observation_prior'):raise ValueError('自带模式不接受外部相位文件')
         cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None))
@@ -121,8 +123,8 @@ def validate(config, inspect=True):
             # Keep older runtimes usable: fall back to the internal engine and say so.
             cfg['dm_engine']='resolve'
             cfg['dm_engine_fallback']=str(error)
-            if cfg.pop('_auto_feedback_cycles',False):cfg['feedback_cycles']=0
             if cfg.pop('_auto_dm_cycles',False):cfg['dm_cycles']=40
+            cfg['feedback_cycles']=0
     if optimized:
         if isinstance(cfg['trust_kl'],bool) or not isinstance(cfg['trust_kl'],(int,float)) or not math.isfinite(cfg['trust_kl']) or not 0<cfg['trust_kl']<=.05:
             raise ValueError('P+ KL 上限须大于 0 且不超过 0.05')
@@ -178,7 +180,7 @@ def validate(config, inspect=True):
     if cfg['per_round_cleanup']:
         from .oasis_options import read_sequences
         if len(read_sequences(cfg['sequence']))!=1:raise ValueError('Per-round cleanup requires one sequence record')
-    cfg.pop('_auto_dm_cycles',None);cfg.pop('_auto_feedback_cycles',None)
+    cfg.pop('_auto_dm_cycles',None)
     cfg['output']=str(Path(cfg['output']).expanduser().resolve())
     if cfg['build_model'] or cfg['auto_hand']:
         cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None,required=('cbuccaneer','refmac5')))
