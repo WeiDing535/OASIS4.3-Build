@@ -201,6 +201,45 @@ def test_task_list_shows_every_job_and_switches_the_log(tmp_path):
 
 
 @pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_imported_result_is_shown_read_only(tmp_path):
+    """An imported run must show its results instead of looking like a live job."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    output=tmp_path/'portfolio';output.mkdir()
+    rows=[dict(id='imported',created=100,updated=110,status='imported',output=str(output),
+               completed=0,total=0,error=None,method='pplus_bundled',label='',
+               method_name='P+ 自带引擎',r_work=0.3156,r_free=0.3829)]
+    controller.history=lambda:rows
+    controller.running=lambda:[]
+    controller.state=lambda identifier:dict(rows[0],log='')
+    pairs=[(0.3903,0.4266),(0.3156,0.3829)]
+    metrics=[dict(stage='第 %d 轮'%index,round=index,r_work=work,r_free=free)
+             for index,(work,free) in enumerate(pairs,1)]
+    controller.results=lambda identifier:dict(metrics=metrics,final_model=None,preview=[],
+                                              method_name='P+ 自带引擎',dm_engine='parrot',
+                                              primary_metric=dict(stage='第 2 轮',r_work=0.3156,r_free=0.3829))
+    app=desktop.App(controller)
+    try:
+        app._refresh_history(force=True)
+        assert app.history.set('imported','status')=='已导入（仅查看）'
+        assert app.history.set('imported','rwork')=='31.56'
+        app.history.selection_set('imported')
+        app.on_select_job()
+        summary=app.summary.cget('text')
+        assert '不会重新运行' in summary and '最终 R-work 31.56' in summary
+        assert '运行中' not in summary
+        assert str(app.stop_button['state'])=='disabled'
+        assert len(app.tree.get_children())==2
+        assert '没有运行日志' in app.log.get('1.0','end')
+        assert len(app.chart.rows)==2
+    finally:
+        app.root.destroy()
+
+
 def test_two_runs_start_from_the_window_without_stopping_the_first(tmp_path):
     """Starting a second run must work while the first is still refining."""
     import tkinter

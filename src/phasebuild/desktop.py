@@ -22,7 +22,8 @@ from . import charts
 from .jobs import Jobs
 
 STATUS_NAMES={'queued':'等待运行','running':'正在运行','stopping':'正在停止','cancelled':'已停止',
-              'failed':'失败','success':'已完成','imported':'已有结果','interrupted':'界面曾中断'}
+              'failed':'失败','success':'已完成','imported':'已导入（仅查看）','interrupted':'界面曾中断'}
+IMPORTED_NOTE='导入的既有结果：只读目录，不会重新运行；可查看曲线/表格、导出结果、保存模型。'
 METHODS=[('pplus_bundled','P+ 自带引擎（推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
          ('pplus_internal','内部 P+（实验性）'),('likelihood','连续 SAD'),('pplus','旧版直接法 P+')]
 METHOD_NAMES=dict(METHODS)
@@ -763,14 +764,16 @@ class App:
         except KeyError:
             return
         self.job=job
-        self._show_log(job.get('log') or '')
         status=job.get('status')
+        self._show_log(job.get('log') or ('（导入的既有结果没有运行日志）' if status=='imported' else ''))
         self.stop_button.configure(state='normal' if status in ('queued','running','stopping') else 'disabled')
         self.progress.configure(value=0)
         self._show_plan_for(job)
-        if status=='success':
-            self.finished.add(identifier)
+        if status in ('success','imported'):
+            if status=='success':self.finished.add(identifier)
             self._show_results()
+            if status=='imported':
+                self.summary.configure(text=IMPORTED_NOTE+'\n'+self.summary.cget('text'))
         elif status in ('failed','cancelled','interrupted'):
             self._clear_results()
             self.summary.configure(text=STATUS_NAMES.get(status,status)+'：'+str(job.get('error') or '查看日志'))
