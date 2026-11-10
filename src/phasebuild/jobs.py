@@ -94,7 +94,7 @@ class Jobs:
         if job.get('owned'):
             save_json(Path(job['output'])/'gui_job.json',job)
 
-    def start(self, config):
+    def start(self, config, name=''):
         with self.lock:
             if len(self.live())>=self.max_parallel:
                 raise ValueError('同时运行的任务已达 %d 个，请等待其中一个完成或停止它。'%self.max_parallel)
@@ -107,7 +107,8 @@ class Jobs:
             job = dict(id=secrets.token_hex(8),owned=True,created=now,updated=now,
                        status='queued',output=cfg['output'],config=cfg,steps=steps,
                        completed=0,current='',error=None,
-                       label=Path(str(cfg.get('sad') or '')).name,method=cfg.get('method',''))
+                       label=Path(str(cfg.get('sad') or '')).name,method=cfg.get('method',''),
+                       name=str(name or '').strip()[:80])
             if self.workflow:job['plan']=self.workflow.describe_plan(cfg)
             self.items[job['id']] = job
             self.running.add(job['id'])
@@ -227,8 +228,30 @@ class Jobs:
                                  total=len(job.get('steps') or []),
                                  error=job.get('error'),
                                  method=job.get('method') or config.get('method',''),
+                                 name=job.get('name') or '',
                                  label=job.get('label') or Path(str(config.get('sad') or '')).name))
             return rows
+
+    def delete(self, identifier):
+        """Forget one record; the result directory on disk is never touched."""
+        with self.lock:
+            job = self.items.get(identifier)
+            if job is None:
+                raise KeyError(identifier)
+            if job.get('status') in ('queued','running','stopping'):
+                raise ValueError('任务还在运行，请先停止它再删除记录。')
+            worker = self.workers.get(identifier)
+            if worker is not None and worker.is_alive():
+                raise ValueError('任务还在收尾，请稍后再删除记录。')
+            self.items.pop(identifier,None)
+            self.workers.pop(identifier,None)
+            self.processes.pop(identifier,None)
+            path = self.storage/(identifier+'.json')
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            return dict(job)
 
     def import_results(self, directory):
         if self.workflow:self.workflow.validate_import(directory)

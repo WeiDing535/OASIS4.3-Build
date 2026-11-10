@@ -92,8 +92,8 @@ class Controller:
     def describe(self, config):
         return self.workflow.describe_plan(config)
 
-    def start(self, config):
-        return self.jobs.start(config)
+    def start(self, config, name=''):
+        return self.jobs.start(config,name)
 
     def state(self, identifier):
         return self.jobs.get(identifier)
@@ -135,6 +135,12 @@ class Controller:
 
     def import_results(self, path):
         return self.jobs.import_results(path)
+
+    def delete(self, identifier):
+        """Drop one history record; its output directory stays on disk."""
+        job=self.jobs.delete(identifier)
+        self._metrics={key:value for key,value in self._metrics.items() if key[0]!=job['output']}
+        return job
 
     def shutdown(self):
         """Stop every running job and make sure no engine child survives exit."""
@@ -257,13 +263,17 @@ class App:
         tk,ttk=self.tk,self.ttk
         frame=ttk.Frame(self.tabs)
         tools=ttk.Frame(frame);tools.pack(fill='x',pady=(4,2))
-        ttk.Label(tools,text='选中一行即可查看它的日志与结果；可以同时运行多个任务。',
+        ttk.Label(tools,text='选中一行查看日志与结果；双击打开结果目录。',
                   style='Hint.TLabel').pack(side='left')
         ttk.Button(tools,text='刷新',command=lambda:self._refresh_history(force=True)).pack(side='right')
-        columns=('started','status','method','rwork','output')
+        self.delete_button=ttk.Button(tools,text='删除记录',command=self.on_delete_history)
+        self.delete_button.pack(side='right',padx=6)
+        self.relaunch_button=ttk.Button(tools,text='沿用参数',command=self.on_relaunch)
+        self.relaunch_button.pack(side='right')
+        columns=('started','name','status','method','rwork','output')
         self.history=ttk.Treeview(frame,columns=columns,show='headings',height=10)
-        for key,title,width in [('started','开始时间',130),('status','状态',86),('method','方法',150),
-                                ('rwork','最终 R-work',100),('output','输出目录',330)]:
+        for key,title,width in [('started','开始时间',118),('name','任务名称',150),('status','状态',96),
+                                ('method','方法',140),('rwork','最终 R-work',96),('output','输出目录',250)]:
             self.history.heading(key,text=title)
             self.history.column(key,width=width,anchor='center' if key in ('started','status','rwork') else 'w')
         y=ttk.Scrollbar(frame,orient='vertical',command=self.history.yview)
@@ -336,6 +346,14 @@ class App:
     def _build_form(self):
         ttk=self.ttk
         specs={spec[0]:spec for spec in FIELD_SPECS}
+        task=self._section('任务名称')
+        row=ttk.Frame(task);row.pack(fill='x',pady=2)
+        ttk.Label(row,text='任务名称',width=26,anchor='w').pack(side='left')
+        self.task_name=self.tk.StringVar(value='')
+        ttk.Entry(row,textvariable=self.task_name).pack(side='left',fill='x',expand=True)
+        ttk.Label(task,text='可选：给这次任务起个名字（如“7E1D 重跑”），任务记录里显示它，'
+                            '相同参数、不同数据也能一眼分清。',
+                  style='Hint.TLabel',wraplength=520,justify='left').pack(fill='x',padx=(2,0))
         box=self._section('定相方法')
         self.method=self.tk.StringVar(value=self.defaults.get('method','pplus_bundled'))
         for key,label in METHODS:
@@ -529,9 +547,11 @@ class App:
         """Start one more run; earlier runs keep going in parallel."""
         try:
             config=self.collect()
-            job=self.controller.start(config)
+            name=self.task_name.get().strip()
+            job=self.controller.start(config,name)
         except Exception as error:
             self._error(str(error));return
+        self.task_name.set('')
         self.job=job
         self.log_text=''
         self.log.delete('1.0','end')
@@ -542,7 +562,8 @@ class App:
         self.tabs.select(1)
         self._refresh_history(force=True)
         self._select_history(job['id'])
-        self._say('已启动任务 '+job['id']+'（可继续新建任务并行运行）')
+        self._say('已启动任务 %s%s（可继续新建任务并行运行）'
+                  %(job.get('name') or job['id'],'' if not job.get('name') else '（%s）'%job['id']))
         self._show_plan_for(job)
         self._advance_output(job)
 
@@ -585,6 +606,7 @@ class App:
         self.log.delete('1.0','end')
         self._clear_results()
         self._fill(self.controller.defaults())
+        self.task_name.set('')
         self.fields['output']['var'].set(str(self._fresh_output()))
         self._method_changed()
         self.progress.configure(value=0)
@@ -741,12 +763,89 @@ class App:
             rwork=row.get('r_work')
             self.history.insert('','end',iid=row['id'],values=(
                 time.strftime('%m-%d %H:%M',time.localtime(row['created'])),
+                row.get('name') or row.get('label') or '',
                 STATUS_NAMES.get(row['status'],row['status']),
                 row.get('method_name') or METHOD_NAMES.get(row.get('method'),row.get('method') or ''),
                 '' if rwork is None else '%.2f'%(100*rwork),
                 row['output']))
         if self.job and self.history.exists(self.job['id']):
             self._select_history(self.job['id'])
+
+    def on_relaunch(self):
+        """Load a history record's parameters so a new run needs no retyping."""
+        selection=self.history.selection()
+        if not selection:
+            self._error('请先在任务记录里选中一行，再点“沿用参数”。');return
+        identifier=selection[0]
+        try:
+            job=self.controller.state(identifier)
+        except KeyError:
+            self._error('这条记录已经不存在。');return
+        config=job.get('config')
+        if not config:
+            self._error('这条记录没有保存运行参数（导入的既有结果），无法沿用。');return
+        self._fill(config,strict=False)
+        self.task_name.set(job.get('name') or '')
+        self.fields['output']['var'].set(str(self._fresh_output()))
+        self._method_changed()
+        if self._needs_advanced(config):
+            self.advanced.set(True);self._toggle_advanced()
+        self.job=None
+        self._clear_results()
+        self._show_log('')
+        try:
+            plan=self.controller.describe(dict(config,output=self.fields['output']['var'].get()))
+            self._set_plan(json.dumps(plan,ensure_ascii=False,indent=2)[:20000])
+        except Exception:
+            pass
+        self.tabs.select(4)
+        self.summary.configure(text='已沿用任务“%s”的参数：改好输入数据后点“开始运行”，输出目录已换成新目录。'
+                                    %(job.get('name') or job.get('label') or identifier))
+        self._say('已沿用参数，可直接开始运行')
+
+    def _needs_advanced(self,config):
+        """True when the record used non-default advanced parameters."""
+        advanced={key for _,keys in ADVANCED_GROUPS for key in keys}
+        for key in advanced:
+            if key not in config:
+                continue
+            old,new=config[key],self.defaults.get(key)
+            if isinstance(old,float) and isinstance(new,(int,float)):
+                if abs(old-new)>1e-9: return True
+            elif str(old)!=str(new):
+                return True
+        return False
+
+    def on_delete_history(self):
+        """Forget selected records; the result directories stay untouched."""
+        selection=list(self.history.selection())
+        if not selection:
+            self._error('请先在任务记录里选中要删除的行。');return
+        busy={'等待运行','正在运行','正在停止'}
+        targets=[i for i in selection if self.history.set(i,'status') not in busy]
+        live=len(selection)-len(targets)
+        if not targets:
+            self._error('选中的任务还在运行，请先停止再删除记录。');return
+        from tkinter import messagebox
+        note='将从任务记录中删除 %d 条记录；结果目录与文件不会被删除。'%len(targets)
+        if live: note+='\n正在运行的 %d 条记录会保留。'%live
+        if not messagebox.askokcancel('删除任务记录',note):
+            return
+        removed=0
+        for identifier in targets:
+            try:
+                self.controller.delete(identifier)
+                removed+=1
+            except Exception as error:
+                self._error(str(error));return
+        if self.job and self.job.get('id') in targets:
+            self.finished.discard(self.job['id'])
+            self.job=None
+            self._clear_results()
+            self._show_log('')
+        self.history_signature=None
+        self._refresh_history(force=True)
+        self._say('已删除 %d 条任务记录（结果目录未改动）'%removed)
 
     def _select_history(self,identifier):
         if not self.history.exists(identifier):return

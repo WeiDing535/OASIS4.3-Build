@@ -252,9 +252,9 @@ def test_two_runs_start_from_the_window_without_stopping_the_first(tmp_path):
         pytest.skip('no display available')
     controller=desktop.Controller(project(tmp_path))
     started=[];rows=[]
-    def start(config):
+    def start(config,name=''):
         identifier='job%d'%len(started)
-        started.append((identifier,config))
+        started.append((identifier,config,name))
         Path(config['output']).mkdir(parents=True,exist_ok=True)
         row=dict(id=identifier,created=100+len(started),updated=100+len(started),status='running',
                  output=str(config['output']),completed=0,total=6,error=None,
@@ -268,13 +268,14 @@ def test_two_runs_start_from_the_window_without_stopping_the_first(tmp_path):
     try:
         fill(app,dict(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
                       wavelength='0.97918',copies='2',output=str(tmp_path/'first')))
+        app.task_name.set('第一个任务')
         app.on_start()
         assert app.job['id']=='job0'
         second=app.fields['output']['var'].get()
         assert second!=str(tmp_path/'first')  # a fresh directory is offered automatically
         fill(app,dict(output=str(tmp_path/'second')))
         app.on_start()
-        assert [identifier for identifier,_ in started]==['job0','job1']
+        assert [(identifier,name) for identifier,_,name in started]==[('job0','第一个任务'),('job1','')]
         assert len(app.history.get_children())==2
         assert app.job['id']=='job1'
         assert app.controller.running()==['job1','job0']
@@ -353,6 +354,103 @@ def test_new_task_clears_the_form_and_offers_a_fresh_output(tmp_path):
         assert Path(output).name.startswith('oasis_') and not Path(output).exists()
         assert Path(output).parent==tmp_path/'runs'
         assert '新任务' in app.summary.cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_task_name_and_delete_live_in_the_job_record(tmp_path):
+    """A name is stored with the record; deleting forgets it but keeps the results."""
+    class Workflow:
+        def make_plan(self,config,project): return dict(config),[]
+        def describe_plan(self,config): return {'stages':[]}
+        def save_selected_result(self,output): pass
+        def enrich_job(self,job): return job
+        def collect_results(self,output): raise ValueError('no results here')
+    jobs=desktop.Jobs(project(tmp_path),workflow=Workflow())
+    first=jobs.start(dict(output=str(tmp_path/'run1'),sad=str(tmp_path/'a.mtz'),
+                          method='pplus_bundled'),'7E1D 重跑')
+    jobs.workers[first['id']].join(5)
+    assert jobs.history()[0]['name']=='7E1D 重跑'
+    stored=json.loads((jobs.storage/(first['id']+'.json')).read_text())
+    assert stored['name']=='7E1D 重跑'
+    jobs.delete(first['id'])
+    assert jobs.history()==[]
+    assert not (jobs.storage/(first['id']+'.json')).exists()
+    assert (tmp_path/'run1').is_dir()          # results stay on disk
+    second=jobs.start(dict(output=str(tmp_path/'run2'),sad=str(tmp_path/'b.mtz')),'')
+    jobs.workers[second['id']].join(5)
+    assert jobs.history()[0]['name']==''
+    jobs.items[second['id']]['status']='running'
+    with pytest.raises(ValueError,match='还在运行'):
+        jobs.delete(second['id'])
+    assert (jobs.storage/(second['id']+'.json')).exists()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_window_names_relaunches_and_deletes_history_rows(tmp_path,monkeypatch):
+    """Name a run, reuse its parameters, and remove records without losing data."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    import tkinter.messagebox as box
+    controller=desktop.Controller(project(tmp_path))
+    config=dict(controller.defaults(),sad=str(tmp_path/'old.mtz'),heavy=str(tmp_path/'old.pdb'),
+                sequence=str(tmp_path/'old.fasta'),wavelength=0.97918,copies=2,
+                output=str(tmp_path/'old_run'),dm_cycles=12)
+    rows=[dict(id='done',created=100,updated=110,status='success',output=str(tmp_path/'old_run'),
+               name='7E1D 重跑',completed=6,total=6,error=None,method='pplus_bundled',
+               label='old.mtz',method_name='P+ 自带引擎',r_work=0.28,r_free=0.31),
+          dict(id='imported',created=90,updated=91,status='imported',output=str(tmp_path/'imp'),
+               name='',completed=0,total=0,error=None,method='pplus_bundled',label='',
+               method_name='P+ 自带引擎',r_work=0.30,r_free=0.35),
+          dict(id='busy',created=80,updated=81,status='running',output=str(tmp_path/'busy'),
+               name='',completed=1,total=6,error=None,method='pplus_bundled',label='',
+               method_name='P+ 自带引擎',r_work=None,r_free=None)]
+    deleted=[]
+    controller.history=lambda:list(rows)
+    controller.state=lambda identifier:dict([r for r in rows if r['id']==identifier][0],log='',
+                                            config=config if identifier=='done' else None)
+    def delete(identifier):
+        deleted.append(identifier)
+        rows[:]=[r for r in rows if r['id']!=identifier]
+    controller.delete=delete
+    controller.results=lambda identifier:dict(metrics=[],final_model=None,preview=[],
+                                              method_name='P+ 自带引擎',dm_engine='parrot',
+                                              primary_metric={})
+    errors=[]
+    monkeypatch.setattr(box,'showerror',lambda title,text:errors.append(text))
+    monkeypatch.setattr(box,'askokcancel',lambda *args,**kwargs: True)
+    app=desktop.App(controller)
+    try:
+        app._refresh_history(force=True)
+        assert app.history.set('done','name')=='7E1D 重跑'
+        assert app.history.set('imported','name')==''
+        app.history.selection_set('done')
+        app.on_select_job()
+        app.on_relaunch()
+        assert app.fields['sad']['var'].get()==str(tmp_path/'old.mtz')
+        assert app.fields['wavelength']['var'].get()=='0.97918'
+        assert app.task_name.get()=='7E1D 重跑'
+        assert app.advanced.get() is True            # dm_cycles was not the default
+        output=app.fields['output']['var'].get()
+        assert output!=str(tmp_path/'old_run') and Path(output).name.startswith('oasis_')
+        assert app.tabs.index(app.tabs.select())==4  # the plan page shows the reused setup
+        assert '已沿用任务' in app.summary.cget('text')
+        app.history.selection_set('imported')
+        app.on_select_job()
+        app.on_relaunch()
+        assert '无法沿用' in errors[-1]               # imported records carry no config
+        app.history.selection_set('busy')
+        app.on_delete_history()
+        assert deleted==[] and '还在运行' in app.status.cget('text')
+        app.history.selection_set('done')
+        app.on_select_job()
+        app.on_delete_history()
+        assert deleted==['done']
+        assert 'done' not in app.history.get_children()
+        assert app.job is None and '尚无结果' in app.summary.cget('text')
     finally:
         app.root.destroy()
 
