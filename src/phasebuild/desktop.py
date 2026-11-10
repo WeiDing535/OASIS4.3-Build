@@ -2,8 +2,8 @@
 
 The window is a thin front end over :mod:`phasebuild.jobs` and
 :mod:`phasebuild.oasis_workflow`: it collects the same configuration the command
-line accepts, starts one job at a time in a worker thread, and renders the
-pipeline log and the refinement table while the job runs.
+line accepts, starts any number of jobs (each in its own worker thread) and renders the
+task list, the pipeline log and the refinement table while they run.
 
 Tkinter ships with the bundled Python, so the desktop window needs no extra
 installation.  ``Controller`` is toolkit-free and can be driven from tests.
@@ -23,6 +23,7 @@ STATUS_NAMES={'queued':'等待运行','running':'正在运行','stopping':'正�
               'failed':'失败','success':'已完成','imported':'已有结果','interrupted':'界面曾中断'}
 METHODS=[('pplus_bundled','P+ 自带引擎（推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
          ('pplus_internal','内部 P+（实验性）'),('likelihood','连续 SAD'),('pplus','旧版直接法 P+')]
+METHOD_NAMES=dict(METHODS)
 PROTOCOLS=[('','不使用参数方案'),('pplus_w8_weight','P+ · Wang8＋精修权重搜索（标定配方）'),
            ('pplus_w8','P+ · Wang8'),('pplus_w14','P+ · Wang14'),('stable_w14','稳定化 P+ · Wang14')]
 RECIPES=[('pipeline','自带 Buccaneer/REFMAC 流程（推荐）'),('ccp4','外部 CCP4 流程'),('legacy','旧版逐轮流程')]
@@ -67,6 +68,7 @@ class Controller:
         self.project=Path(project).resolve()
         self.workflow=workflow or oasis_workflow
         self.jobs=Jobs(self.project,workflow=self.workflow)
+        self._metrics={}
 
     def defaults(self):
         return self.workflow.defaults(self.project)
@@ -90,27 +92,56 @@ class Controller:
         self.jobs.cancel(identifier)
 
     def history(self):
-        return self.jobs.history()
+        """Task list for the window: job records plus their final R factors."""
+        rows=self.jobs.history()
+        for row in rows:
+            row.update(self._metric(row))
+        return rows
+
+    def _metric(self,row):
+        """Read the final statistics of one job, cached per (dir,status,update)."""
+        key=(row['output'],row['status'],row.get('updated'))
+        if key in self._metrics:
+            return self._metrics[key]
+        value={}
+        if row['status'] in ('success','imported','cancelled','failed'):
+            try:
+                result=self.workflow.collect_results(row['output'])
+                primary=result.get('primary_metric') or {}
+                value=dict(method_name=result.get('method_name',''),
+                           r_work=primary.get('r_work'),r_free=primary.get('r_free'),
+                           stage=primary.get('stage',''),
+                           endpoint=(result.get('endpoint_root') or '').split('/')[-1])
+            except Exception:
+                value={}
+        self._metrics[key]=value
+        return value
+
+    def running(self):
+        return self.jobs.live()
 
     def import_results(self, path):
         return self.jobs.import_results(path)
 
     def shutdown(self):
-        """Stop the running job and make sure no engine child survives exit."""
+        """Stop every running job and make sure no engine child survives exit."""
         with self.jobs.lock:
-            active,process,worker=self.jobs.active,self.jobs.process,self.jobs.worker
-        if active:
-            self.jobs.cancel(active)
-        if worker:
+            live=self.jobs.live()
+            processes=dict(self.jobs.processes)
+            workers=dict(self.jobs.workers)
+        for identifier in live:
+            self.jobs.cancel(identifier)
+        for worker in workers.values():
             worker.join(timeout=2.5)
         with self.jobs.lock:
-            process=self.jobs.process or process
-        if process and process.poll() is None:
-            try:
-                os.killpg(process.pid,9)
-            except (ProcessLookupError,PermissionError):
-                pass
-        if worker:
+            processes={**processes,**self.jobs.processes}
+        for process in processes.values():
+            if process and process.poll() is None:
+                try:
+                    os.killpg(process.pid,9)
+                except (ProcessLookupError,PermissionError):
+                    pass
+        for worker in workers.values():
             worker.join(timeout=5)
 
 
@@ -131,8 +162,9 @@ class App:
         self.fields={}
         self.job=None
         self.error_text=''
-        self.finished_id=None
+        self.finished=set()
         self.log_text=''
+        self.history_signature=None
         self.root=tk.Tk()
         self.follow=tk.BooleanVar(master=self.root,value=True)
         self.root.title('OASIS4.3 · 单波长异常散射定相')
@@ -186,7 +218,7 @@ class App:
         right=ttk.Frame(panes)
         self.tabs=ttk.Notebook(right)
         self.tabs.pack(fill='both',expand=True)
-        self._log_tab();self._results_tab();self._plan_tab()
+        self._history_tab();self._log_tab();self._results_tab();self._plan_tab()
         panes.add(right,weight=4)
 
         foot=ttk.Frame(self.root,padding=(10,0,10,8));foot.pack(side='bottom',fill='x')
@@ -200,6 +232,26 @@ class App:
         ttk.Button(foot,text='导入已有结果…',command=self.on_import).pack(side='left',padx=6)
 
         self._build_form()
+
+    def _history_tab(self):
+        tk,ttk=self.tk,self.ttk
+        frame=ttk.Frame(self.tabs)
+        tools=ttk.Frame(frame);tools.pack(fill='x',pady=(4,2))
+        ttk.Label(tools,text='选中一行即可查看它的日志与结果；可以同时运行多个任务。',
+                  style='Hint.TLabel').pack(side='left')
+        ttk.Button(tools,text='刷新',command=lambda:self._refresh_history(force=True)).pack(side='right')
+        columns=('started','status','method','rwork','output')
+        self.history=ttk.Treeview(frame,columns=columns,show='headings',height=10)
+        for key,title,width in [('started','开始时间',130),('status','状态',86),('method','方法',150),
+                                ('rwork','最终 R-work',100),('output','输出目录',330)]:
+            self.history.heading(key,text=title)
+            self.history.column(key,width=width,anchor='center' if key in ('started','status','rwork') else 'w')
+        y=ttk.Scrollbar(frame,orient='vertical',command=self.history.yview)
+        self.history.configure(yscrollcommand=y.set)
+        y.pack(side='right',fill='y');self.history.pack(fill='both',expand=True)
+        self.history.bind('<<TreeviewSelect>>',self.on_select_job)
+        self.history.bind('<Double-1>',lambda event:self.on_open())
+        self.tabs.add(frame,text='任务记录')
 
     def _log_tab(self):
         tk,ttk=self.tk,self.ttk
@@ -423,8 +475,7 @@ class App:
         self._say('配置检查通过',ok=True)
 
     def on_start(self):
-        if self.job and self.job.get('status') in ('queued','running','stopping'):
-            self._error('已有任务运行中，请等待完成或先停止它。');return
+        """Start one more run; earlier runs keep going in parallel."""
         try:
             config=self.collect()
             job=self.controller.start(config)
@@ -433,23 +484,37 @@ class App:
         self.job=job
         self.log_text=''
         self.log.delete('1.0','end')
-        for row in self.tree.get_children():
-            self.tree.delete(row)
+        self._clear_results()
         self.summary.configure(text='运行中：'+str(job['output']))
-        self.start_button.configure(state='disabled')
         self.stop_button.configure(state='normal')
         self.progress.configure(value=0)
-        self.tabs.select(0)
-        self._say('已启动任务 '+job['id'])
-        try:
-            self._set_plan(json.dumps(self.controller.describe(job['config']),ensure_ascii=False,indent=2)[:20000])
-        except Exception:
-            pass
+        self.tabs.select(1)
+        self._refresh_history(force=True)
+        self._select_history(job['id'])
+        self._say('已启动任务 '+job['id']+'（可继续新建任务并行运行）')
+        self._show_plan_for(job)
+        self._advance_output(job)
+
+    def _advance_output(self,job):
+        """Offer a fresh output directory so the next run can start at once."""
+        field=self.fields.get('output')
+        if not field:return
+        try: current=Path(field['var'].get().strip()).expanduser().resolve()
+        except (OSError,ValueError): return
+        consumed=Path(job['output']).resolve()
+        if current!=consumed and not current.exists(): return
+        candidate=current.parent/('oasis_'+_stamp())
+        suffix=2
+        while candidate.exists():
+            candidate=current.parent/('oasis_%s_%d'%(_stamp(),suffix));suffix+=1
+        field['var'].set(str(candidate))
 
     def on_stop(self):
         if not self.job:return
+        if self.job.get('status') not in ('queued','running','stopping'):
+            self._say('该任务已经结束');return
         self.controller.stop(self.job['id'])
-        self._say('正在停止…')
+        self._say('正在停止 '+self.job['id']+' …')
 
     def on_open(self):
         if not self.job:
@@ -470,13 +535,16 @@ class App:
         except Exception as error:
             self._error(str(error));return
         self.job=job
+        self._refresh_history(force=True)
+        self._select_history(job['id'])
         self._show_results()
 
     def on_close(self):
-        status=(self.job or {}).get('status')
-        if status in ('queued','running','stopping') and not self.exit_on_finish:
+        live=self.controller.running()
+        if live and not self.exit_on_finish:
             from tkinter import messagebox
-            if not messagebox.askokcancel('退出 OASIS4.3','任务仍在运行，退出将停止它。确定退出？'):
+            question='还有 %d 个任务在运行，退出将停止它们。确定退出？'%len(live)
+            if not messagebox.askokcancel('退出 OASIS4.3',question):
                 return
         self.controller.shutdown()
         self.root.destroy()
@@ -484,7 +552,8 @@ class App:
     # ---------------------------------------------------------------- update
     def poll(self):
         try:
-            if self.job and self.finished_id!=self.job.get('id'):
+            self._refresh_history()
+            if self.job and self.job.get('id') not in self.finished:
                 self._refresh()
         finally:
             self.root.after(900,self.poll)
@@ -503,25 +572,103 @@ class App:
         if total:
             self.progress.configure(value=100*min(1,done/total))
         label=progress.get('current') or job.get('current') or ''
-        self._say('%s %s'%(STATUS_NAMES.get(status,status),label))
+        self._say_status('%s %s'%(STATUS_NAMES.get(status,status),label))
         log=job.get('log') or ''
         if log!=self.log_text:
-            self.log_text=log
-            self.log.delete('1.0','end');self.log.insert('end',log)
-            if self.follow.get():
-                self.log.see('end')
+            self._show_log(log)
         if status in ('success','failed','cancelled','interrupted'):
-            self.finished_id=identifier
-            self.start_button.configure(state='normal')
+            self.finished.add(identifier)
             self.stop_button.configure(state='disabled')
+            self.progress.configure(value=100 if status=='success' else 0)
             if status=='success':
                 self._show_results()
             elif status=='failed':
                 self.error_text=job.get('error') or '任务失败，请查看日志'
                 self.summary.configure(text='失败：'+self.error_text)
-                self.tabs.select(0)
-            if self.exit_on_finish:
+                self.tabs.select(1)
+            if self.exit_on_finish and not self.controller.running():
                 self.root.after(200,self.on_close)
+
+    def _show_log(self,text):
+        self.log_text=text
+        self.log.delete('1.0','end');self.log.insert('end',text)
+        if self.follow.get():
+            self.log.see('end')
+
+    def _say_status(self,label=''):
+        live=self.controller.running()
+        text=label or '就绪'
+        if len(live)>1:
+            text+='　·　共 %d 个任务运行中'%len(live)
+        self._say(text)
+
+    # ------------------------------------------------------------ task list
+    def _refresh_history(self,force=False):
+        try:
+            rows=self.controller.history()
+        except Exception:
+            return
+        signature=tuple((row['id'],row['status'],row.get('updated')) for row in rows)
+        if not force and signature==self.history_signature:
+            return
+        self.history_signature=signature
+        for item in self.history.get_children():
+            self.history.delete(item)
+        for row in rows:
+            rwork=row.get('r_work')
+            self.history.insert('','end',iid=row['id'],values=(
+                time.strftime('%m-%d %H:%M',time.localtime(row['created'])),
+                STATUS_NAMES.get(row['status'],row['status']),
+                row.get('method_name') or METHOD_NAMES.get(row.get('method'),row.get('method') or ''),
+                '' if rwork is None else '%.2f'%(100*rwork),
+                row['output']))
+        if self.job and self.history.exists(self.job['id']):
+            self._select_history(self.job['id'])
+
+    def _select_history(self,identifier):
+        if not self.history.exists(identifier):return
+        self.history.selection_set(identifier)
+        self.history.focus(identifier)
+        self.history.see(identifier)
+
+    def on_select_job(self,event=None):
+        selection=self.history.selection()
+        if not selection:return
+        identifier=selection[0]
+        if self.job and self.job.get('id')==identifier:return
+        try:
+            job=self.controller.state(identifier)
+        except KeyError:
+            return
+        self.job=job
+        self._show_log(job.get('log') or '')
+        status=job.get('status')
+        self.stop_button.configure(state='normal' if status in ('queued','running','stopping') else 'disabled')
+        self.progress.configure(value=0)
+        self._show_plan_for(job)
+        if status=='success':
+            self.finished.add(identifier)
+            self._show_results()
+        elif status in ('failed','cancelled','interrupted'):
+            self._clear_results()
+            self.summary.configure(text=STATUS_NAMES.get(status,status)+'：'+str(job.get('error') or '查看日志'))
+        else:
+            self._clear_results()
+            self.summary.configure(text='运行中：'+str(job.get('output')))
+        self._say_status('%s %s'%(STATUS_NAMES.get(status,status),identifier))
+
+    def _show_plan_for(self,job):
+        plan=job.get('plan')
+        if not plan and job.get('config'):
+            try: plan=self.controller.describe(job['config'])
+            except Exception: plan=None
+        if plan:
+            self._set_plan(json.dumps(plan,ensure_ascii=False,indent=2)[:20000])
+
+    def _clear_results(self):
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+        self.summary.configure(text='尚无结果')
 
     def _show_results(self):
         try:
@@ -558,7 +705,7 @@ class App:
         elif result.get('final_phases'):
             lines.append('相位：'+result['final_phases'])
         self.summary.configure(text='\n'.join(lines))
-        self.tabs.select(1)
+        self.tabs.select(2)
 
     def _set_plan(self,text):
         self.plan_text.configure(state='normal')
@@ -575,7 +722,8 @@ class App:
         if self.exit_on_finish:
             # Unattended mode: nobody can dismiss a dialog, so fail loudly instead.
             print('OASIS4.3: '+text,file=sys.stderr,flush=True)
-            self.root.after_idle(self.root.destroy)
+            if not self.controller.running():
+                self.root.after_idle(self.root.destroy)
             return
         from tkinter import messagebox
         messagebox.showerror('OASIS4.3',text)

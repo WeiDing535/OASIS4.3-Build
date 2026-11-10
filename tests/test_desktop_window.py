@@ -165,3 +165,97 @@ def test_results_panel_lists_the_endpoint_grid_and_the_retained_one(tmp_path):
         assert '最终 R-work 28.34 / R-free 31.47' in text
     finally:
         app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_task_list_shows_every_job_and_switches_the_log(tmp_path):
+    """The window must remember earlier runs and show the selected one's log."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    rows=[dict(id='new',created=200,updated=210,status='running',output=str(tmp_path/'b'),
+               completed=1,total=6,error=None,method='pplus_bundled',label='b.mtz',
+               method_name='P+ 自带引擎',r_work=None,r_free=None),
+          dict(id='old',created=100,updated=110,status='success',output=str(tmp_path/'a'),
+               completed=6,total=6,error=None,method='pplus_bundled',label='a.mtz',
+               method_name='P+ Wang8 + 精修权重搜索',r_work=0.2834,r_free=0.3147)]
+    controller.history=lambda:rows
+    controller.running=lambda:['new']
+    controller.state=lambda identifier:dict(rows[0] if identifier=='new' else rows[1],
+                                            log='log of '+identifier,pipeline_progress={'total':6,'completed':1})
+    app=desktop.App(controller)
+    try:
+        app._refresh_history(force=True)
+        assert set(app.history.get_children())=={'new','old'}
+        assert app.history.set('old','rwork')=='28.34'
+        assert app.history.set('old','status')=='已完成'
+        app.history.selection_set('old')
+        app.on_select_job()
+        assert app.job['id']=='old' and 'log of old' in app.log.get('1.0','end')
+        assert app.history.set('old','method')=='P+ Wang8 + 精修权重搜索'
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_two_runs_start_from_the_window_without_stopping_the_first(tmp_path):
+    """Starting a second run must work while the first is still refining."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    started=[];rows=[]
+    def start(config):
+        identifier='job%d'%len(started)
+        started.append((identifier,config))
+        Path(config['output']).mkdir(parents=True,exist_ok=True)
+        row=dict(id=identifier,created=100+len(started),updated=100+len(started),status='running',
+                 output=str(config['output']),completed=0,total=6,error=None,
+                 method=config['method'],label='sad.mtz',method_name='P+ 自带引擎',r_work=None,r_free=None)
+        rows.insert(0,row)
+        return dict(row,config=config,plan={'stages':[]},steps=[])
+    controller.start=start
+    controller.history=lambda:rows
+    controller.running=lambda:[row['id'] for row in rows if row['status']=='running']
+    app=desktop.App(controller)
+    try:
+        fill(app,dict(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
+                      wavelength='0.97918',copies='2',output=str(tmp_path/'first')))
+        app.on_start()
+        assert app.job['id']=='job0'
+        second=app.fields['output']['var'].get()
+        assert second!=str(tmp_path/'first')  # a fresh directory is offered automatically
+        fill(app,dict(output=str(tmp_path/'second')))
+        app.on_start()
+        assert [identifier for identifier,_ in started]==['job0','job1']
+        assert len(app.history.get_children())==2
+        assert app.job['id']=='job1'
+        assert app.controller.running()==['job1','job0']
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_closing_asks_once_for_all_running_jobs(tmp_path,monkeypatch):
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    controller.running=lambda:['a','b']
+    from tkinter import messagebox
+    asked=[]
+    monkeypatch.setattr(messagebox,'askokcancel',lambda *a,**k:(asked.append(a),False)[1])
+    app=desktop.App(controller)
+    try:
+        app.on_close()
+        assert asked and '2 个任务' in asked[0][1]
+        assert app.root.winfo_exists()
+    finally:
+        app.root.destroy()

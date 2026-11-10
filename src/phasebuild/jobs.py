@@ -40,15 +40,25 @@ def save_selected_result(*args,**kwargs):
 
 
 class Jobs:
-    def __init__(self, project, workflow=None):
+    """Owns every job of one project: threads, child groups, on-disk records.
+
+    Several jobs may run at the same time; each one owns its own worker thread,
+    child process group and ``gui.log``, so the front ends can start a new run
+    while an earlier one is still refining.  ``max_parallel`` keeps a single
+    machine from being oversubscribed by accident.
+    """
+
+    def __init__(self, project, workflow=None, max_parallel=4):
         self.workflow=workflow
         self.project = Path(project).resolve()
         self.storage = self.project/('.gui-oasis/jobs' if workflow else '.gui/jobs')
         self.storage.mkdir(parents=True,exist_ok=True)
         self.lock = threading.RLock()
         self.items = {}
-        self.process = None
-        self.worker = None
+        self.processes = {}
+        self.workers = {}
+        self.running = set()
+        self.max_parallel = max_parallel
         self.active = None
         for index in self.storage.glob('*.json'):
             try:
@@ -60,6 +70,25 @@ class Jobs:
             except (OSError,ValueError,KeyError):
                 continue
 
+    @property
+    def process(self):
+        """Child process of the most recently started job (compatibility)."""
+        return self.processes.get(self.active)
+
+    @property
+    def worker(self):
+        """Worker thread of the latest job, running or just finished."""
+        with self.lock:
+            if self.active:
+                return self.workers.get(self.active)
+            return next(reversed(self.workers.values()),None) if self.workers else None
+
+    def live(self):
+        """Identifiers of the jobs that are queued, running or stopping."""
+        with self.lock:
+            return [identifier for identifier in self.running
+                    if self.items.get(identifier,{}).get('status') in ('queued','running','stopping')]
+
     def persist(self, job):
         save_json(self.storage/(job['id']+'.json'),job)
         if job.get('owned'):
@@ -67,20 +96,26 @@ class Jobs:
 
     def start(self, config):
         with self.lock:
-            if self.active:
-                raise ValueError('已有任务运行中，请等待完成或停止它')
+            if len(self.live())>=self.max_parallel:
+                raise ValueError('同时运行的任务已达 %d 个，请等待其中一个完成或停止它。'%self.max_parallel)
+            for identifier in [key for key,thread in self.workers.items()
+                               if key not in self.running and not thread.is_alive()]:
+                del self.workers[identifier]  # keep the last finished one for inspection
             cfg, steps = (self.workflow.make_plan if self.workflow else make_plan)(config,self.project)
             Path(cfg['output']).mkdir(parents=True,exist_ok=False)
             now = time.time()
             job = dict(id=secrets.token_hex(8),owned=True,created=now,updated=now,
                        status='queued',output=cfg['output'],config=cfg,steps=steps,
-                       completed=0,current='',error=None)
+                       completed=0,current='',error=None,
+                       label=Path(str(cfg.get('sad') or '')).name,method=cfg.get('method',''))
             if self.workflow:job['plan']=self.workflow.describe_plan(cfg)
             self.items[job['id']] = job
+            self.running.add(job['id'])
             self.active = job['id']
             self.persist(job)
-            self.worker = threading.Thread(target=self.run,args=(job,),daemon=True)
-            self.worker.start()
+            worker = threading.Thread(target=self.run,args=(job,),daemon=True)
+            self.workers[job['id']] = worker
+            worker.start()
             return dict(job)
 
     def run(self, job):
@@ -96,13 +131,13 @@ class Jobs:
                         log.write('\n▶ '+step['name']+'\n')
                         log.flush()
                         env = dict(os.environ,PYTHONUNBUFFERED='1')
-                        self.process = subprocess.Popen(step['command'],cwd=str(self.project),env=env,
-                                                        stdout=log,stderr=subprocess.STDOUT,
-                                                        start_new_session=True)
-                        process = self.process
+                        process = subprocess.Popen(step['command'],cwd=str(self.project),env=env,
+                                                   stdout=log,stderr=subprocess.STDOUT,
+                                                   start_new_session=True)
+                        self.processes[job['id']] = process
                     code = process.wait()
                     with self.lock:
-                        self.process = None
+                        self.processes.pop(job['id'],None)
                         if job['status']=='stopping':
                             break
                         if code:
@@ -127,17 +162,23 @@ class Jobs:
             with self.lock:
                 job['updated'] = time.time()
                 self.persist(job)
-                self.active = None
-                self.process = None
+                self.processes.pop(job['id'],None)
+                self.running.discard(job['id'])
+                if self.active == job['id']:
+                    # Keep ``active`` pointing at another live job, if any.
+                    remaining = self.live()
+                    self.active = remaining[-1] if remaining else None
 
     def cancel(self, identifier):
         with self.lock:
-            job = self.items[identifier]
-            if self.active != identifier:
+            job = self.items.get(identifier)
+            if job is None or job.get('status') not in ('queued','running','stopping'):
+                return
+            if job['status'] == 'stopping':
                 return
             job['status'] = 'stopping'
             self.persist(job)
-            process = self.process
+            process = self.processes.get(identifier)
             if process:
                 try:
                     os.killpg(process.pid,signal.SIGTERM)
@@ -174,9 +215,20 @@ class Jobs:
         return self.workflow.enrich_job(job) if self.workflow else job
 
     def history(self):
+        """Every known job, newest first, with the fields a task list shows."""
         with self.lock:
-            return [dict(id=j['id'],created=j['created'],status=j['status'],output=j['output'])
-                    for j in sorted(self.items.values(),key=lambda j:j['created'],reverse=True)]
+            rows = []
+            for job in sorted(self.items.values(),key=lambda j:j['created'],reverse=True):
+                config = job.get('config') or {}
+                rows.append(dict(id=job['id'],created=job['created'],
+                                 updated=job.get('updated',job['created']),
+                                 status=job['status'],output=job['output'],
+                                 completed=job.get('completed',0),
+                                 total=len(job.get('steps') or []),
+                                 error=job.get('error'),
+                                 method=job.get('method') or config.get('method',''),
+                                 label=job.get('label') or Path(str(config.get('sad') or '')).name))
+            return rows
 
     def import_results(self, directory):
         if self.workflow:self.workflow.validate_import(directory)
