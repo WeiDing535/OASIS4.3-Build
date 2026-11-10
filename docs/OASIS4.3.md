@@ -101,7 +101,7 @@ conda activate oasis43-unified
 python -B run_desktop.py --project .
 ```
 
-源码包不包含外部引擎运行时。完整安装包需一并提供 Buccaneer、REFMAC、对应共享库、字典与参考资源，用户使用完整包时无需另装 CCP4。本次已生成整合完整安装包 `dist/OASIS4.3-standalone-20261110.tar.gz`（356,036,593 字节，SHA-256 `fa07cfc5aac083877eb12ca698009b8a5c799caf203e8f8b21026b18170cade7`，macOS x86_64，未签名，仅供本地评估）：解压到可写目录后双击其中的 `OASIS4.3.command` 即进入上述桌面窗口，不需要另装 Python、CCP4 或任何 pip 包。
+源码包不包含外部引擎运行时。完整安装包需一并提供 Buccaneer、REFMAC、对应共享库、字典与参考资源，用户使用完整包时无需另装 CCP4。本次已生成整合完整安装包 `dist/OASIS4.3-standalone-20261110.tar.gz`（356,036,104 字节，SHA-256 `fe666b0af9713279cd2213c7b6450f61b6d4e88fbe0fc9e987078bec6670cfa1`，macOS x86_64，未签名，仅供本地评估）：解压到可写目录后双击其中的 `OASIS4.3.command` 即进入上述桌面窗口，不需要另装 Python、CCP4 或任何 pip 包。
 
 ## 可选辅助程序（按需自行安装）
 
