@@ -195,6 +195,7 @@ def test_task_list_shows_every_job_and_switches_the_log(tmp_path):
         app.history.selection_set('old')
         app.on_select_job()
         assert app.job['id']=='old' and 'log of old' in app.log.get('1.0','end')
+        assert app.tabs.index(app.tabs.select())==0   # the record page keeps its buttons usable
         assert app.history.set('old','method')=='P+ Wang8 + 精修权重搜索'
     finally:
         app.root.destroy()
@@ -429,6 +430,7 @@ def test_window_names_relaunches_and_deletes_history_rows(tmp_path,monkeypatch):
         assert app.history.set('imported','name')==''
         app.history.selection_set('done')
         app.on_select_job()
+        assert app.tabs.index(app.tabs.select())==0
         app.on_relaunch()
         assert app.fields['sad']['var'].get()==str(tmp_path/'old.mtz')
         assert app.fields['wavelength']['var'].get()=='0.97918'

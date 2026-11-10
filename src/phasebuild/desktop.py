@@ -263,7 +263,7 @@ class App:
         tk,ttk=self.tk,self.ttk
         frame=ttk.Frame(self.tabs)
         tools=ttk.Frame(frame);tools.pack(fill='x',pady=(4,2))
-        ttk.Label(tools,text='选中一行查看日志与结果；双击打开结果目录。',
+        ttk.Label(tools,text='选中一行即在右侧各页查看；双击打开结果目录。',
                   style='Hint.TLabel').pack(side='left')
         ttk.Button(tools,text='刷新',command=lambda:self._refresh_history(force=True)).pack(side='right')
         self.delete_button=ttk.Button(tools,text='删除记录',command=self.on_delete_history)
@@ -726,7 +726,7 @@ class App:
             self.stop_button.configure(state='disabled')
             self.progress.configure(value=100 if status=='success' else 0)
             if status=='success':
-                self._show_results()
+                self._show_results(select=False)
             elif status=='failed':
                 self.error_text=job.get('error') or '任务失败，请查看日志'
                 self.summary.configure(text='失败：'+self.error_text)
@@ -870,7 +870,7 @@ class App:
         self._show_plan_for(job)
         if status in ('success','imported'):
             if status=='success':self.finished.add(identifier)
-            self._show_results()
+            self._show_results(select=False)
             if status=='imported':
                 self.summary.configure(text=IMPORTED_NOTE+'\n'+self.summary.cget('text'))
         elif status in ('failed','cancelled','interrupted'):
@@ -898,7 +898,7 @@ class App:
         self.chart.show([])
         self.structure.show(None)
 
-    def _show_results(self):
+    def _show_results(self,select=True):
         try:
             result=self.controller.results(self.job['id'])
         except Exception as error:
@@ -938,7 +938,8 @@ class App:
         model=self._model_path(result)
         self.save_model_button.configure(state='normal' if model and model.is_file() else 'disabled')
         self.structure.show(str(model) if model and model.is_file() else None,result.get('preview'))
-        self.tabs.select(2)
+        if select:
+            self.tabs.select(2)
 
     def _set_plan(self,text):
         self.plan_text.configure(state='normal')
