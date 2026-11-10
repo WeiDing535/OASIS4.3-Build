@@ -11,6 +11,7 @@ installation.  ``Controller`` is toolkit-free and can be driven from tests.
 import argparse
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -58,6 +59,16 @@ FIELD_SPECS=[
  ('feedback_endpoints','反馈终点组合（留空=单终点）','optional','逗号分隔的反馈轮数，例如 2,3：每个值各跑一遍同一协议，再按工作集 R 选择终点（不读 R-free）。',None,None),
  ('dm_solvents','反馈终点溶剂组合（可选）','optional','与上一项配对，逗号分隔，auto 表示按序列估算，例如 auto,0.5；留空则沿用溶剂比例。',None,None),
 ]
+
+# What an experiment needs is on the form; the calibrated constants, the run
+# resources and the rare overrides wait behind “显示高级参数”.
+ESSENTIAL_GROUPS=[('输入文件',('sad','heavy','sequence','elements','wavelength','output')),
+                  ('样本与密度修饰',('copies','solvent_fraction')),
+                  ('建模与精修',('rounds','cycles'))]
+ADVANCED_GROUPS=[('输入细节',('native','observation_prior','composition_sequence','labels','free_value')),
+                 ('循环与采样',('phase_cycles','dm_cycles','max_per_target','seed')),
+                 ('P+ 优化',('trust_wang_radius','trust_kl')),
+                 ('运行资源与终点组合',('reference','runtime','feedback_endpoints','dm_solvents'))]
 
 
 class Controller:
@@ -161,6 +172,7 @@ class App:
         self.defaults=controller.defaults()
         self.fields={}
         self.job=None
+        self.result=None
         self.error_text=''
         self.finished=set()
         self.log_text=''
@@ -171,6 +183,8 @@ class App:
         self.root.geometry('1200x820')
         self.root.minsize(980,680)
         self.root.protocol('WM_DELETE_WINDOW',self.on_close)
+        self.root.bind('<Control-n>',lambda event:self.on_new())
+        self.root.bind('<Command-n>',lambda event:self.on_new())
         self._styles()
         self._layout()
         self._fill(self.defaults)
@@ -218,18 +232,22 @@ class App:
         right=ttk.Frame(panes)
         self.tabs=ttk.Notebook(right)
         self.tabs.pack(fill='both',expand=True)
-        self._history_tab();self._log_tab();self._results_tab();self._plan_tab()
+        self._history_tab();self._log_tab();self._results_tab();self._structure_tab();self._plan_tab()
         panes.add(right,weight=4)
 
         foot=ttk.Frame(self.root,padding=(10,0,10,8));foot.pack(side='bottom',fill='x')
         self.progress=ttk.Progressbar(foot,mode='determinate',maximum=100)
         self.progress.pack(side='left',fill='x',expand=True,padx=(0,10))
+        self.new_button=ttk.Button(foot,text='新建任务',command=self.on_new)
+        self.new_button.pack(side='left')
         self.start_button=ttk.Button(foot,text='开始运行',command=self.on_start)
-        self.start_button.pack(side='left')
+        self.start_button.pack(side='left',padx=(6,0))
         self.stop_button=ttk.Button(foot,text='停止',command=self.on_stop,state='disabled')
         self.stop_button.pack(side='left',padx=6)
         ttk.Button(foot,text='打开结果目录',command=self.on_open).pack(side='left')
-        ttk.Button(foot,text='导入已有结果…',command=self.on_import).pack(side='left',padx=6)
+        self.export_button=ttk.Button(foot,text='导出结果…',command=self.on_export)
+        self.export_button.pack(side='left',padx=6)
+        ttk.Button(foot,text='导入已有结果…',command=self.on_import).pack(side='left')
 
         self._build_form()
 
@@ -271,6 +289,13 @@ class App:
     def _results_tab(self):
         ttk=self.ttk
         frame=ttk.Frame(self.tabs)
+        tools=ttk.Frame(frame);tools.pack(fill='x',pady=(4,2))
+        ttk.Label(tools,text='R-work / R-free 为百分数；最后一行是固定后精修。',
+                  style='Hint.TLabel').pack(side='left')
+        self.save_model_button=ttk.Button(tools,text='保存最终模型…',command=self.on_save_model,
+                                          state='disabled')
+        self.save_model_button.pack(side='right')
+        ttk.Button(tools,text='导出结果…',command=self.on_export).pack(side='right',padx=6)
         self.summary=self.ttk.Label(frame,text='尚无结果',justify='left',anchor='w',padding=(4,6))
         self.summary.pack(fill='x')
         columns=('stage','engine','rwork','rfree','cycles')
@@ -281,6 +306,11 @@ class App:
             self.tree.column(key,width=width,anchor='center' if key!='engine' else 'w')
         self.tree.pack(fill='both',expand=True)
         self.tabs.add(frame,text='精修结果')
+
+    def _structure_tab(self):
+        frame=self.ttk.Frame(self.tabs)
+        self.structure=StructureView(self,frame)
+        self.tabs.add(frame,text='结构 3D')
 
     def _plan_tab(self):
         tk,ttk=self.tk,self.ttk
@@ -294,13 +324,14 @@ class App:
         self.tabs.add(frame,text='运行计划')
 
     # ------------------------------------------------------------------ form
-    def _section(self,title):
-        box=self.ttk.LabelFrame(self.form,text=title,padding=(10,6))
+    def _section(self,title,parent=None):
+        box=self.ttk.LabelFrame(parent or self.form,text=title,padding=(10,6))
         box.pack(fill='x',pady=(0,8))
         return box
 
     def _build_form(self):
         ttk=self.ttk
+        specs={spec[0]:spec for spec in FIELD_SPECS}
         box=self._section('定相方法')
         self.method=self.tk.StringVar(value=self.defaults.get('method','pplus_bundled'))
         for key,label in METHODS:
@@ -313,12 +344,12 @@ class App:
                      state='readonly',width=34).pack(side='left',padx=6)
 
         inputs=self._section('输入文件')
-        for spec in FIELD_SPECS[:9]:
-            self._field(inputs,spec)
+        for key in ESSENTIAL_GROUPS[0][1]:
+            self._field(inputs,specs[key])
 
         sample=self._section('样本与密度修饰')
-        for spec in FIELD_SPECS[9:13]:
-            self._field(sample,spec)
+        for key in ESSENTIAL_GROUPS[1][1]:
+            self._field(sample,specs[key])
         row=ttk.Frame(sample);row.pack(fill='x',pady=2)
         ttk.Label(row,text='密度修饰引擎',width=26,anchor='w').pack(side='left')
         self.dm_engine=self.tk.StringVar(value='parrot')
@@ -331,8 +362,8 @@ class App:
         ttk.Checkbutton(row,text='Buccaneer 建模 + REFMAC 精修',variable=self.build_model).pack(side='left')
         self.auto_hand=self.tk.BooleanVar(value=True)
         ttk.Checkbutton(row,text='自动判手（双手试建，不用 R-free）',variable=self.auto_hand).pack(side='left',padx=12)
-        for spec in FIELD_SPECS[13:15]:
-            self._field(build,spec)
+        for key in ESSENTIAL_GROUPS[2][1]:
+            self._field(build,specs[key])
         for key,title,values,var in [('building_recipe','构建配方',RECIPES,'recipe'),
                                      ('refinement_prior','精修相位来源',PRIORS,'prior')]:
             row=ttk.Frame(build);row.pack(fill='x',pady=2)
@@ -342,10 +373,26 @@ class App:
                          state='readonly',width=30).pack(side='left')
             setattr(self,var,variable);setattr(self,var+'_values',values)
 
-        advanced=self._section('高级选项（一般保持默认）')
-        for spec in FIELD_SPECS[15:]:
-            self._field(advanced,spec)
-        ttk.Button(advanced,text='检查配置',command=self.on_check).pack(anchor='e',pady=(6,0))
+        # The advanced parameters stay out of the way until they are asked for:
+        # they are calibrated constants or run resources, not experiment inputs.
+        self.advanced_box=ttk.Frame(self.form)
+        for title,keys in ADVANCED_GROUPS:
+            group=self._section(title,parent=self.advanced_box)
+            for key in keys:
+                self._field(group,specs[key])
+
+        actions=ttk.Frame(self.form);actions.pack(fill='x',pady=(0,6))
+        self.advanced=self.tk.BooleanVar(value=False)
+        ttk.Checkbutton(actions,text='显示高级参数（一般保持默认）',variable=self.advanced,
+                        command=self._toggle_advanced).pack(side='left')
+        ttk.Button(actions,text='检查配置',command=self.on_check).pack(side='right')
+        self.actions=actions
+
+    def _toggle_advanced(self):
+        if self.advanced.get():
+            self.advanced_box.pack(fill='x',pady=(0,8),before=self.actions)
+        else:
+            self.advanced_box.pack_forget()
 
     def _field(self,parent,spec):
         key,title,kind,hint,_,only=spec
@@ -526,6 +573,78 @@ class App:
         except OSError as error:
             self._error(str(error))
 
+    def on_new(self):
+        """Clear the form for another experiment without touching the history."""
+        self.job=None
+        self.finished=set()
+        self.log_text=''
+        self.log.delete('1.0','end')
+        self._clear_results()
+        self._fill(self.controller.defaults())
+        self.fields['output']['var'].set(str(self._fresh_output()))
+        self._method_changed()
+        self.progress.configure(value=0)
+        self.stop_button.configure(state='disabled')
+        for item in self.history.selection():
+            self.history.selection_remove(item)
+        self.summary.configure(text='新任务：填写输入后点击“开始运行”')
+        self._say('已新建任务：输出目录 '+self.fields['output']['var'].get())
+
+    def _fresh_output(self):
+        """A new, unused run directory next to the workflow's default one."""
+        base=Path(self.controller.defaults()['output']).parent
+        candidate=base/('oasis_'+_stamp())
+        suffix=2
+        while candidate.exists():
+            candidate=base/('oasis_%s_%d'%(_stamp(),suffix));suffix+=1
+        return candidate
+
+    def on_export(self):
+        """Copy the selected run directory to a place the user chooses."""
+        if not self.job:
+            self._error('还没有可导出的结果。');return
+        source=Path(self.job['output'])
+        if not source.is_dir():
+            self._error('结果目录不存在：'+str(source));return
+        from tkinter import filedialog
+        target=filedialog.askdirectory(initialdir=str(Path.home()),title='选择导出位置')
+        if not target:return
+        destination=Path(target)/('oasis_export_'+_stamp())
+        try:
+            shutil.copytree(source,destination)
+        except OSError as error:
+            self._error('导出失败：'+str(error));return
+        files=[item for item in destination.rglob('*') if item.is_file()]
+        size=sum(item.stat().st_size for item in files)
+        self._say('已导出 %d 个文件（%.1f MB）到 %s'%(len(files),size/1e6,destination),ok=True)
+
+    def _model_path(self,result=None):
+        """Absolute path of a result's final model (results store it relative)."""
+        result=self.result if result is None else result
+        model=(result or {}).get('final_model')
+        if not model:
+            return None
+        path=Path(model)
+        if path.is_absolute():
+            return path
+        base=(result or {}).get('root') or (self.job or {}).get('output')
+        return Path(base)/path if base else path
+
+    def on_save_model(self):
+        """Save the final model as a single file (mmCIF or PDB)."""
+        model=self._model_path()
+        if not model or not model.is_file():
+            self._error('还没有最终模型。');return
+        from tkinter import filedialog
+        path=filedialog.asksaveasfilename(defaultextension='.cif',initialfile=Path(model).name,
+                                          initialdir=str(Path(model).parent),title='保存最终模型')
+        if not path:return
+        try:
+            shutil.copyfile(model,path)
+        except OSError as error:
+            self._error('保存失败：'+str(error));return
+        self._say('已保存模型到 '+path,ok=True)
+
     def on_import(self):
         from tkinter import filedialog
         path=filedialog.askdirectory(initialdir=str(self.controller.project),title='选择已有结果目录')
@@ -666,9 +785,12 @@ class App:
             self._set_plan(json.dumps(plan,ensure_ascii=False,indent=2)[:20000])
 
     def _clear_results(self):
+        self.result=None
         for row in self.tree.get_children():
             self.tree.delete(row)
         self.summary.configure(text='尚无结果')
+        self.save_model_button.configure(state='disabled')
+        self.structure.show(None)
 
     def _show_results(self):
         try:
@@ -705,6 +827,10 @@ class App:
         elif result.get('final_phases'):
             lines.append('相位：'+result['final_phases'])
         self.summary.configure(text='\n'.join(lines))
+        self.result=result
+        model=self._model_path(result)
+        self.save_model_button.configure(state='normal' if model and model.is_file() else 'disabled')
+        self.structure.show(str(model) if model and model.is_file() else None,result.get('preview'))
         self.tabs.select(2)
 
     def _set_plan(self,text):
@@ -730,6 +856,137 @@ class App:
 
     def run(self):
         self.root.mainloop()
+
+
+class StructureView:
+    """Draw the built model on a canvas: drag to rotate, wheel to zoom.
+
+    The Cα trace comes from the result preview, so the common case needs no
+    file parsing; “显示所有原子” reads the model with gemmi on demand.
+    """
+
+    def __init__(self, app, parent):
+        tk,ttk=app.tk,app.ttk
+        self.app=app
+        self.path=None
+        self.preview=[]
+        self.chains=[]
+        self.atoms=None
+        self.yaw=0.6
+        self.pitch=0.35
+        self.zoom=1.0
+        self._drag=None
+        self.frame=ttk.Frame(parent)
+        self.frame.pack(fill='both',expand=True)
+        tools=ttk.Frame(self.frame);tools.pack(fill='x',pady=(4,2))
+        self.label=ttk.Label(tools,text='尚无模型',style='Hint.TLabel')
+        self.label.pack(side='left')
+        ttk.Button(tools,text='重置视角',command=self.reset).pack(side='right',padx=(6,0))
+        self.all_atoms=tk.BooleanVar(master=app.root,value=False)
+        ttk.Checkbutton(tools,text='显示所有原子',variable=self.all_atoms,
+                        command=self._draw).pack(side='right')
+        self.canvas=tk.Canvas(self.frame,background='#0f1216',highlightthickness=0)
+        self.canvas.pack(fill='both',expand=True)
+        self.canvas.bind('<ButtonPress-1>',self._press)
+        self.canvas.bind('<B1-Motion>',self._move)
+        self.canvas.bind('<ButtonRelease-1>',lambda event:setattr(self,'_drag',None))
+        self.canvas.bind('<MouseWheel>',self._wheel)
+        self.canvas.bind('<Configure>',lambda event:self._draw())
+
+    def show(self, path, preview=None):
+        """Display ``path`` (or clear the page when it is None)."""
+        self.path=str(path) if path else None
+        self.preview=preview or []
+        self.atoms=None
+        self.chains=[]
+        if self.path:
+            from . import structure_view
+            self.chains=structure_view.chain_traces(self.preview)
+            if not self.chains:
+                try:
+                    self.chains=[(name,coordinates) for name,coordinates,_ in
+                                 structure_view.read_atoms(self.path)]
+                except Exception:
+                    self.chains=[]
+            residues=sum(len(points) for _,points in self.chains)
+            self.label.configure(text='%s · %d 条链 · %d 个残基'%(Path(self.path).name,
+                                 len(self.chains),residues))
+        else:
+            self.label.configure(text='尚无模型')
+        self.all_atoms.set(False)
+        self.reset()
+
+    def reset(self):
+        self.yaw=0.6;self.pitch=0.35;self.zoom=1.0
+        self._draw()
+
+    def _press(self, event):
+        self._drag=(event.x,event.y)
+
+    def _move(self, event):
+        if not self._drag:
+            return
+        x,y=self._drag
+        self.yaw+=(event.x-x)*0.012
+        self.pitch=max(-1.5,min(1.5,self.pitch+(event.y-y)*0.012))
+        self._drag=(event.x,event.y)
+        self._draw()
+
+    def _wheel(self, event):
+        step=1.1 if event.delta>0 else 1/1.1
+        self.zoom=max(0.2,min(8.0,self.zoom*step))
+        self._draw()
+        return 'break'  # keep the form's global wheel handler out of the page
+
+    def _atom_groups(self):
+        if self.atoms is None:
+            from . import structure_view
+            try:
+                self.atoms=[(name,coordinates) for name,coordinates,_ in
+                            structure_view.read_atoms(self.path)]
+            except Exception as error:
+                self.atoms=[]
+                self.label.configure(text='读取模型失败：'+str(error))
+        return self.atoms
+
+    def _draw(self):
+        import numpy as np
+        from . import structure_view
+        canvas=self.canvas
+        canvas.delete('all')
+        width=max(canvas.winfo_width(),10);height=max(canvas.winfo_height(),10)
+        if not self.path:
+            canvas.create_text(width/2,height/2,text='运行完成后这里显示最终模型',
+                               fill='#7f8c99')
+            return
+        all_atoms=self.all_atoms.get()
+        groups=self._atom_groups() if all_atoms else self.chains
+        points=[coordinates for _,coordinates in groups if len(coordinates)]
+        if not points:
+            canvas.create_text(width/2,height/2,text='模型中没有可绘制的原子',fill='#7f8c99')
+            return
+        matrix=structure_view.rotation(self.yaw,self.pitch)
+        center,scale=structure_view.fit(np.vstack(points),width,height)
+        scale*=self.zoom
+        total=0
+        for index,(name,coordinates) in enumerate(groups):
+            if not len(coordinates):
+                continue
+            color=structure_view.PALETTE[index%len(structure_view.PALETTE)]
+            x,y,_=structure_view.project(coordinates,matrix,center,scale,width,height)
+            total+=len(coordinates)
+            if all_atoms:
+                for px,py in zip(x,y):
+                    canvas.create_oval(px-1.4,py-1.4,px+1.4,py+1.4,fill=color,outline='')
+            else:
+                flat=[]
+                for px,py in zip(x,y):
+                    flat.extend((px,py))
+                if len(flat)>=4:
+                    canvas.create_line(*flat,fill=color,width=2)
+        canvas.create_text(10,height-10,anchor='sw',fill='#8fa0b0',
+                           text='%s · %d 个%s · 拖动旋转 / 滚轮缩放'%(
+                               Path(self.path).name,total,'原子' if all_atoms else 'Cα'))
 
 
 def _terminate(signum,frame):

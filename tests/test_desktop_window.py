@@ -259,3 +259,123 @@ def test_closing_asks_once_for_all_running_jobs(tmp_path,monkeypatch):
         assert app.root.winfo_exists()
     finally:
         app.root.destroy()
+
+
+def window(tmp_path):
+    """Build a real window for a test, skipping when no display exists."""
+    pytest.importorskip('tkinter')
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    app=desktop.App(desktop.Controller(project(tmp_path)))
+    app.root.update_idletasks()
+    return app
+
+
+def test_advanced_parameters_stay_hidden_until_asked_for(tmp_path):
+    """Only experiment inputs are visible; calibrated constants wait behind a toggle."""
+    app=window(tmp_path)
+    try:
+        assert app.advanced_box.winfo_manager()==''      # never packed at start
+        essential=[key for _,keys in desktop.ESSENTIAL_GROUPS for key in keys]
+        advanced=[key for _,keys in desktop.ADVANCED_GROUPS for key in keys]
+        assert set(essential)|set(advanced)==set(app.fields)
+        assert app.fields['sad']['row'].winfo_ismapped()
+        assert not app.fields['native']['row'].winfo_ismapped()
+        app.advanced.set(True);app._toggle_advanced();app.root.update_idletasks()
+        assert app.advanced_box.winfo_manager()=='pack'
+        assert app.fields['native']['row'].winfo_ismapped()
+        app.advanced.set(False);app._toggle_advanced();app.root.update_idletasks()
+        assert app.advanced_box.winfo_manager()==''
+    finally:
+        app.root.destroy()
+
+
+def test_new_task_clears_the_form_and_offers_a_fresh_output(tmp_path):
+    """“新建任务” must start from defaults without losing the task history."""
+    app=window(tmp_path)
+    try:
+        fill(app,dict(sad='old.mtz',heavy='old.pdb',sequence='old.fasta',elements='Se',
+                      wavelength='0.9',copies='3',output=str(tmp_path/'runs/oasis_run')))
+        app.job={'id':'previous','output':str(tmp_path/'runs/oasis_run')}
+        app.log.insert('end','old log')
+        app.on_new()
+        assert app.job is None
+        assert app.fields['sad']['var'].get()=='' and app.fields['heavy']['var'].get()==''
+        assert app.fields['wavelength']['var'].get()==''
+        assert app.log.get('1.0','end').strip()==''
+        output=app.fields['output']['var'].get()
+        assert output!=str(tmp_path/'runs/oasis_run')
+        assert Path(output).name.startswith('oasis_') and not Path(output).exists()
+        assert Path(output).parent==tmp_path/'runs'
+        assert '新任务' in app.summary.cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_export_copies_the_whole_run_directory(tmp_path,monkeypatch):
+    """The download button copies the run tree to a folder the user picks."""
+    app=window(tmp_path)
+    try:
+        run=tmp_path/'run'
+        (run/'00_sad_to_model').mkdir(parents=True)
+        (run/'00_sad_to_model'/'primary_model.cif').write_text('data_x\n')
+        (run/'gui.log').write_text('log\n')
+        app.job={'id':'x','output':str(run)}
+        from tkinter import filedialog
+        target=tmp_path/'chosen';target.mkdir()
+        monkeypatch.setattr(filedialog,'askdirectory',lambda **kwargs:str(target))
+        app.on_export()
+        exported=list(target.glob('oasis_export_*'))
+        assert len(exported)==1
+        assert (exported[0]/'00_sad_to_model'/'primary_model.cif').read_text()=='data_x\n'
+        assert (exported[0]/'gui.log').is_file()
+        assert '已导出 2 个文件' in app.status.cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_save_model_writes_the_final_model_file(tmp_path,monkeypatch):
+    app=window(tmp_path)
+    try:
+        model=tmp_path/'primary_model.cif';model.write_text('data_x\n')
+        app.result={'final_model':str(model)}
+        from tkinter import filedialog
+        destination=tmp_path/'saved.cif'
+        monkeypatch.setattr(filedialog,'asksaveasfilename',lambda **kwargs:str(destination))
+        app.on_save_model()
+        assert destination.read_text()=='data_x\n'
+    finally:
+        app.root.destroy()
+
+
+def test_structure_page_draws_the_ca_trace_and_can_show_all_atoms(tmp_path):
+    """The 3D page draws the result preview and switches to all atoms on demand."""
+    app=window(tmp_path)
+    try:
+        assert '结构 3D' in [app.tabs.tab(index,'text') for index in range(len(app.tabs.tabs()))]
+        model=tmp_path/'primary_model.pdb'
+        model.write_text(
+            'ATOM      1  N   MET A   1       0.000   0.000   0.000  1.00 20.00           N\n'
+            'ATOM      2  CA  MET A   1       1.458   0.000   0.000  1.00 20.00           C\n'
+            'ATOM      3  CA  GLY A   2       2.916   0.000   0.000  1.00 20.00           C\n'
+            'END\n')
+        preview=[{'chain':'A','points':[[0,0,0,'1','MET'],[3.8,0,0,'2','ALA'],[7.6,0,0,'3','GLY']]},
+                 {'chain':'B','points':[[0,4,0,'1','SER'],[3.8,4,0,'2','THR']]}]
+        app.tabs.select(3);app.root.update()
+        app.structure.show(model,preview)
+        app.structure._draw()
+        assert len(app.structure.chains)==2
+        trace_items=len(app.structure.canvas.find_all())
+        assert trace_items>=3            # two polylines plus the caption
+        app.structure.all_atoms.set(True)
+        app.structure._draw()
+        assert len(app.structure.canvas.find_all())>trace_items
+        assert sum(len(coordinates) for _,coordinates in app.structure.atoms)==3
+        app.structure.all_atoms.set(False)
+        app.structure.show(None)
+        assert app.structure.canvas.find_all()      # a placeholder, not an empty page
+    finally:
+        app.root.destroy()
