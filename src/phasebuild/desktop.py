@@ -18,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import charts
 from .jobs import Jobs
 
 STATUS_NAMES={'queued':'等待运行','running':'正在运行','stopping':'正在停止','cancelled':'已停止',
@@ -298,6 +299,8 @@ class App:
         ttk.Button(tools,text='导出结果…',command=self.on_export).pack(side='right',padx=6)
         self.summary=self.ttk.Label(frame,text='尚无结果',justify='left',anchor='w',padding=(4,6))
         self.summary.pack(fill='x')
+        self.chart=MetricChart(self,frame)
+        self.chart.frame.pack(fill='x',pady=(2,6))
         columns=('stage','engine','rwork','rfree','cycles')
         self.tree=ttk.Treeview(frame,columns=columns,show='headings',height=10)
         for key,title,width in [('stage','阶段',140),('engine','引擎',220),('rwork','R-work',90),
@@ -790,6 +793,7 @@ class App:
             self.tree.delete(row)
         self.summary.configure(text='尚无结果')
         self.save_model_button.configure(state='disabled')
+        self.chart.show([])
         self.structure.show(None)
 
     def _show_results(self):
@@ -828,6 +832,7 @@ class App:
             lines.append('相位：'+result['final_phases'])
         self.summary.configure(text='\n'.join(lines))
         self.result=result
+        self.chart.show(charts.round_series(result.get('metrics')))
         model=self._model_path(result)
         self.save_model_button.configure(state='normal' if model and model.is_file() else 'disabled')
         self.structure.show(str(model) if model and model.is_file() else None,result.get('preview'))
@@ -856,6 +861,88 @@ class App:
 
     def run(self):
         self.root.mainloop()
+
+
+class MetricChart:
+    """Draw R-work / R-free per refinement round on a canvas."""
+
+    WORK='#2b6cb0'
+    FREE='#c53030'
+
+    def __init__(self,app,parent):
+        tk,ttk=app.tk,app.ttk
+        self.rows=[]
+        self.frame=ttk.Frame(parent)
+        self.canvas=tk.Canvas(self.frame,height=190,background='#ffffff',
+                              highlightthickness=1,highlightbackground='#dde3ea')
+        self.canvas.pack(fill='x')
+        self.canvas.bind('<Configure>',lambda event:self._draw())
+
+    def show(self,rows):
+        """Show the rows from :func:`phasebuild.charts.round_series`."""
+        self.rows=list(rows or [])
+        self._draw()
+
+    def _draw(self):
+        canvas=self.canvas
+        canvas.delete('all')
+        width=max(canvas.winfo_width(),160);height=max(canvas.winfo_height(),120)
+        rows=self.rows
+        if not rows:
+            canvas.create_text(width/2,height/2,text='尚无逐轮精修数据',fill='#8a97a5')
+            return
+        if len(rows)<2:
+            canvas.create_text(width/2,height/2,fill='#8a97a5',
+                               text='只有 %d 轮数据；至少两轮才能画出曲线'%len(rows))
+            return
+        left,right,top,bottom=52,14,14,26
+        low,high=charts.y_range(rows)
+        ticks=charts.y_ticks(low,high)
+        if ticks:
+            low=min(low,ticks[0]);high=max(high,ticks[-1])
+        plot_w=max(width-left-right,10);plot_h=max(height-top-bottom,10)
+
+        def px(index):
+            return left+plot_w*index/(len(rows)-1)
+
+        def py(value):
+            return top+plot_h*(high-value)/max(high-low,1e-9)
+
+        for tick in ticks:
+            y=py(tick)
+            canvas.create_line(left,y,left+plot_w,y,fill='#e6ebf1')
+            canvas.create_text(left-6,y,anchor='e',text='%.0f%%'%tick,fill='#7b8794',
+                               font=('Helvetica',9))
+        canvas.create_line(left,top,left,top+plot_h,fill='#9aa7b4')
+        canvas.create_line(left,top+plot_h,left+plot_w,top+plot_h,fill='#9aa7b4')
+        every=1 if len(rows)<=12 else 2
+        for index,row in enumerate(rows):
+            if index%every:
+                continue
+            canvas.create_text(px(index),top+plot_h+12,text=str(row['round']),fill='#7b8794',
+                               font=('Helvetica',9))
+
+        legend=(('r_work',self.WORK,None,'R-work'),('r_free',self.FREE,(4,3),'R-free'))
+        for key,color,dash,name in legend:
+            points=[(px(index),py(row[key])) for index,row in enumerate(rows)
+                    if row[key] is not None]
+            if len(points)>=2:
+                flat=[value for point in points for value in point]
+                canvas.create_line(*flat,fill=color,width=2,dash=dash)
+            for x,y in points:
+                canvas.create_oval(x-2.5,y-2.5,x+2.5,y+2.5,fill=color,outline='')
+
+        last=[row for row in rows if row['r_work'] is not None or row['r_free'] is not None][-1]
+        legend_w=112;legend_h=18*len(legend)+8
+        x0=left+plot_w-legend_w;y0=top+6
+        canvas.create_rectangle(x0-6,y0-2,x0+legend_w,y0+legend_h,fill='#ffffff',
+                                outline='#e2e8f0')
+        for index,(key,color,dash,name) in enumerate(legend):
+            y=y0+6+18*index
+            canvas.create_line(x0,y,x0+18,y,fill=color,width=2,dash=dash)
+            value=last[key]
+            canvas.create_text(x0+24,y,anchor='w',fill='#3d4852',font=('Helvetica',9),
+                               text='%s %s'%(name,'—' if value is None else '%.1f%%'%value))
 
 
 class StructureView:

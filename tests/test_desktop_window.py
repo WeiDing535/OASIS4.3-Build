@@ -379,3 +379,34 @@ def test_structure_page_draws_the_ca_trace_and_can_show_all_atoms(tmp_path):
         assert app.structure.canvas.find_all()      # a placeholder, not an empty page
     finally:
         app.root.destroy()
+
+
+def test_results_page_draws_the_r_work_and_r_free_curve(tmp_path):
+    """The curve needs the per-round metrics, and one round cannot make a line."""
+    app=window(tmp_path)
+    try:
+        pairs=[(0.3903,0.4266),(0.3639,0.4031),(0.3402,0.3931),(0.3345,0.3869),(0.3156,0.3829)]
+        metrics=[dict(stage='第 %d 轮'%index,round=index,r_work=work,r_free=free)
+                 for index,(work,free) in enumerate(pairs,1)]
+        app.controller.results=lambda identifier:dict(metrics=metrics,final_model=None,preview=[])
+        app.job={'id':'x','output':str(tmp_path)}
+        app._show_results()
+        app.root.update()
+        app.chart._draw()
+        items=app.chart.canvas.find_all()
+        assert len(items)>25
+        texts=[app.chart.canvas.itemcget(item,'text') for item in items
+               if app.chart.canvas.type(item)=='text']
+        assert any('R-work 31.6%' in text for text in texts)
+        assert any('R-free 38.3%' in text for text in texts)
+        assert sum(1 for text in texts if text.endswith('%'))>=3   # y axis ticks
+        assert {'1','5'} <= set(texts)                             # x axis rounds
+
+        app.controller.results=lambda identifier:dict(metrics=metrics[:1],final_model=None,preview=[])
+        app._show_results()
+        app.chart._draw()
+        texts=[app.chart.canvas.itemcget(item,'text') for item in app.chart.canvas.find_all()
+               if app.chart.canvas.type(item)=='text']
+        assert any('至少两轮' in text for text in texts)
+    finally:
+        app.root.destroy()
