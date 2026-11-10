@@ -1,8 +1,10 @@
+> **历史存档（2026-10-23）**：本文描述的浏览器界面已被原生桌面窗口取代，启动命令为 `python -B run_desktop.py --project .`。以下正文保留原样，仅作回溯；现行说明见 [OASIS4.3 使用说明](OASIS4.3.md)。
+
 # OASIS4.3-Build
 
 [English](README_EN.md) | 中文
 
-SAD 定相与蛋白质模型构建研究软件：统一浏览器界面连接 OASIS 定相、密度修饰、PhaseBuild 和外部 Buccaneer / REFMAC。
+SAD 定相与蛋白质模型构建研究软件：统一界面连接 OASIS 定相、密度修饰、PhaseBuild 和外部 Buccaneer / REFMAC。
 
 软件内核和界面沿用 **PhaseBuild 0.8.3** 名称。本仓库首个公开源码修订为 **2026-10-22**。旧版 OASIS4.3-GUI 定相软件保留在[独立仓库](https://github.com/WeiDing535/OASIS4.3-GUI)，没有被替换。
 
@@ -10,14 +12,14 @@ SAD 定相与蛋白质模型构建研究软件：统一浏览器界面连接 OAS
 
 统一界面新增 **SAD 定相到模型**：已有重原子信息 → SAD 定相 → 密度修饰 → 无初始模型构建 → 原 HL 约束精修。原独立功能保留。
 
-使用 [conda 环境](environment.yml)（Python 3.12）启动 `python -B run_gui.py --project .`。新入口支持只读检查和命令行断点恢复，分别保存原始 SAD HL 与密度修饰相位，保留原自由集；详见 [整合说明](docs/INTEGRATION.md)。这是软件整合开发版，尚无新增真实数据端到端求解结论，也不是此前 Intel Mac 草稿包的功能声明。
+使用 [conda 环境](environment.yml)（Python 3.12）启动 `python -B run_desktop.py --project .`。新入口支持只读检查和命令行断点恢复，分别保存原始 SAD HL 与密度修饰相位，保留原自由集；详见 [整合说明](docs/INTEGRATION.md)。这是软件整合开发版，尚无新增真实数据端到端求解结论，也不是此前 Intel Mac 草稿包的功能声明。
 
 推荐启动方式：
 
 ```bash
 conda env create -f environment.yml
 conda activate oasis43-unified
-python -B run_gui.py --project .
+python -B run_desktop.py --project .
 ```
 
 ## 完整包目标：Linux 优先
@@ -46,7 +48,7 @@ PHASEBUILD_RUNTIME=/path/to/ccp4 ./PhaseBuild.command
 也可直接使用已有科学 Python 环境：
 
 ```bash
-python -B run_gui.py --project .
+python -B run_desktop.py --project .
 ```
 
 运行后打开终端显示的完整本机链接。关闭网页不会停止任务；通过界面停止计算，在终端按 Ctrl+C 关闭服务。输出目录必须是新目录。

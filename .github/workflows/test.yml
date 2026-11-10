@@ -29,9 +29,8 @@ jobs:
         run: python -B -m pytest -q -p no:cacheprovider tests vendor/oasis43/tests -m 'not reference_data'
       - name: Check CLI and source package
         run: |
-          python -B run_gui.py --help
+          python -B run_desktop.py --help
           python -B run_build_from_phases.py --help
-          python -B package_gui.py --output dist/phasebuild-source.zip
           python -B run_sad_to_model.py --help
           python -B package_oasis.py --output dist/OASIS4.3-focused-source.zip
       - name: Check Linux application staging (not a complete runtime package)

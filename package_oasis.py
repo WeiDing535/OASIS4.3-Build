@@ -8,9 +8,9 @@ import tomllib
 import zipfile
 
 ROOT=Path(__file__).resolve().parent
-SCRIPTS=['run_gui.py','run_sad_to_model.py','run_oasis_stage.py','run_build_from_phases.py','run_build_pipeline.py','run_trace_feedback.py','run_pplus_trust_stage.py','run_hand_preselection.py','run_sad_portfolio.py']
+SCRIPTS=['run_desktop.py','run_sad_to_model.py','run_oasis_stage.py','run_build_from_phases.py','run_build_pipeline.py','run_trace_feedback.py','run_pplus_trust_stage.py','run_hand_preselection.py','run_sad_portfolio.py']
 # This compatibility adapter is only used by the old workbench in the development
-# repository. The focused server always receives oasis_workflow explicitly.
+# repository. The desktop window always receives oasis_workflow explicitly.
 LEGACY_ONLY={'phasebuild.gui_workflow'}
 
 
@@ -47,7 +47,6 @@ def source_files(root=ROOT):
                 for alias in item.names:
                     if alias.name.split('.')[0] in ('phasebuild','oasis_py'):include(alias.name)
     paths.add(src/'phasebuild/resolve_driver.py')
-    paths.update((src/'phasebuild/oasis_assets').glob('*'))
     paths.update(p for p in (src/'oasis_py/resources').rglob('*') if p.is_file())
     paths.update(root/p for p in ['OASIS4.3.command','environment.yml','LICENSE','AUTHORS.md','CITATION.cff','docs/OASIS4.3.md','docs/VERSIONING.md','docs/INSULIN_DIAGNOSIS_20261023.md','docs/NSF_D2_IMPROVEMENT_20261026.md','docs/PORTFOLIO_20261027.md','docs/GUI_PORTFOLIO_RELEASE_20261027.md','docs/DEFAULT_W8_AUTO_FPP_20261027.md','docs/MTZ_INPUT_SELECTION_20261027.md','docs/DUAL_HAND_AND_PHASE_RESTRAINTS_20261028.md','docs/FOUR_MODES_20261028.md','docs/METHOD_SELECTION_20261028.md','docs/PHASE_CONFIDENCE_DIAGNOSTIC_20261028.md','docs/ITERATIVE_CLEANUP_NSF_20261028.md','docs/AUTO_HAND_ALL_METHODS_20261028.md',
                    'vendor/oasis43/LICENSE','vendor/oasis43/UPSTREAM.json','vendor/oasis43/TEST_PATCHES.md'])
@@ -78,7 +77,6 @@ dependencies = {json.dumps(project['project']['dependencies'])}
 [tool.setuptools.packages.find]
 where = ["src"]
 [tool.setuptools.package-data]
-phasebuild = ["oasis_assets/*"]
 oasis_py = ["resources/*.json", "resources/*.md", "resources/*.gz", "resources/licenses/*.txt"]
 '''
     with zipfile.ZipFile(target,'x',zipfile.ZIP_DEFLATED) as z:

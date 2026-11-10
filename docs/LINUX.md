@@ -36,13 +36,15 @@ cd OASIS4.3-Build-linux-x86_64
 ./OASIS4.3-Build.sh
 ```
 
-For a server without a desktop:
+The window is a native Tk desktop window; there is no web server, no port and no browser. On a server without a graphical session, use the command line instead — it takes the same options as the form:
 
 ```bash
-./phasebuild gui --no-browser --port 8765
+./phasebuild sad-to-model --help
+./phasebuild sad-to-model --sad SAD.mtz --native NATIVE.mtz --sequence SEQ.fasta \
+   --heavy HEAVY.pdb --wavelength 0.97918 --elements Se --output NEW_DIR
 ```
 
-On the user's own computer establish an SSH local forward, for example `ssh -L 8765:127.0.0.1:8765 user@server`, then open the complete token-bearing localhost URL printed by the server. Keep the GUI bound to `127.0.0.1`; no public HTTP listener is needed.
+For a window over SSH, forward X11 (`ssh -X user@server`) and run `./phasebuild gui`; no public listener is opened by the program.
 
 ## Release gate
 

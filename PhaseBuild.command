@@ -18,7 +18,7 @@ if [ ! -x "$runtime" ]; then
   read -r -p '按回车退出…'
   exit 1
 fi
-"$runtime" -B run_gui.py --project "$PWD" "$@"
+"$runtime" -B run_desktop.py --project "$PWD" "$@"
 status=$?
 if [ "$status" -ne 0 ]; then
   read -r -p '启动失败，请阅读上方提示。按回车退出…'

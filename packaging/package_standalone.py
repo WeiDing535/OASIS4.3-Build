@@ -107,7 +107,7 @@ mkdir -p "$CCP4_SCR"
 if [ "$#" -gt 0 ]; then
   exec "$HERE/python/bin/python3" -u "$HERE/app/$1" "${@:2}"
 fi
-exec "$HERE/python/bin/python3" -u "$HERE/app/run_gui.py" --project "$HERE"
+exec "$HERE/python/bin/python3" -u "$HERE/app/run_desktop.py" --project "$HERE/app"
 ''')
     os.chmod(launcher,0o755)
     return launcher
@@ -181,6 +181,25 @@ def verify_bundle(output):
         env=env,capture_output=True,text=True,timeout=180)
     report['cli_import']=check.returncode==0 and 'dm-engine' in check.stdout
     if not report['cli_import']:raise RuntimeError('Bundled CLI failed to start: '+(check.stderr or check.stdout)[:800])
+    # The desktop window must import inside the bundle: Tkinter ships with the
+    # bundled Python, so the GUI needs no extra installation.
+    desktop=subprocess.run([str(python),'-c',
+        "import sys;sys.path.insert(0,sys.argv[1]);import tkinter;from phasebuild import desktop;"
+        "print(tkinter.TkVersion,desktop.App.__name__)",str(output/'app'/'src')],
+        env=env,capture_output=True,text=True,timeout=120)
+    if desktop.returncode:raise RuntimeError('Bundled desktop UI cannot start: '+desktop.stderr[:800])
+    report['desktop']=desktop.stdout.strip()
+    launcher_help=subprocess.run([str(python),'-u',str(output/'app'/'run_desktop.py'),'--help'],
+        env=env,capture_output=True,text=True,timeout=120)
+    report['desktop_cli']=launcher_help.returncode==0 and 'project' in launcher_help.stdout
+    if not report['desktop_cli']:raise RuntimeError('Bundled desktop launcher failed: '+(launcher_help.stderr or launcher_help.stdout)[:800])
+    # The window must find the pipeline scripts from the bundle root as well.
+    project_check=subprocess.run([str(python),'-c',
+        "import sys;sys.path.insert(0,sys.argv[1]);from phasebuild.desktop import resolve_project;"
+        "p=resolve_project(sys.argv[2]);assert p and (p/'run_sad_to_model.py').is_file(),'cannot resolve project';print(p)",
+        str(output/'app/src'),str(output)],cwd=str(output),env=env,capture_output=True,text=True,timeout=120)
+    report['desktop_project']=project_check.returncode==0
+    if not report['desktop_project']:raise RuntimeError('Bundled desktop cannot locate its scripts: '+(project_check.stderr or project_check.stdout)[:800])
     # The Parrot adapter must resolve the bundled binary, never a host installation.
     locate=subprocess.run([str(python),'-c',
         "import sys;sys.path.insert(0,sys.argv[1]);from phasebuild import parrot_dm;"
@@ -201,7 +220,7 @@ def main(argv=None):
     parser.add_argument('--parrot-binary',type=Path)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--keep-optional',action='store_true',
-                        help='keep GUI/plotting/validation payloads (adds ~1.4 GB)')
+                        help='keep optional RESOLVE/plotting/validation payloads (adds ~1.4 GB)')
     parser.add_argument('--keep-all-monomers',action='store_true',
                         help='keep every ligand dictionary (adds ~660 MB)')
     archives=parser.add_mutually_exclusive_group()

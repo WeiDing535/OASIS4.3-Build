@@ -18,7 +18,7 @@ unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_FRAMEWORK_PATH DYLD_INSE
 export PHASEBUILD_STANDALONE=1 PHASEBUILD_RUNTIME="$base/runtime"
 export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$base/app/src"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1
-mode=${1:---help}
+mode=${1:-gui}
 if [ "$#" -gt 0 ]; then shift; fi
 case "$mode" in
   doctor) script=run_runtime_doctor.py ;;
@@ -30,13 +30,13 @@ case "$mode" in
   refine) script=run_refine.py ;;
   rfactor) script=run_rfactor.py ;;
   phase-refine) script=run_phase_refinement.py ;;
-  gui) exec "$base/python/bin/python3" "$base/app/run_gui.py" --project "$base/app" "$@" ;;
+  gui) exec "$base/python/bin/python3" "$base/app/run_desktop.py" --project "$base/app" "$@" ;;
   audit|evaluate) exec "$base/python/bin/python3" "$base/app/run_phasebuild.py" "$mode" "$@" ;;
   --help|-h|help)
     cat <<'HELP'
 OASIS4.3-Build local portable preview (@PLATFORM@)
   ./phasebuild sad-to-model --help  SAD phasing -> density modification -> model building
-  ./phasebuild gui                  Open the local GUI
+  ./phasebuild gui                  Open the desktop window
   ./phasebuild doctor [--verify]    Inspect/verify bundled components
   ./phasebuild hybrid-hl --help     PhaseBuild seed + Buccaneer + original HL refinement
   ./phasebuild build-hl --help      Experimental phases, no initial model + original HL refinement

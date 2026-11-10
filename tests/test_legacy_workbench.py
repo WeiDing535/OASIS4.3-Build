@@ -1,13 +1,7 @@
-"""Workflow, task lifecycle and loopback API boundaries for the GUI."""
+"""Planning and result collection for the archived PhaseBuild workbench."""
 import json
-import sys
-import threading
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 import pytest
-from phasebuild import gui
 from phasebuild.gui_workflow import defaults,make_plan,collect_results
 
 
@@ -89,127 +83,6 @@ def test_existing_output_never_overwritten(cfg,tmp_path):
     with pytest.raises(ValueError,match='已存在'):
         make_plan(cfg,tmp_path,inspect=False)
     assert marker.read_text()=='preserved'
-
-
-def wait_for(predicate):
-    limit=time.monotonic()+8
-    while time.monotonic()<limit:
-        if predicate():
-            return
-        time.sleep(.02)
-    raise AssertionError('Task state did not settle')
-
-
-def test_worker_failure_preserves_output_and_stops_pipeline(monkeypatch,tmp_path):
-    out=tmp_path/'output'
-    steps=[dict(name='first',command=[sys.executable,'-c',"print('visible log'); raise SystemExit(7)"],output=str(out/'one'),kind='build'),
-           dict(name='must not run',command=[sys.executable,'-c',"raise SystemExit(0)"],output=str(out/'two'),kind='build')]
-    monkeypatch.setattr(gui,'make_plan',lambda *a:({'output':str(out)},steps))
-    jobs=gui.Jobs(tmp_path);job=jobs.start({})
-    wait_for(lambda:jobs.active is None)
-    result=jobs.get(job['id'])
-    assert result['status']=='failed' and result['completed']==0
-    assert 'visible log' in result['log'] and '退出码 7' in result['error']
-    assert json.loads((out/'gui_job.json').read_text())['status']=='failed'
-
-
-def test_empty_trace_stops_with_actionable_error(monkeypatch,tmp_path):
-    out=tmp_path/'output';trace=out/'trace'
-    code='from pathlib import Path; p=Path('+repr(str(trace))+'); p.mkdir(); (p/"build_report.json").write_text(\'{"residues":0}\')'
-    steps=[dict(name='trace',command=[sys.executable,'-c',code],output=str(trace),kind='trace')]
-    monkeypatch.setattr(gui,'make_plan',lambda *a:({'output':str(out)},steps))
-    jobs=gui.Jobs(tmp_path);job=jobs.start({})
-    wait_for(lambda:jobs.active is None)
-    result=jobs.get(job['id'])
-    assert result['status']=='failed' and '未找到满足筛选条件' in result['error']
-
-
-def test_stop_kills_running_group_and_prevents_next_step(monkeypatch,tmp_path):
-    out=tmp_path/'output';marker=tmp_path/'should_not_exist'
-    steps=[dict(name='long',command=[sys.executable,'-c','import time; print("started",flush=True); time.sleep(60)'],output=str(out/'one'),kind='build'),
-           dict(name='next',command=[sys.executable,'-c','from pathlib import Path; Path('+repr(str(marker))+').touch()'],output=str(out/'two'),kind='build')]
-    monkeypatch.setattr(gui,'make_plan',lambda *a:({'output':str(out)},steps))
-    jobs=gui.Jobs(tmp_path);job=jobs.start({})
-    wait_for(lambda:jobs.process is not None)
-    process=jobs.process
-    with pytest.raises(ValueError,match='已有任务'):
-        jobs.start({})
-    jobs.cancel(job['id'])
-    wait_for(lambda:jobs.active is None)
-    assert process.poll() is not None
-    assert jobs.get(job['id'])['status']=='cancelled'
-    assert not marker.exists()
-
-
-def test_restart_marks_unfinished_job_interrupted(tmp_path):
-    jobs=gui.Jobs(tmp_path)
-    data=dict(id='old',status='running',output=str(tmp_path),owned=False,created=0)
-    jobs.persist(data)
-    restored=gui.Jobs(tmp_path)
-    assert restored.items['old']['status']=='interrupted'
-
-
-def test_results_without_refinement_do_not_invent_r_factors(tmp_path):
-    (tmp_path/'build_report.json').write_text('{}')
-    results=collect_results(tmp_path)
-    assert results['metrics']==[] and results['preview']==[]
-    assert results['final_model'] is None
-
-
-def test_legacy_nested_cycle_reports_are_chronological(tmp_path):
-    for cycles,relative in [(30,'cycles_30/refine'),(40,'continuation/cycles_40/refine'),
-                            (50,'continuation/cycles_50/refine')]:
-        folder=tmp_path/relative;folder.mkdir(parents=True)
-        data=dict(status='success',statistics={'final':{'r_work':.3,'r_free':cycles/100.}},
-                  requested_cycles=10,free_flags_preserved=True)
-        (folder/'refinement_report.json').write_text(json.dumps(data))
-    rows=collect_results(tmp_path)['metrics']
-    assert [row['r_free'] for row in rows]==[.3,.4,.5]
-
-
-@pytest.fixture
-def server(tmp_path):
-    server=gui.create_server(tmp_path,token='test-token')
-    thread=threading.Thread(target=server.serve_forever,daemon=True)
-    thread.start()
-    yield server
-    server.shutdown();server.server_close();thread.join()
-
-
-def request(server,path,token='test-token',data=None,headers=None):
-    h={'X-PhaseBuild-Token':token}
-    h.update(headers or {})
-    req=urllib.request.Request('http://'+server.address+path,headers=h,
-                               data=json.dumps(data).encode() if data is not None else None)
-    return urllib.request.urlopen(req)
-
-
-def test_loopback_api_requires_token_and_same_origin(server):
-    assert request(server,'/api/defaults').status==200
-    for headers,token in [({},'wrong'),({'Origin':'https://example.invalid'},'test-token'),
-                          ({'Host':'attacker.invalid'},'test-token')]:
-        with pytest.raises(urllib.error.HTTPError) as error:
-            request(server,'/api/defaults',token,headers=headers)
-        assert error.value.code==403
-
-
-def test_browse_new_output_opens_existing_parent(server,tmp_path):
-    from urllib.parse import urlencode
-    result=json.loads(request(server,'/api/browse?'+urlencode({'path':str(tmp_path/'new_run'),'allow_parent':'1'})).read())
-    assert result['path']==str(tmp_path)
-
-
-def test_download_cannot_escape_imported_results(server,tmp_path):
-    root=tmp_path/'result';root.mkdir()
-    (root/'build_report.json').write_text('{}')
-    (tmp_path/'outside.json').write_text('{"private":true}')
-    job=server.jobs.import_results(root)
-    path='/api/download?token=test-token&id='+job['id']+'&file=../outside.json'
-    with pytest.raises(urllib.error.HTTPError) as error:
-        request(server,path)
-    assert error.value.code==400
-    good='/api/download?token=test-token&id='+job['id']+'&file=build_report.json'
-    assert request(server,good).read()==b'{}'
 
 
 def test_complete_fresh_schedule_uses_original_then_updated_map(cfg,tmp_path):

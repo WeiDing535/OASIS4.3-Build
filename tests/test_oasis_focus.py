@@ -2,9 +2,6 @@
 import json
 from pathlib import Path
 import sys
-import threading
-import urllib.request
-import urllib.error
 import numpy as np
 import gemmi
 import pytest
@@ -25,7 +22,11 @@ def test_both_real_phase_and_dm_routes_match_preserved_upstream(inputs,method):
     meta=json.loads(dm.with_suffix('.json').read_text())
     assert meta['dm_engine']==('legacy' if method=='pplus' else 'mlhl-best')
     assert meta['phase_method']==method and meta['solvent_fraction_used']==.45 and meta['solvent_source']=='user'
-    assert state['experimental_prior']['sha256']==fingerprint(raw)['sha256']
+    assert state['pre_dm_result']['sha256']==fingerprint(raw)['sha256']
+    observations=out/'02_sad/observations.mtz'
+    assert state['experimental_prior']['sha256']==fingerprint(observations)['sha256']
+    build_command=pipeline.stage_plan(state['config'])[-1]['command']
+    assert build_command[build_command.index('--phase-prior')+1]==str(observations)
     assert raw.read_bytes()!=dm.read_bytes()
     from oasis_py.cli import main as upstream
     ref=out/'upstream.mtz'
@@ -81,20 +82,18 @@ def test_pure_plan_rejects_removed_modes_and_preserves_method_options(inputs):
         with pytest.raises(ValueError):workflow.make_plan({**cfg,**bad},root())
 
 
-def test_focused_server_only_accepts_the_two_method_pipeline(inputs):
-    from phasebuild.gui import create_server
-    server=create_server(root(),workflow=workflow)
-    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
-    def call(route,data=None):
-        req=urllib.request.Request('http://'+server.address+'/api/'+route,
-            data=None if data is None else json.dumps(data).encode(),headers={'X-PhaseBuild-Token':server.token,'Content-Type':'application/json'})
-        with urllib.request.urlopen(req) as response:return json.load(response)
-    try:
-        default=call('defaults')['config'];assert default['method']=='likelihood' and 'profile' not in default
-        result=call('plan',{**inputs,'method':'pplus'});assert len(result['stages'])==5
-        with pytest.raises(urllib.error.HTTPError) as err:call('plan',{**inputs,'mode':'refine'})
-        assert err.value.code==400 and not Path(inputs['output']).exists()
-    finally:server.shutdown();server.server_close();thread.join(timeout=3)
+def test_desktop_controller_only_accepts_the_two_method_pipeline(inputs):
+    from phasebuild.desktop import Controller
+    controller=Controller(root(),workflow=workflow)
+    default=controller.defaults();assert default['method']==workflow.defaults(root())['method'] and 'profile' not in default
+    config={**inputs,'method':'pplus'}
+    cfg,steps=controller.plan(config)
+    assert len(steps)==1 and steps[0]['command'][2].endswith('run_sad_to_model.py')
+    assert cfg['output']==str(Path(inputs['output']))
+    plan=controller.describe(cfg)
+    assert len(plan['stages'])==5 and plan['effective_options']['dm_engine']=='Legacy'
+    with pytest.raises(ValueError):controller.plan({**config,'mode':'refine'})
+    assert not Path(inputs['output']).exists()
 
 
 def test_results_keep_intermediate_separate_and_verify_final_hash(inputs):
@@ -123,15 +122,23 @@ def test_results_keep_intermediate_separate_and_verify_final_hash(inputs):
 
 
 def test_focused_source_runs_without_legacy_entrypoints_or_training_models(inputs,tmp_path):
-    import importlib.util,subprocess,zipfile
+    import importlib.util,subprocess,tomllib,zipfile
     spec=importlib.util.spec_from_file_location('focus_packager',root()/'package_oasis.py')
     packager=importlib.util.module_from_spec(spec);spec.loader.exec_module(packager)
     target=tmp_path/'focused.zip';packager.main(['--output',str(target)])
     with zipfile.ZipFile(target) as z:
         names=z.namelist()
+        prefix='OASIS4.3-focused-development/'
+        project=tomllib.loads((root()/'pyproject.toml').read_text())
+        packaged=tomllib.loads(z.read(prefix+'pyproject.toml').decode())
+        manifest=json.loads(z.read(prefix+'PACKAGE_MANIFEST.json'))
+        assert packaged['project']['version']==manifest['version']==project['tool']['oasis43']['version']
+        for key in ['requires-python','dependencies']:
+            assert packaged['project'][key]==project['project'][key]
         assert not any('/gui_assets/' in n or '/models/' in n or n.endswith('/gui_workflow.py') for n in names)
+        assert any(n.endswith('/phasebuild/desktop.py') for n in names) and not any(n.endswith('/phasebuild/gui.py') for n in names)
         assert not any(n.endswith('/run_phasebuild.py') or n.endswith('/run_refine.py') or n.endswith('/oasis_py/cli.py') for n in names)
-        assert any(n.endswith('/oasis_assets/app.js') for n in names)
+        assert any(n.endswith('/run_desktop.py') for n in names)
         assert any(n.endswith('/clipper-2.1.20201109.tar.gz') for n in names)
         z.extractall(tmp_path/'source')
     extracted=tmp_path/'source/OASIS4.3-focused-development'
@@ -141,7 +148,7 @@ def test_focused_source_runs_without_legacy_entrypoints_or_training_models(input
     assert result.returncode==0,result.stderr
     assert json.loads(result.stdout)['config']['method']=='pplus'
     probe=subprocess.run([sys.executable,'-B','-c',
-        "import sys;sys.path.insert(0,'src');from phasebuild.gui import create_server;from phasebuild import oasis_workflow; s=create_server('.',workflow=oasis_workflow);assert 'gui_workflow' not in sys.modules;s.server_close();print('focused imports passed')"],
+        "import sys;sys.path.insert(0,'src');from phasebuild.desktop import Controller;from phasebuild import oasis_workflow;c=Controller('.',workflow=oasis_workflow);assert 'gui_workflow' not in sys.modules;assert c.defaults()['method'];print('focused imports passed')"],
         cwd=extracted,text=True,capture_output=True)
     assert probe.returncode==0,probe.stderr
     assert not Path(inputs['output']).exists()
@@ -188,8 +195,8 @@ def test_optional_build_flag_in_preflight_and_resume_protocol(inputs):
     with pytest.raises(ValueError,match='boolean'):pipeline.validate({**inputs,'build_model':'false'})
 
 
-def test_gui_phases_only_job_is_successful_and_reports_three_stages(inputs,tmp_path):
-    from phasebuild.gui import Jobs
+def test_desktop_phases_only_job_is_successful_and_reports_three_stages(inputs,tmp_path):
+    from phasebuild.jobs import Jobs
     project=tmp_path/'project';project.mkdir()
     (project/'run_sad_to_model.py').symlink_to(root()/'run_sad_to_model.py')
     jobs=Jobs(project,workflow=workflow)
@@ -201,3 +208,35 @@ def test_gui_phases_only_job_is_successful_and_reports_three_stages(inputs,tmp_p
     assert saved['pipeline_progress']['total']==saved['pipeline_progress']['completed']==3
     assert len(saved['plan']['stages'])==3
     assert workflow.collect_results(job['output'])['final_phases']=='00_sad_to_model/03_dm/map_phases.mtz'
+
+
+def test_fixed_endpoint_grid_reports_its_retained_endpoint(tmp_path):
+    """--feedback-endpoints keeps one pipeline per endpoint; the front ends must
+    resolve the selection instead of reporting an empty case root."""
+    base=tmp_path/'run'/'00_sad_to_model'
+    for tag,fb,rwork in [('endpoint_fb2_s0.50',2,0.2834),('endpoint_fb3_s0.50',3,0.2911)]:
+        folder=base/tag
+        folder.mkdir(parents=True)
+        (folder/'pipeline_report.json').write_text(json.dumps(
+            {'engine':'oasis-sad-to-model','status':'completed','config':{'method':'pplus_bundled','rounds':1},
+             'completed':[],'primary_metric':{'r_work':rwork,'r_free':rwork+0.03}}))
+    (base/'endpoint_selection.json').write_text(json.dumps(
+        {'rule':'lowest final work-set R across the predeclared endpoint grid; R-free never read',
+         'endpoints':[{'feedback':2,'solvent':0.5,'status':'completed','output':str(base/'endpoint_fb2_s0.50'),
+                       'primary_metric':{'r_work':0.2834,'r_free':0.3147}},
+                      {'feedback':3,'solvent':0.5,'status':'completed','output':str(base/'endpoint_fb3_s0.50'),
+                       'primary_metric':{'r_work':0.2911,'r_free':0.3273}}],
+         'selected_feedback':2,'selected_solvent':0.5,'selected_metric':{'r_work':0.2834,'r_free':0.3147}}))
+    chosen,selection=workflow.selected_endpoint(tmp_path/'run')
+    assert chosen.name=='endpoint_fb2_s0.50' and selection['selected_feedback']==2
+    result=workflow.collect_results(tmp_path/'run')
+    assert result['endpoint_root'].endswith('endpoint_fb2_s0.50')
+    assert result['root']==str((tmp_path/'run').resolve())
+    assert result['status']=='completed' and result['pipeline_complete'] is True
+    assert len(result['endpoints'])==2
+    assert 'work-set R' in result['selection_policy']
+    # Without a selection file the newest endpoint is reported while running.
+    (base/'endpoint_selection.json').unlink()
+    assert workflow.selected_endpoint(tmp_path/'run')==(None,{})
+    job=workflow.enrich_job({'output':str(tmp_path/'run'),'config':{}})
+    assert job['endpoint'].startswith('endpoint_fb')

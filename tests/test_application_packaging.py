@@ -18,22 +18,25 @@ def load(name,path):
     return module
 
 
-def test_source_archive_retains_build_tools_profiles_and_refuses_overwrite(tmp_path):
-    package=load('phasebuild_source_package',ROOT/'package_gui.py')
+def test_focused_source_archive_ships_the_desktop_window_and_refuses_overwrite(tmp_path):
+    package=load('oasis43_source_package',ROOT/'package_oasis.py')
     target=tmp_path/'source.zip';package.main(['--output',str(target)])
     before=target.read_bytes()
     with zipfile.ZipFile(target) as archive:
-        prefix='phasebuild-gui-0.8.3/'
+        prefix='OASIS4.3-focused-development/'
         manifest=json.loads(archive.read(prefix+'PACKAGE_MANIFEST.json'))
         records={item['path']:item['sha256'] for item in manifest['files']}
-        for name in ['run_build_from_phases.py','packaging/assemble_bundle.py',
-                     'packaging/build_local_runtime.py','packaging/summarize_portable_remaining.py',
-                     'runs/sad_four_optimization/models/backbone_2p8.npz',
-                     'runs/sad_four_optimization/models/residue_2p8.npz']:
+        for name in ['run_desktop.py','run_sad_to_model.py','src/phasebuild/desktop.py',
+                     'src/phasebuild/jobs.py','src/phasebuild/oasis_workflow.py']:
             assert name in records
+        # The retired browser front end and its assets are not shipped at all.
+        for name in records:
+            assert not name.endswith(('run_gui.py','package_gui.py','phasebuild/gui.py','phasebuild/gui_workflow.py'))
+            assert 'gui_assets' not in name and 'oasis_assets' not in name
         for name,digest in records.items():
             assert hashlib.sha256(archive.read(prefix+name)).hexdigest()==digest
         assert not any('/runtime/bin/' in n or '/cases/' in n for n in archive.namelist())
+        assert archive.getinfo(prefix+'OASIS4.3.command').external_attr>>16&0o111
     with pytest.raises(FileExistsError):package.main(['--output',str(target)])
     assert target.read_bytes()==before
 
@@ -72,4 +75,4 @@ def test_linux_launcher_runs_from_space_path_with_host_runtime_disabled(tmp_path
     process = subprocess.run([str(bundle / 'phasebuild'), '--help'], capture_output=True, text=True, env=environment)
     assert process.returncode == 0 and 'linux-x86_64' in process.stdout
     process = subprocess.run([str(bundle / 'OASIS4.3-Build.sh'), '--help'], capture_output=True, text=True, env=environment)
-    assert process.returncode == 0 and '--no-browser' in process.stdout
+    assert process.returncode == 0 and '--exit-on-finish' in process.stdout

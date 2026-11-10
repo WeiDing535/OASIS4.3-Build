@@ -38,7 +38,7 @@ P+ 升级引入的三处外部依赖已全部消除，程序现在可以打成**
 ## 打包
 
 ```bash
-python3 OASIS4.3-Build/packaging/package_standalone.py \
+OASIS4.3-Build/.conda-unified/bin/python -B OASIS4.3-Build/packaging/package_standalone.py \
   --app-source   OASIS4.3-Build \
   --python-source "OASIS4.3-dev17-portable local/python" \
   --runtime-source "OASIS4.3-dev17-portable local/runtime" \

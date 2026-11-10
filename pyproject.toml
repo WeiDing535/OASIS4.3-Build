@@ -14,12 +14,10 @@ dependencies = ["gemmi==0.7.5", "numpy>=1.26,<2", "scipy>=1.12"]
 
 [project.scripts]
 phasebuild = "phasebuild.cli:main"
-phasebuild-gui = "phasebuild.gui:main"
-oasis43-gui = "phasebuild.oasis_gui:main"
+oasis43-gui = "phasebuild.desktop:main"
 oasis-py = "oasis_py.cli:main"
 
 [tool.setuptools.package-data]
-phasebuild = ["gui_assets/*", "oasis_assets/*"]
 oasis_py = ["resources/*.json", "resources/*.md", "resources/*.gz", "resources/licenses/*.txt"]
 
 [tool.setuptools.packages.find]
@@ -27,11 +25,19 @@ where = ["src"]
 
 
 [project.optional-dependencies]
+# Optional helpers that are NOT part of the scientific core and are not shipped
+# in the pruned portable bundle. Install them yourself, e.g.
+#   python -m pip install ".[gui]"     legacy Qt front end (oasis_py.gui)
+#   python -m pip install ".[test]"    test runner only
+gui = ["PySide6>=6.5"]
 test = ["pytest>=8"]
 
 [project.urls]
 Source = "https://github.com/WeiDing535/OASIS4.3-Build"
 Issues = "https://github.com/WeiDing535/OASIS4.3-Build/issues"
+
+[tool.oasis43]
+version = "4.3.0.dev13"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

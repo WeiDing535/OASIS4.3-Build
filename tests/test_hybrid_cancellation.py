@@ -77,25 +77,31 @@ def unexpected_refinement(*args, **kwargs):
     raise AssertionError("Cancellation test must not reach refinement")
 h.refmac_refine = unexpected_refinement
 if os.environ["GUI_SHUTDOWN"] == "1" and "--engine" not in sys.argv:
-    # Replace only the socket-facing server. Actual gui.main signal/finally,
-    # Jobs worker, CLI process group and engine child session all execute.
-    from types import SimpleNamespace
-    from phasebuild import gui
+    # Replace only the window. The desktop Controller's shutdown path, the Jobs
+    # worker, the CLI process group and the engine child session all execute.
+    import signal
+    from phasebuild import jobs as runner
+    from phasebuild.desktop import Controller
     (root / "run_phasebuild.py").touch()
-    jobs = gui.Jobs(root)
-    gui.make_plan = lambda config, project: ({"output": str(root / "gui_result")},
+    jobs = runner.Jobs(root)
+    runner.make_plan = lambda config, project: ({"output": str(root / "gui_result")},
         [{"name": "heartbeat engine", "kind": "hybrid", "output": str(root / "result"),
           "command": [sys.executable, __file__, "--engine"]}])
-    def serve_forever(**kwargs):
+    controller = Controller(root)
+    controller.jobs = jobs
+    def terminate(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, terminate)
+    signal.signal(signal.SIGHUP, terminate)
+    try:
         jobs.start({})
         while True:
             time.sleep(0.025)
-    server = SimpleNamespace(jobs=jobs, address="127.0.0.1:0", token="test",
-        serve_forever=serve_forever,
-        server_close=lambda: (root / "server_closed").write_text("closed"))
-    gui.create_server = lambda *args: server
-    sys.argv = [__file__, "--no-browser", "--project", str(root)]
-    gui.main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        controller.shutdown()
+        (root / "server_closed").write_text("closed")
 else:
     h.recycle(root / "map.mtz", root / "native.mtz", root / "seed.cif",
               root / "sequence.fasta", root / "result", rounds=1, progress=lambda _: None)

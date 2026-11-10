@@ -222,7 +222,7 @@ def main():
     parser.add_argument('--keep-all-monomers', action='store_true',
                         help='retain every ligand dictionary (adds ~670 MB)')
     parser.add_argument('--keep-optional', action='store_true',
-                        help='retain GUI/plotting payloads and keep duplicate files')
+                        help='retain optional RESOLVE/plotting payloads and keep duplicate files')
     args = parser.parse_args()
     removed = prune(args.bundle)
     if not args.keep_all_monomers:

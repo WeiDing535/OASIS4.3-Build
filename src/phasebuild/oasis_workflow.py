@@ -42,6 +42,8 @@ def defaults(project):
     cfg['method']='pplus_bundled'
     # 标定配方：Parrot 密度修饰 + 2 轮反馈 + 40 轮修饰；非 P+ 方法会被降级为 RESOLVE。
     cfg.update(dm_engine='parrot',dm_cycles=40,feedback_cycles=2,max_per_target=48,dm_solvent=0.5)
+    # 终点组合默认留空：等价于单终点，由 --feedback-cycles 决定；填写后按工作集 R 选终点。
+    cfg.update(feedback_endpoints='',dm_solvents='')
     cfg.update(sad='',native='',sequence='',heavy='',fpp='',runtime=runtime,
                reference=str(Path(runtime)/'lib/data/reference_structures/reference-1tqw.mtz') if runtime else '',
                output=str(project/'runs/oasis_run'),mode='sad_to_model',
@@ -171,6 +173,9 @@ def describe_plan(cfg):
     active['building_recipe']=cfg.get('building_recipe','legacy')
     if cfg.get('phase_blur_scale') is not None:active['phase_blur']={'SCBLUR':cfg['phase_blur_scale'],'BBLUR':cfg['phase_blur_b'],'policy':'预先声明的 DM 相位置信度修正，不按 Rfree 选择'}
     active['build_model']=cfg.get('build_model',True)
+    if cfg.get('feedback_endpoints'):
+        active['feedback_endpoints']=cfg['feedback_endpoints']
+        if cfg.get('dm_solvents'):active['dm_solvents']=cfg['dm_solvents']
     if not active['build_model']:
         active.pop('rounds');active.pop('refmac_cycles')
     import gemmi
@@ -210,11 +215,53 @@ def pipeline_root(directory):
     return root if (root/'pipeline_report.json').is_file() else root/'00_sad_to_model'
 
 
+def selected_endpoint(directory):
+    """Resolve a fixed-endpoint grid to its retained endpoint directory.
+
+    ``--feedback-endpoints`` runs one full pipeline per predeclared endpoint and
+    keeps them all, so the case root only carries ``endpoint_selection.json``.
+    Returns ``(endpoint_directory, selection)`` or ``(None, {})``.
+    """
+    root=Path(directory).resolve()
+    for base in (root,root/'00_sad_to_model'):
+        selection=read_json(base/'endpoint_selection.json')
+        endpoints=selection.get('endpoints') or []
+        if not endpoints:continue
+        chosen=None
+        for item in endpoints:
+            if (item.get('feedback')==selection.get('selected_feedback')
+                    and item.get('solvent')==selection.get('selected_solvent')):
+                chosen=item;break
+        if chosen is None:
+            chosen=min(endpoints,key=lambda item:(item.get('status')!='completed',
+                        (item.get('primary_metric') or {}).get('r_work',float('inf'))))
+        path=Path(chosen.get('output') or '')
+        if not path.is_absolute():path=base/path
+        if not path.is_dir():path=base/Path(str(chosen.get('output') or '')).name
+        if path.is_dir():return path,selection
+    return None,{}
+
+
+def _running_endpoint(directory):
+    """Newest endpoint directory of an in-progress grid, for progress reporting."""
+    root=Path(directory).resolve()
+    candidates=[path for path in (root/'00_sad_to_model').glob('endpoint_*') if path.is_dir()]
+    if not candidates:return None
+    def stamp(path):
+        for name in ('pipeline_report.json','gui.log'):
+            if (path/name).is_file():return (path/name).stat().st_mtime
+        return path.stat().st_mtime
+    return max(candidates,key=stamp)
+
+
 def validate_import(directory):
     from .portfolio_gui import locate
     if locate(directory) is not None:
         from .portfolio_gui import validate_import as validate_portfolio
         return validate_portfolio(directory)
+    endpoint,_=selected_endpoint(directory)
+    if endpoint is not None:
+        return validate_import(endpoint)
     state=read_json(pipeline_root(directory)/'pipeline_report.json')
     if state.get('engine')!='oasis-sad-to-model' or state.get('config',{}).get('method','likelihood') not in METHODS:
         raise ValueError('请选择含 OASIS4.3 pipeline_report.json 的流程结果目录')
@@ -242,6 +289,20 @@ def collect_results(directory):
     from .portfolio_gui import locate,collect_results as collect_portfolio
     if locate(root) is not None or read_json(root/'gui_job.json').get('config',{}).get('explore'):
         return collect_portfolio(root)
+    endpoint,selection=selected_endpoint(root)
+    if endpoint is not None:
+        result=collect_results(endpoint)
+        prefix=endpoint.relative_to(root)
+        for item in result.get('artifacts') or []:
+            item['path']=str(prefix/item['path'])
+        for key in ('final_model','final_phases'):
+            if result.get(key):result[key]=str(prefix/result[key])
+        result['root']=str(root);result['output']=str(root)
+        result['endpoint_root']=str(endpoint)
+        result['endpoints']=selection.get('endpoints') or []
+        result['endpoint_selection']=selection
+        result['selection_policy']=selection.get('rule') or result.get('selection_policy')
+        return result
     pipe=pipeline_root(root);state=read_json(pipe/'pipeline_report.json')
     cfg=state.get('config') or read_json(root/'gui_job.json').get('config',{})
     completed={item['id'] for item in state.get('completed',[])}
@@ -395,7 +456,24 @@ def enrich_job(job):
     if job.get('config',{}).get('explore') or locate(job['output']) is not None:
         return enrich_portfolio(job)
     pipe=pipeline_root(job['output']);state=read_json(pipe/'pipeline_report.json')
-    if not state:return job
+    if not state:
+        # A fixed-endpoint grid has one pipeline per endpoint; report the
+        # endpoint that is running (or the retained one) instead of nothing.
+        endpoint,_=selected_endpoint(job['output'])
+        running=endpoint or _running_endpoint(job['output'])
+        if running is None:return job
+        sub=dict(job);sub['output']=str(running)
+        enriched=enrich_job(sub)
+        enriched['output']=job['output'];enriched['endpoint']=running.name
+        progress=enriched.setdefault('pipeline_progress',{})
+        label=progress.get('current') or ''
+        progress['current']=('端点 %s · %s'%(running.name,label) if label else '端点 '+running.name)
+        top=Path(job['output'])/'gui.log'
+        if top.is_file():
+            with top.open('rb') as handle:
+                handle.seek(max(0,top.stat().st_size-24000))
+                enriched['log']=(enriched.get('log') or '')+'\n\n── gui.log ──\n'+handle.read().decode(errors='replace')
+        return enriched
     if state.get('status')=='failed':
         detail=read_json(pipe/'05_build/hybrid_report.json').get('error') if state.get('current')=='build' else None
         job['error']=detail or state.get('error') or job.get('error')
