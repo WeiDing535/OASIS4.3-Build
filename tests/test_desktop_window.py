@@ -236,6 +236,9 @@ def test_imported_result_is_shown_read_only(tmp_path):
         assert len(app.tree.get_children())==2
         assert '没有运行日志' in app.log.get('1.0','end')
         assert len(app.chart.rows)==2
+        app._refresh()   # the 900 ms poll must not wipe the placeholder
+        assert '没有运行日志' in app.log.get('1.0','end')
+        assert '不会重新运行' in app.summary.cget('text')
     finally:
         app.root.destroy()
 

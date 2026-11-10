@@ -696,7 +696,7 @@ class App:
             self.progress.configure(value=100*min(1,done/total))
         label=progress.get('current') or job.get('current') or ''
         self._say_status('%s %s'%(STATUS_NAMES.get(status,status),label))
-        log=job.get('log') or ''
+        log=job.get('log') or ('（导入的既有结果没有运行日志）' if status=='imported' else '')
         if log!=self.log_text:
             self._show_log(log)
         if status in ('success','failed','cancelled','interrupted'):
