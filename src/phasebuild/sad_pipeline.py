@@ -22,6 +22,15 @@ DEFAULTS = dict(copies='auto', phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 observation_prior='', composition_sequence='', phenix_bin='', trust_kl=.0005, trust_cleanup=True, trust_stability=False, trust_partial_cleanup=False, trust_work_weight=False, trust_wang_radius=14., wavelength=None,
                 elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='resolve',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all')
 
+FALLBACK_NOTICE=('密度修饰引擎已回退到内置 RESOLVE/MLHL（原因：%s）。'
+                 'trace/Fcalc 反馈已关闭；本次结果不能与 Parrot 协议（十案例流程）直接比较。')
+
+
+def fallback_notice(cfg):
+    """One user-facing sentence for a recorded engine fallback, else an empty string."""
+    reason=cfg.get('dm_engine_fallback')
+    return FALLBACK_NOTICE%reason if reason else ''
+
 
 def validate(config, inspect=True):
     cfg = {**DEFAULTS, **config}
@@ -127,7 +136,10 @@ def validate(config, inspect=True):
         try:
             cfg['dm_executable']=parrot_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime') or None)
         except ValueError as error:
-            # Keep older runtimes usable: fall back to the internal engine and say so.
+            # Keep older runtimes usable, but never silently: the run records the
+            # requested engine and the reason so the GUI, the report and the
+            # result page can all say what actually ran.
+            cfg['dm_engine_requested']='parrot'
             cfg['dm_engine']='resolve'
             cfg['dm_engine_fallback']=str(error)
             if cfg.pop('_auto_dm_cycles',False):cfg['dm_cycles']=40

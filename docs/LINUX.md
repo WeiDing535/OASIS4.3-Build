@@ -6,6 +6,8 @@ Linux x86_64 is the primary target for the next complete runtime package. Users 
 
 The source regression suite already runs successfully on Ubuntu 22.04 through GitHub Actions. The new Linux packager and dependency-audit code are tested separately. A complete Linux binary bundle has not yet been built or validated: Linux-native engine and Python runtime inputs will be provided from the user's Linux machine or existing installation archive. The earlier Intel Mac package remains available but its Mach-O binaries cannot be used in Linux.
 
+A source-tree run on a host without CCP4 cannot use the Parrot density-modification engine. That case is now explicit rather than silent: the CLI prints the reason to stderr, the window shows a red warning, the result page marks the engine as a fallback, and the run record keeps `dm_engine_requested`/`dm_engine_fallback`. A complete Linux bundle ships Parrot and is unaffected.
+
 The 2026-10-22 Linux-preparation changes passed 197 regression cases locally on macOS; that local result is not a Linux runtime validation. The GitHub workflow also checks the Linux application-only staging launcher.
 
 ## Build operator workflow

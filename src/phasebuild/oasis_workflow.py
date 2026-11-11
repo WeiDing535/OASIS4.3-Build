@@ -3,7 +3,7 @@ import json
 import math
 from pathlib import Path
 import sys
-from .sad_pipeline import DEFAULTS, validate, stage_plan
+from .sad_pipeline import DEFAULTS, validate, stage_plan, fallback_notice
 from .runtime import default_runtime
 from .data import fingerprint
 
@@ -116,6 +116,24 @@ def make_plan(config, project, python=None, inspect=True):
                          output=str(outer/'00_sad_to_model'),command=command)]
 
 
+def engine_fallback(cfg):
+    """Reason text when the requested Parrot engine is unavailable, else ''."""
+    fallback=cfg.get('dm_engine_fallback') or ''
+    if cfg.get('dm_engine')=='parrot' and not fallback:
+        from . import parrot_dm
+        try:parrot_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime') or None)
+        except ValueError as error:fallback=str(error)
+    return fallback
+
+
+def planned_config(cfg):
+    """The options the stages will really run with, engine fallback included."""
+    values={**DEFAULTS,**cfg,'output':str(Path(cfg['output'])/'00_sad_to_model')}
+    fallback=engine_fallback(cfg)
+    if fallback:values.update(dm_engine='resolve',feedback_cycles=0,dm_engine_fallback=fallback)
+    return values
+
+
 def describe_plan(cfg):
     if cfg.get('explore'):
         from .portfolio_gui import describe
@@ -123,8 +141,7 @@ def describe_plan(cfg):
     if cfg.get('input_columns'):
         from .mtz_inputs import checked_config
         with checked_config(cfg) as (selected,selection):result=describe_plan(selected)
-        values={**DEFAULTS,**cfg,'output':str(Path(cfg['output'])/'00_sad_to_model')}
-        result['stages']=stage_plan(values)
+        result['stages']=stage_plan(planned_config(cfg))
         result['column_selection']=selection
         selected_lines=['SAD '+k+' = '+v['label']+' ['+v['dataset']+'; 列 '+str(v['index'])+']' for k,v in selection['sad_columns'].items()]
         selected_lines += ['观测 '+k+' = '+v['label']+' ['+v['dataset']+'; 列 '+str(v['index'])+']' for k,v in selection['native_columns'].items()]
@@ -137,7 +154,13 @@ def describe_plan(cfg):
     if cfg.get('explore'):
         from .portfolio_gui import describe
         return describe(cfg)
-    values={**DEFAULTS,**cfg,'output':str(Path(cfg['output'])/'00_sad_to_model')}
+    # Describe the run that will actually happen: if Parrot cannot be located,
+    # validate() will fall back to the internal engine, so the plan must show the
+    # internal stages instead of advertising a Parrot run that never occurs.
+    values=planned_config(cfg)
+    fallback=engine_fallback(cfg)
+    requested_parrot=bool(fallback) and (cfg.get('dm_engine')=='parrot'
+                                        or cfg.get('dm_engine_requested')=='parrot')
     phase,dm=METHODS[cfg['method']]
     active=dict(method=phase,dm_engine=dm,solvent_fraction=cfg['solvent_fraction'],
                 solvent_source='按序列与 ASU 份数估算' if cfg['solvent_fraction'] is None else '用户指定',
@@ -200,7 +223,13 @@ def describe_plan(cfg):
     if cfg.get('trust_work_weight'):protocol_extra=protocol_extra.replace('权重 0.005','由工作集几何门控选择的固定权重（0.005–0.04）')
     if cfg.get('trust_stability'):protocol_extra+=' 关系稳定性收缩开启；这不是独立观测交叉验证。'
     if cfg['method']=='pplus_internal':protocol_extra+=' 内部异常差似然与内部 MLHL DM 均为近似实现，非 Phaser/RESOLVE 等价替代；此前外部流程的 27.42% 不适用于此模式。'
-    return dict(stages=stage_plan(values),effective_options=active,sample_warnings=sample['warnings'],
+    warnings=list(sample['warnings'])
+    if fallback:
+        if requested_parrot:
+            active['dm_engine']=(active['dm_engine']+'；' if active.get('dm_engine') else '')+\
+                '密度修饰已回退内置 RESOLVE/MLHL（Parrot 不可用）'
+        warnings.append(fallback_notice(values))
+    return dict(stages=stage_plan(values),effective_options=active,sample_warnings=warnings,
                 fixed_protocol=('Buccaneer 首轮 3 周期、后续每轮 2 周期；单线程；REFMAC '+('冻结工作集 DM 相位/FOM 近似约束' if cfg.get('refinement_prior')=='dm_phifom' else '固定原始 SAD 观测 HL')+'；固定最后一轮结果。'+protocol_extra) if active['build_model'] else
                 '未启用 Buccaneer / REFMAC：流程在密度修饰后结束，不检查或调用建模精修引擎；分别保留定相结果、纯观测 HL、最终相位、FOM 与日志。')
 
@@ -278,6 +307,8 @@ def phase_statistics(path):
 
 def _engine_label(method,cfg,dm_meta):
  """Report the density-modification engine that actually ran, not the method default."""
+ if cfg.get('dm_engine_requested')=='parrot' and cfg.get('dm_engine_fallback'):
+  return '内置 RESOLVE/MLHL（Parrot 不可用，已回退）'
  engine=(dm_meta.get('parameters') or {}).get('engine') or cfg.get('dm_engine')
  if engine=='parrot':return 'CCP4 Parrot + %d 轮 trace 反馈'%cfg['feedback_cycles'] if cfg.get('feedback_cycles') else 'CCP4 Parrot'
  return METHODS[method][1]
@@ -429,7 +460,7 @@ def collect_results(directory):
     method=cfg.get('method','likelihood')
     return dict(root=str(root),status=state.get('status','waiting'),method=method,
                 hand_selection=read_json(pipe/'02_sad/hand_selection.json') or read_json(pipe/'02_hand/hand_selection.json'),
-                method_name='P+ Wang8 + 精修权重搜索' if method=='pplus_bundled' and cfg.get('trust_wang_radius')==8 and cfg.get('trust_work_weight') and not cfg.get('trust_stability') else METHODS[method][0],dm_engine=_engine_label(method,cfg,dm_meta),config=cfg,
+                method_name='P+ Wang8 + 精修权重搜索' if method=='pplus_bundled' and cfg.get('trust_wang_radius')==8 and cfg.get('trust_work_weight') and not cfg.get('trust_stability') else METHODS[method][0],dm_engine=_engine_label(method,cfg,dm_meta),dm_engine_fallback=fallback_notice(cfg),config=cfg,
                 stages=stages,sad=raw,dm=dm,dm_history=history,solvent_fraction=dm_meta.get('solvent_fraction_used',(dm_meta.get('parameters') or {}).get('solvent_fraction')),
                 solvent_source=dm_meta.get('solvent_source'),partition=partition,metrics=metrics,
                 sample=raw_meta.get('sequence_asu',{}),anomalous_scattering=state.get('anomalous_scattering'),

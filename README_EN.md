@@ -20,6 +20,8 @@ The next complete runtime target is Linux x86_64, with Python and scientific eng
 
 Use an Python 3.12 environment with Gemmi, NumPy and SciPy. External construction/refinement additionally requires a user-provided CCP4 installation and reference resources. No Python or CCP4 runtime is bundled.
 
+The P+ route uses CCP4 Parrot for density modification. When `cparrot` cannot be located, the run is not silently re-routed: the command line writes the reason to stderr, the window shows a red warning under the toolbar, the result page labels the engine "built-in RESOLVE/MLHL (Parrot unavailable, fell back)", and `pipeline_report.json` keeps `dm_engine_requested` and `dm_engine_fallback`. The complete bundle ships Parrot, so this does not apply to it.
+
 Double-click `OASIS4.3.command` for the native desktop window, or run `python -B run_desktop.py --project .` from the repository root in the Python 3.12 [conda environment](environment.yml). The window is drawn with Tk, which is part of the Python runtime: no browser, no local web server and no port forwarding. No dependencies are installed automatically.
 
 Everything the scientific workflow needs is shipped or installed by the environment above. Optional helpers that are not part of the core — the legacy Qt front end (`oasis_py.gui`) and plotting — are installed by the user with `python -m pip install ".[gui]"` or conda; see the [usage guide](docs/OASIS4.3.md). Closing the window stops the running job. Always use a new output directory.

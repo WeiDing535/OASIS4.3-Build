@@ -24,6 +24,8 @@ P+ 的可选研究模块、四组消融试验及补充先验对照见 [P+ 优化
 
 专用精简源码包由 `python -B package_oasis.py --output /new/path.zip` 生成；只收录此流程所需代码与资源，排除旧产品入口、旧界面、训练脚本和训练模型。源码包不包含 Buccaneer/REFMAC 运行时，当前也不是新的完整安装包。
 
+从源码树直接运行时，P+ 流程默认用 CCP4 Parrot 做密度修饰；找不到 `cparrot` 时不再静默改道：命令行把回退原因写到标准错误，界面在工具栏下显示红字警告，结果页把密度修饰引擎标为“内置 RESOLVE/MLHL（Parrot 不可用，已回退）”，`pipeline_report.json` 里保留 `dm_engine_requested`、`dm_engine_fallback` 两个字段。自带完整运行时内含 Parrot，不受此影响。
+
 现存 Intel Mac 0.8.3 完整包保持原样。Linux 完整运行时仍待提供。开发仓库保留历史模块用于回溯与测试；本版产品不提供其他独立功能入口。旧版说明存档见 [历史 Build 说明](docs/LEGACY_BUILD_README_20261023.md)。
 
 原始输入、原自由集、定相结果、独立观测 HL、密度修饰结果和每轮模型分别保留；固定最后一轮结果。算法属于需实验验证的研究实现，真实数据完整流程效果尚待验证。

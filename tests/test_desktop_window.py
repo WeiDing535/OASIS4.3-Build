@@ -128,6 +128,56 @@ def test_unattended_failure_is_reported_instead_of_waiting_for_a_dialog(tmp_path
         app.root.destroy()
 
 
+def test_check_button_shows_a_plan_that_has_no_status_yet(tmp_path,monkeypatch):
+    """A fresh plan has no run status; the check must still render it."""
+    pytest.importorskip('tkinter')
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    app=desktop.App(desktop.Controller(project(tmp_path)),exit_on_finish=True)
+    try:
+        monkeypatch.setattr(app,'collect',lambda: {'output':str(tmp_path/'out')})
+        monkeypatch.setattr(app.controller,'describe',lambda config: dict(
+            stages=[dict(id='dm',name='密度修饰',command=None)],
+            effective_options={'dm_engine':'内置 RESOLVE/MLHL'},
+            sample_warnings=['引擎已回退']))
+        app.on_check()
+        app.root.update_idletasks()
+        assert '密度修饰' in app.plan_text.get('1.0','end')
+        assert app.warning.winfo_ismapped()
+        assert app.warning.cget('text')=='引擎已回退'
+    finally:
+        app.root.destroy()
+
+
+def test_fallback_warning_is_a_red_line_that_clears(tmp_path):
+    """An engine fallback must be visible in the window, not only in the log."""
+    pytest.importorskip('tkinter')
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    app=desktop.App(desktop.Controller(project(tmp_path)))
+    try:
+        app.root.update_idletasks()
+        assert not app.warning.winfo_ismapped()
+        notice=app.controller.fallback_notice({'dm_engine_fallback':'Parrot (cparrot) was not found'})
+        assert '已回退' in notice
+        app._warn(notice)
+        app.root.update_idletasks()
+        assert app.warning.winfo_ismapped() and app.warning.cget('text')==notice
+        assert app.warning.cget('style')=='Bad.TLabel'
+        app._warn('')
+        app.root.update_idletasks()
+        assert not app.warning.winfo_ismapped()
+        assert app.controller.fallback_notice({'dm_engine':'resolve'})==''
+    finally:
+        app.root.destroy()
+
+
 def test_project_resolution_accepts_a_source_tree_or_a_portable_bundle(tmp_path):
     """The window must find its scripts from a checkout and from a bundle root."""
     (tmp_path/'run_sad_to_model.py').write_text('')

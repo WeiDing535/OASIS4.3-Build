@@ -91,8 +91,11 @@ def main(argv=None):
     for flag in ['trust_work_weight','trust_partial_cleanup']:
         if args[flag] is None:args[flag]=profile and args['build_model']
     if args['trust_wang_radius'] is None:args['trust_wang_radius']=8. if profile else 14.
-    from phasebuild.sad_pipeline import validate,stage_plan,run_pipeline
+    from phasebuild.sad_pipeline import validate,stage_plan,run_pipeline,fallback_notice
     cfg=validate(args)
+    if fallback_notice(cfg):
+        # The fallback is legal, but it changes the protocol: say it out loud.
+        print('OASIS4.3: '+fallback_notice(cfg),file=sys.stderr,flush=True)
     if check:
         if Path(cfg['output']).exists() and not resume:p.error('Output exists; choose a new directory')
         print(json.dumps(dict(config=cfg,stages=stage_plan(cfg),output_created=False),indent=2));return 0

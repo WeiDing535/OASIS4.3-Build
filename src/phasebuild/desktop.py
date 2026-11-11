@@ -92,6 +92,11 @@ class Controller:
     def describe(self, config):
         return self.workflow.describe_plan(config)
 
+    def fallback_notice(self, config):
+        """Red-line text for a run that fell back from Parrot, else ''."""
+        from .sad_pipeline import fallback_notice
+        return fallback_notice(config or {})
+
     def start(self, config, name=''):
         return self.jobs.start(config,name)
 
@@ -221,7 +226,9 @@ class App:
         self.status=ttk.Label(bar,text='就绪',style='Status.TLabel')
         self.status.pack(side='right')
 
-        panes=ttk.Panedwindow(self.root,orient='horizontal')
+        self.warning=ttk.Label(self.root,text='',style='Bad.TLabel',wraplength=1120,justify='left')
+        self.panes=ttk.Panedwindow(self.root,orient='horizontal')
+        panes=self.panes
         panes.pack(fill='both',expand=True,padx=10,pady=(0,6))
 
         left=ttk.Frame(panes)
@@ -536,11 +543,12 @@ class App:
             plan=self.controller.describe(config)
         except Exception as error:
             self._error(str(error));return
-        lines=[(stage['name'],stage['status']) for stage in plan.get('stages',[])]
+        lines=[(stage['name'],stage.get('status') or '待运行') for stage in plan.get('stages',[])]
         text='\n'.join('· %s  [%s]'%(name,status) for name,status in lines)
         effective=plan.get('effective_options') or {}
         body='\n'.join('%s：%s'%(key,value) for key,value in effective.items())
         self._set_plan(text+('\n\n生效参数\n'+body if body else ''))
+        self._warn('\n'.join(plan.get('sample_warnings') or []))
         self._say('配置检查通过',ok=True)
 
     def on_start(self):
@@ -553,6 +561,7 @@ class App:
             self._error(str(error));return
         self.task_name.set('')
         self.job=job
+        self._warn(self.controller.fallback_notice(job.get('config') or {}))
         self.log_text=''
         self.log.delete('1.0','end')
         self._clear_results()
@@ -910,6 +919,7 @@ class App:
             self.tree.insert('','end',values=(row.get('stage',''),
                 row.get('engine',''),'' if rwork is None else '%.2f'%(100*rwork),
                 '' if rfree is None else '%.2f'%(100*rfree),row.get('cycles','')))
+        self._warn(result.get('dm_engine_fallback') or '')
         primary=result.get('primary_metric') or {}
         lines=['方法：%s  密度修饰：%s'%(result.get('method_name',''),result.get('dm_engine',''))]
         if result.get('solvent_fraction') is not None:
@@ -949,6 +959,16 @@ class App:
 
     def _say(self,text,ok=False):
         self.status.configure(text=text,style='Status.TLabel')
+
+    def _warn(self,text=''):
+        """Show one persistent red line under the toolbar; empty text hides it."""
+        text=(text or '').strip()
+        self.warning.configure(text=text)
+        if text:
+            if not self.warning.winfo_ismapped():
+                self.warning.pack(side='top',fill='x',padx=14,pady=(0,4),before=self.panes)
+        elif self.warning.winfo_ismapped():
+            self.warning.pack_forget()
 
     def _error(self,text):
         self.error_text=text

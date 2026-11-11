@@ -93,3 +93,72 @@ def test_stage_plan_routes_parrot_engine_to_trace_feedback(tmp_path):
     dm=[s for s in stages if s['id']=='dm'][0]
     assert 'run_trace_feedback.py' in ' '.join(dm['command'])
     assert 'trace/Fcalc' in dm['name']
+
+
+def test_missing_parrot_is_recorded_instead_of_hidden(monkeypatch,tmp_path):
+    """A run without CCP4 must say which engine really ran."""
+    from phasebuild import parrot_dm
+    from phasebuild.sad_pipeline import fallback_notice
+    monkeypatch.setattr(parrot_dm,'locate',lambda *a,**k: (_ for _ in ()).throw(
+        ValueError('Parrot (cparrot) was not found')))
+    for name in ('sad','native','sequence','heavy','reference'):
+        (tmp_path/name).write_text('placeholder')
+    cfg=_validate(None, method='pplus_internal', dm_engine='parrot',
+                  feedback_cycles=2, dm_cycles=40, dm_executable='/nonexistent/cparrot',
+                  sad=str(tmp_path/'sad'), native=str(tmp_path/'native'),
+                  sequence=str(tmp_path/'sequence'), heavy=str(tmp_path/'heavy'),
+                  reference=str(tmp_path/'reference'), output=str(tmp_path/'out'))
+    assert cfg['dm_engine']=='resolve'
+    assert cfg['dm_engine_requested']=='parrot'
+    assert 'cparrot' in cfg['dm_engine_fallback']
+    assert cfg['feedback_cycles']==0
+    notice=fallback_notice(cfg)
+    assert '已回退' in notice and 'Parrot' in notice and 'RESOLVE' in notice
+    assert fallback_notice({})==''
+    dm=[s for s in stage_plan(cfg) if s['id']=='dm'][0]
+    assert 'run_trace_feedback.py' not in ' '.join(dm['command'])
+
+
+def test_engine_label_marks_the_fallback():
+    from phasebuild.oasis_workflow import _engine_label
+    label=_engine_label('pplus_bundled',{'dm_engine':'resolve','dm_engine_requested':'parrot',
+                                         'dm_engine_fallback':'missing'},{})
+    assert '已回退' in label
+    assert '已回退' not in _engine_label('pplus_bundled',{'dm_engine':'resolve'},{})
+
+
+def test_planned_config_shows_the_internal_stages(monkeypatch,tmp_path):
+    """The stage list must match the engine the run will really use."""
+    from phasebuild import parrot_dm
+    from phasebuild.oasis_workflow import planned_config
+    monkeypatch.setattr(parrot_dm,'locate',lambda *a,**k: (_ for _ in ()).throw(
+        ValueError('Parrot (cparrot) was not found')))
+    for name in ('sad','native','sequence','heavy','reference'):
+        (tmp_path/name).write_text('placeholder')
+    base=dict(_validate(None, method='pplus_internal', dm_engine='parrot',
+                        feedback_cycles=2, dm_executable='/nonexistent/cparrot',
+                        sad=str(tmp_path/'sad'), native=str(tmp_path/'native'),
+                        sequence=str(tmp_path/'sequence'), heavy=str(tmp_path/'heavy'),
+                        reference=str(tmp_path/'reference'), output=str(tmp_path/'out')))
+    # A raw (not yet validated) plan request is what the window sends.
+    raw={k:v for k,v in base.items() if k not in ('dm_engine_fallback','dm_engine_requested')}
+    raw.update(dm_engine='parrot',dm_executable='/nonexistent/cparrot')
+    values=planned_config(raw)
+    assert values['dm_engine']=='resolve' and values['feedback_cycles']==0
+    dm=[s for s in stage_plan(values) if s['id']=='dm'][0]
+    assert 'run_trace_feedback.py' not in ' '.join(dm['command'])
+
+
+def test_plan_probe_detects_parrot_before_the_run(monkeypatch):
+    """The plan must warn up front, not only once the run has started."""
+    from phasebuild import parrot_dm
+    from phasebuild.oasis_workflow import engine_fallback
+    monkeypatch.setattr(parrot_dm,'locate',lambda *a,**k: (_ for _ in ()).throw(
+        ValueError('Parrot (cparrot) was not found')))
+    assert 'cparrot' in engine_fallback({'dm_engine':'parrot'})
+    # A recorded fallback needs no probe at all.
+    assert engine_fallback({'dm_engine':'resolve','dm_engine_fallback':'recorded'})=='recorded'
+    # A reachable Parrot means no warning.
+    monkeypatch.setattr(parrot_dm,'locate',lambda *a,**k: '/opt/ccp4/bin/cparrot')
+    assert engine_fallback({'dm_engine':'parrot'})==''
+    assert engine_fallback({'dm_engine':'resolve'})==''
