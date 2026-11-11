@@ -26,6 +26,8 @@ P+ 的可选研究模块、四组消融试验及补充先验对照见 [P+ 优化
 
 从源码树直接运行时，P+ 流程默认用 CCP4 Parrot 做密度修饰；找不到 `cparrot` 时不再静默改道：命令行把回退原因写到标准错误，界面在工具栏下显示红字警告，结果页把密度修饰引擎标为“内置 RESOLVE/MLHL（Parrot 不可用，已回退）”，`pipeline_report.json` 里保留 `dm_engine_requested`、`dm_engine_fallback` 两个字段。自带完整运行时内含 Parrot，不受此影响。
 
+“免安装”指的是**完整包**：`OASIS4.3-dev17-portable` 内自带 `runtime/`（Phaser、Parrot、Buccaneer、REFMAC 与 OASIS 密度修饰），双击即用，不需要另装 CCP4 或 Phenix。源码树不含这些二进制，从源码运行时要由本机提供：macOS 上可指向已安装的 CCP4 9（`/Applications/ccp4-9`），或把完整包的 `runtime/` 放到源码树旁并用 `--runtime` 指定；Linux 目前还没有完整运行时。本仓库记录的十案例基准是在自带运行时下跑出的，因此源码树缺 Parrot 时的那次运行只能算内置引擎的参考结果，不能与基准直接对比。
+
 现存 Intel Mac 0.8.3 完整包保持原样。Linux 完整运行时仍待提供。开发仓库保留历史模块用于回溯与测试；本版产品不提供其他独立功能入口。旧版说明存档见 [历史 Build 说明](docs/LEGACY_BUILD_README_20261023.md)。
 
 原始输入、原自由集、定相结果、独立观测 HL、密度修饰结果和每轮模型分别保留；固定最后一轮结果。算法属于需实验验证的研究实现，真实数据完整流程效果尚待验证。
