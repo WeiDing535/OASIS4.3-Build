@@ -111,8 +111,13 @@ def main(argv=None):
     (app/'app_manifest.json').write_text(json.dumps({'files':appfiles},indent=2)+'\n')
     env={'PATH':'/usr/bin:/bin:/usr/sbin:/sbin','HOME':str(out.parent/(out.name+'-clean-home')),'LANG':'C'}
     run=subprocess.run([str(out/'oasis'),'doctor'],env=env,capture_output=True,text=True,timeout=120)
-    (out/'DOCTOR.json').write_text(run.stdout)
     if run.returncode:raise RuntimeError('Copied runtime doctor failed: '+run.stdout+run.stderr)
+    # The bundle is meant to be moved and downloaded; absolute build paths in the
+    # doctor report would be wrong on the receiving machine.
+    doctor=json.loads(run.stdout)
+    doctor['paths']={k:str(Path(v).relative_to(out)) if str(v).startswith(str(out)) else v
+                     for k,v in doctor.get('paths',{}).items()}
+    (out/'DOCTOR.json').write_text(json.dumps(doctor,indent=2)+'\n')
     engines=bundled_engines(out);parrot='cparrot' in engines
     scope=('Bundled Phaser SAD -> P+ -> Parrot density modification -> Buccaneer/REFMAC. '
         'The RESOLVE/CCTBX density runtime is not part of this assembly.') if parrot else \
@@ -124,7 +129,7 @@ def main(argv=None):
         'bundled_engine_ids':[n for n in ENGINE_LABELS if n in engines],
         'scope':'Local evaluation with existing authorized engine binaries. Public redistribution conditions unresolved.',
         'public_redistribution_ready':False,'dependencies_installed':False,'python_files':len(pyfiles),'app_files':len(appfiles),
-        'engine_manifest_SHA256':sha(out/'runtime/runtime_manifest.json'),'doctor':json.loads(run.stdout),
+        'engine_manifest_SHA256':sha(out/'runtime/runtime_manifest.json'),'doctor':doctor,
         'scientific_scope':scope}
     (out/'bundle.json').write_text(json.dumps(report,indent=2)+'\n')
     engine_text='、'.join(ENGINE_LABELS[n] for n in ENGINE_LABELS if n in engines)

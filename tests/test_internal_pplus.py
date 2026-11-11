@@ -32,6 +32,16 @@ def test_internal_preflight_needs_no_phenix_or_external_phase_file(own,monkeypat
     with pytest.raises(ValueError,match='不接受外部'):pipeline.validate({**own,'observation_prior':'from_phaser.mtz'})
 
 
+def test_installation_free_trusted_route_is_allowed_when_parrot_replaces_phenix(trusted,monkeypatch):
+    """The ban exists for the RESOLVE/CCTBX backend; the Parrot route never calls Phenix."""
+    monkeypatch.setenv('OASIS_INSTALLATION_FREE','1')
+    cfg=pipeline.validate({**trusted,'dm_engine':'parrot','phenix_bin':'/not-installed'})
+    assert cfg['phenix_bin']=='' and cfg['dm_engine']=='parrot'
+    assert cfg['dm_cycles']==40 and cfg['phase_cycles']==100
+    with pytest.raises(ValueError,match='禁止调用 Phenix'):
+        pipeline.validate({**trusted,'dm_engine':None,'phenix_bin':'/not-installed'})
+
+
 def test_math_phase_dm_execute_no_external_program_and_keep_original_prior(own,tmp_path,monkeypatch):
     cfg=pipeline.validate({**own,'dm_cycles':1});root=tmp_path/'math';root.mkdir();phase=root/'02_sad';dm=root/'03_dm';phase.mkdir();dm.mkdir()
     prepared=root/'prepared.mtz';prepare_sad(cfg['sad'],cfg['native'],prepared,cfg['free_value']);cfg['prepared_sad']=str(prepared)

@@ -106,7 +106,7 @@ tar -czf OASIS4.3-portable-ccp4only.tar.gz OASIS4.3-portable-ccp4only-20261111
 shasum -a 256 OASIS4.3-portable-ccp4only.tar.gz > OASIS4.3-portable-ccp4only.tar.gz.sha256
 ```
 
-实测：1.4 GB 的目录压成 **436 MB**、45 370 个条目（55 秒），单个文件即可传，接收方：
+实测：1.4 GB 的目录压成 **436 MB**、45 370 个条目（53 秒），单个文件即可传。2026-11-11 这一版的 tarball 是 456 700 259 字节，SHA256 `f105ff8ec243b70a72117b3e3c9cee437fc1ebff72e7edab42f5dede55d40118`。接收方：
 
 ```bash
 shasum -a 256 -c OASIS4.3-portable-ccp4only.tar.gz.sha256
@@ -117,6 +117,47 @@ cd OASIS4.3-portable-ccp4only-20261111 && ./oasis doctor
 - 带 RESOLVE/CCTBX 的 dev17 完整包（3.8 GB）压缩后仍可能超过 2 GB 的 GitHub Release 附件上限，那才需要 `split -b 1900m … part-` 分卷，接收方 `cat part-* | tar xz`。
 - 渠道用内网、移动硬盘，或**私有**仓库的 Release；不要放到公开仓库。
 - 包里带着 CCP4 的二进制，按 CCP4 许可，接收方也应已持有相应授权；接收机需为 macOS Intel。
+- 接收方第一次运行：从网络下载的文件会被 macOS 打上隔离属性，而包里的二进制未签名（`codesign -dv` 报 `code object is not signed at all`），双击 `OASIS4.3.command` 可能被 Gatekeeper 拦下。在终端执行一次 `xattr -dr com.apple.quarantine OASIS4.3-portable-ccp4only-20261111` 即可；从终端直接 `./oasis doctor`、`./oasis sad-to-model` 不受影响（已实测）。
+- `bundle.json` 与 `DOCTOR.json` 里的路径是相对包根的（`python/bin/python3` 等），换机器、换目录都不会失效。
+
+### 方式 B 的包能复现标定结果吗？能不装 CCP4 吗？（2026-11-11 实测）
+
+**能复现。** 把 tarball 解到新目录，用空环境（`env -i`，不继承 CCP4、Phenix、系统 Python 的任何变量）把十套标定的选中终点逐个重跑，每套参数照抄该终点 `pipeline_report.json` 里的 `config`：
+
+```bash
+env -i PATH=/usr/bin:/bin HOME=/tmp/oasis-clean-home LANG=C \
+  ./oasis sad-to-model --method pplus_bundled --dm-engine parrot --no-auto-hand \
+    --input-columns --feedback-cycles 3 --dm-solvent 0.50 --dm-mask-radius 3.0 \
+    --dm-anisotropy --trace-resolution 2.0 --fcalc fc_all --copies 1 --rounds 5 \
+    --cycles 10 --phase-cycles 100 --dm-cycles 40 …（其余照抄 config）
+```
+
+| 案例 | 终点 | 标定 R / R-free | 包内重跑 R / R-free | 坐标 |
+| --- | --- | --- | --- | --- |
+| 3O2E | fb3，溶剂 auto | 41.14 / 42.64 | 41.14 / 42.64 | 逐行相同 |
+| 5D9D | fb3，0.50 | 25.43 / 27.51 | 25.43 / 27.51 | 逐行相同 |
+| 5HHK | fb3，0.50 | 25.94 / 28.82 | 25.94 / 28.82 | 逐行相同 |
+| 6HF7 | fb3，0.50 | 26.02 / 29.04 | 26.02 / 29.04 | 逐行相同 |
+| 6ZPP | fb2，0.50 | 30.04 / 31.31 | 30.04 / 31.31 | 逐行相同 |
+| 7E1D | fb3，0.50 | 36.65 / 42.33 | 36.65 / 42.33 | 逐行相同 |
+| 7ENM | fb2，0.50 | 28.34 / 31.47 | 28.34 / 31.47 | 逐行相同 |
+| 7TBS | fb3，0.50 | 25.17 / 28.35 | 25.17 / 28.35 | 逐行相同 |
+| 7TFQ | fb2，0.50（`pplus_trust`） | 32.52 / 36.86 | 32.52 / 36.86 | 逐行相同 |
+| 7TJ1 | fb2，0.50 | 23.92 / 31.08 | 23.92 / 31.08 | 逐行相同 |
+
+十套的 R 与 R-free 都与标定一致到小数点后四位，`primary_model.cif` 的坐标逐行相同。文件 sha256 仍会不同：CIF 头部 `_pdbx_database_status.recvd_initial_deposition_date` 记的是写文件日期，比对坐标前先去掉 `_` 开头的头行。
+
+复现时最容易踩的三个坑（都是参数没照抄，不是包的问题）：
+
+1. **3O2E 的终点用 `auto` 溶剂，不是 0.50。** 单跑时 `--dm-solvent` 只收数字，必须走端点网格 `--feedback-endpoints 3 --dm-solvents auto`；写成 0.50 会落到另一条终点（47.01 / 50.89）。
+2. **7TFQ 的终点是 `pplus_trust`**，要显式 `--dm-engine parrot`（本版起允许；`--dm-engine resolve` 仍会被拒绝，因为包里没有 Phenix）。它的 `--observation-prior` 用同一套 `pplus_bundled --no-build-model` 跑出的 `02_sad/observations.mtz` 就行。
+3. **每套的 `--max-per-target` 不同**（多数 48，5HHK 13，6HF7 24）；6HF7 还要 `--copies 3 --elements Tb,Mg --wavelength 1.6486`。
+
+**不用装 CCP4。** 三条独立证据：
+
+- `env -i ./oasis doctor` 通过，报 `requires_separate_CCP4: false`、`requires_separate_Phenix: false`，随包引擎 Phaser / Parrot / Buccaneer / REFMAC。
+- 启动脚本先 `unset CCP4 CLIBD CLIBD_MON CBIN CEXAM CINCL CLIB PHENIX PHENIX_ROOT LIBTBX_BUILD` 及全部 `DYLD_*`/`LD_*`，再设 `PHASEBUILD_RUNTIME=<包>/runtime`；机器上不需要任何 CCP4 目录存在。
+- `otool -L` 检查：`runtime/bin/*` 的非系统依赖全是 `@loader_path/../lib/…`（库就在包里），`python/bin/python3` 只链接 `/usr/lib/libSystem`；`./oasis gui` 也能用随包 Python 3.12 + Tk 8.6 直接起窗口。
 
 ## 方式 C：只要代码
 

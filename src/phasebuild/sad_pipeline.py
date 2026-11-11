@@ -68,7 +68,11 @@ def validate(config, inspect=True):
     if cfg['method'] not in ('likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'):raise ValueError('Unknown phase method')
     trusted=cfg['method']=='pplus_trust'
     optimized=cfg['method'] in ('pplus_trust','pplus_internal','pplus_bundled')
-    if os.environ.get('OASIS_INSTALLATION_FREE')=='1' and trusted:raise ValueError('免安装版禁止调用 Phenix；请选择内部 P+、连续 SAD 或旧 P+')
+    # 免安装包禁止调用 Phenix。pplus_trust 只有在用 RESOLVE/CCTBX 做密度修饰时才需要 Phenix；
+    # 换成随包 Parrot 后这条路线不接触 Phenix（见下方 trusted 分支），因此四引擎包可以跑它，
+    # 十套标定里 7TFQ 的终点正是 pplus_trust+parrot。
+    if os.environ.get('OASIS_INSTALLATION_FREE')=='1' and trusted and cfg.get('dm_engine')!='parrot':
+        raise ValueError('免安装版禁止调用 Phenix；请选择内部 P+、连续 SAD 或旧 P+')
     if cfg['method']=='pplus_internal':
         cfg.update(phenix_bin='',phase_cycles=100)
         if cfg.get('observation_prior'):raise ValueError('内部 P+ 不接受外部 Phaser 先验')
@@ -100,6 +104,8 @@ def validate(config, inspect=True):
         if cfg.get('dm_engine')!='parrot':
             from .trust_workflow import phenix_directory
             cfg['phenix_bin']=phenix_directory(cfg['phenix_bin'])
+        else:
+            cfg['phenix_bin']=''
         cfg.update(phase_cycles=100,dm_cycles=40)
     for flag in ['trust_stability','trust_partial_cleanup','trust_work_weight']:
         if not isinstance(cfg[flag],bool):raise ValueError(flag+' must be boolean')
