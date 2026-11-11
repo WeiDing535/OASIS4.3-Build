@@ -99,9 +99,24 @@ dist/OASIS4.3-portable/
 
 ## 方式 B：从维护者处拿现成构建（私有分发）
 
-- 单个文件不能超过 2 GB（GitHub Release 上限），包需要分卷，例如 `split -b 1900m OASIS4.3-dev17-portable.tar.gz part-`，随包附 `shasum -a 256` 清单，接收方 `cat part-* | tar xz` 后逐个核对。
+只带四个引擎的包压缩后很小，不需要分卷：
+
+```bash
+tar -czf OASIS4.3-portable-ccp4only.tar.gz OASIS4.3-portable-ccp4only-20261111
+shasum -a 256 OASIS4.3-portable-ccp4only.tar.gz > OASIS4.3-portable-ccp4only.tar.gz.sha256
+```
+
+实测：1.4 GB 的目录压成 **436 MB**、45 370 个条目（55 秒），单个文件即可传，接收方：
+
+```bash
+shasum -a 256 -c OASIS4.3-portable-ccp4only.tar.gz.sha256
+tar -xzf OASIS4.3-portable-ccp4only.tar.gz
+cd OASIS4.3-portable-ccp4only-20261111 && ./oasis doctor
+```
+
+- 带 RESOLVE/CCTBX 的 dev17 完整包（3.8 GB）压缩后仍可能超过 2 GB 的 GitHub Release 附件上限，那才需要 `split -b 1900m … part-` 分卷，接收方 `cat part-* | tar xz`。
 - 渠道用内网、移动硬盘，或**私有**仓库的 Release；不要放到公开仓库。
-- 包里带着 CCP4 的二进制，按 CCP4 许可，接收方也应已持有相应授权。
+- 包里带着 CCP4 的二进制，按 CCP4 许可，接收方也应已持有相应授权；接收机需为 macOS Intel。
 
 ## 方式 C：只要代码
 
