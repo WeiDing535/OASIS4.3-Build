@@ -92,7 +92,7 @@ def validate(config, inspect=True):
         if cfg.get('observation_prior'):raise ValueError('自带模式不接受外部相位文件')
         cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None))
         from .bundled_pplus import engine_layout
-        engine_layout(cfg['runtime'])
+        engine_layout(cfg['runtime'],cfg.get('dm_engine'))
     if trusted:
         # The P+ trust-region phase stage itself never needs Phenix; only the
         # original RESOLVE/CCTBX density-modification backend did. When the
@@ -208,7 +208,7 @@ def validate(config, inspect=True):
                 raise ValueError('External construction reference unavailable')
     if cfg['auto_hand'] and cfg['method']!='pplus_bundled':
         from .bundled_pplus import engine_layout
-        engine_layout(cfg['runtime'])
+        engine_layout(cfg['runtime'],cfg.get('dm_engine'))
         if cfg.get('wavelength') is None:raise ValueError('Automatic hands require experimental SAD wavelength')
     if not cfg.get('fpp') or not isinstance(cfg['fpp'],str):raise ValueError('Specify element=f-double-prime')
     if inspect and cfg['input_columns']:

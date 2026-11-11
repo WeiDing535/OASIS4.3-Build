@@ -24,6 +24,11 @@ def locate(explicit=None, runtime=None):
         path=Path(explicit).expanduser()
         if path.is_file() and os.access(path,os.X_OK):return str(path)
         raise ValueError('Configured Parrot executable is not runnable: '+str(path))
+    if not runtime:
+        # A portable bundle exports PHASEBUILD_RUNTIME; its own cparrot must win
+        # over any host CCP4 installation before we look at system paths.
+        from .runtime import default_runtime
+        runtime=default_runtime() or None
     if runtime:
         candidate=Path(runtime)/'bin'/'cparrot'
         if candidate.is_file() and os.access(candidate,os.X_OK):return str(candidate)

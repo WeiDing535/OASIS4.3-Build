@@ -73,8 +73,24 @@ def resolve_dependency(name, loader, source):
     return target
 
 
-def runtime_graph(source):
-    pending = [source / 'bin/cbuccaneer', source / 'bin/refmac5']
+ENGINES = ('cbuccaneer', 'refmac5', 'phaser', 'cparrot')
+DEFAULT_ENGINES = ('cbuccaneer', 'refmac5')
+
+
+def engine_names(value):
+    """Parse and check a comma-separated engine list; defaults stay minimal."""
+    names = tuple(part.strip() for part in str(value or '').split(',') if part.strip())
+    if not names:
+        return DEFAULT_ENGINES
+    unknown = [name for name in names if name not in ENGINES]
+    if unknown:
+        raise ValueError('Unknown engine(s): %s; choose from %s'
+                         % (', '.join(unknown), ', '.join(ENGINES)))
+    return tuple(dict.fromkeys(names))
+
+
+def runtime_graph(source, engines=DEFAULT_ENGINES):
+    pending = [source / 'bin' / name for name in engines]
     seen, graph = set(), []
     while pending:
         path = pending.pop()
@@ -266,6 +282,8 @@ def main():
     parser.add_argument('--source', type=Path, default=Path('/Applications/ccp4-9'))
     parser.add_argument('--output', type=Path, default=REPOSITORY / 'dist/local_macos_x86_64/runtime')
     parser.add_argument('--workers', type=int, default=8)
+    parser.add_argument('--engines', default=','.join(DEFAULT_ENGINES),
+                        help='Comma-separated installed engines to stage: ' + ', '.join(ENGINES))
     parser.add_argument('--skip-startup-check', action='store_true')
     arguments = parser.parse_args()
     source, output = arguments.source.resolve(), arguments.output.resolve()
@@ -279,8 +297,9 @@ def main():
         raise RuntimeError('Output must not be inside the original installation')
     if arguments.workers < 1 or arguments.workers > 32:
         raise ValueError('Workers must be1..32')
+    engines = engine_names(arguments.engines)
     started = time.time()
-    graph = runtime_graph(source)
+    graph = runtime_graph(source, engines)
     plan = []
     for item in graph:
         relative = Path(item['relative_path'])

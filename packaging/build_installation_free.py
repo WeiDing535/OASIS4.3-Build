@@ -47,8 +47,21 @@ assert resolve_runtime(required=('cbuccaneer','refmac5'))==base/'runtime'
 assert os.environ.get('OASIS_INSTALLATION_FREE')=='1'
 from phasebuild.oasis_workflow import defaults
 cfg=defaults(base/'app');assert cfg['method'] in ('pplus_internal','pplus_bundled') and not cfg['phenix_bin']
-print(json.dumps({'status':'passed','paths':paths,'python_version':sys.version,'default_method':cfg['method'],'requires_separate_Phenix':False,'requires_separate_CCP4':False,'bundled_external_engines':['Buccaneer','REFMAC'],'public_redistribution_ready':False},indent=2))
+doc=json.loads((base/'runtime/runtime_manifest.json').read_text())
+names={Path(e['relative_path']).name for e in doc.get('dependency_graph',[])}
+labels={'phaser':'Phaser','cparrot':'Parrot','cbuccaneer':'Buccaneer','refmac5':'REFMAC'}
+engines=[labels[n] for n in labels if n in names]
+print(json.dumps({'status':'passed','paths':paths,'python_version':sys.version,'default_method':cfg['method'],'requires_separate_Phenix':False,'requires_separate_CCP4':False,'bundled_external_engines':engines,'public_redistribution_ready':False},indent=2))
 '''
+
+
+ENGINE_LABELS={'phaser':'Phaser','cparrot':'Parrot','cbuccaneer':'Buccaneer','refmac5':'REFMAC'}
+
+
+def bundled_engines(root):
+    doc=json.loads((Path(root)/'runtime'/'runtime_manifest.json').read_text())
+    names={Path(entry['relative_path']).name for entry in doc.get('dependency_graph',[])}
+    return [name for name in ENGINE_LABELS if name in names]
 
 
 def sha(path):
@@ -100,14 +113,23 @@ def main(argv=None):
     run=subprocess.run([str(out/'oasis'),'doctor'],env=env,capture_output=True,text=True,timeout=120)
     (out/'DOCTOR.json').write_text(run.stdout)
     if run.returncode:raise RuntimeError('Copied runtime doctor failed: '+run.stdout+run.stderr)
-    report={'version':tomllib.loads((ROOT/'pyproject.toml').read_text())['tool']['oasis43']['version'],'platform':'macOS Intel x86_64','status':'assembled','default_method':'pplus_internal',
+    engines=bundled_engines(out);parrot='cparrot' in engines
+    scope=('Bundled Phaser SAD -> P+ -> Parrot density modification -> Buccaneer/REFMAC. '
+        'The RESOLVE/CCTBX density runtime is not part of this assembly.') if parrot else \
+        'Internal approximate likelihood and DM. External-branch SEC17 Rfree27.42% is not claimed for this route.'
+    report={'version':tomllib.loads((ROOT/'pyproject.toml').read_text())['tool']['oasis43']['version'],'platform':'macOS Intel x86_64','status':'assembled',
+        'default_method':'pplus_bundled' if {'phaser','cparrot'}<=set(engines) else 'pplus_internal',
         'requires_separate_Phenix_installation':False,'requires_separate_CCP4_installation':False,'Phenix_bundled':False,
-        'bundled_external_engines':['Buccaneer','REFMAC'],'scope':'Local evaluation with existing authorized engine binaries. Public redistribution conditions unresolved.',
+        'bundled_external_engines':[ENGINE_LABELS[n] for n in ENGINE_LABELS if n in engines],
+        'bundled_engine_ids':[n for n in ENGINE_LABELS if n in engines],
+        'scope':'Local evaluation with existing authorized engine binaries. Public redistribution conditions unresolved.',
         'public_redistribution_ready':False,'dependencies_installed':False,'python_files':len(pyfiles),'app_files':len(appfiles),
         'engine_manifest_SHA256':sha(out/'runtime/runtime_manifest.json'),'doctor':json.loads(run.stdout),
-        'scientific_scope':'Internal approximate likelihood and DM. External-branch SEC17 Rfree27.42% is not claimed for this route.'}
+        'scientific_scope':scope}
     (out/'bundle.json').write_text(json.dumps(report,indent=2)+'\n')
-    (out/'使用说明.txt').write_text('OASIS4.3 dev4 本机免安装套件评估包（macOS Intel）\n\n双击 OASIS4.3.command；保持整个目录完整。无需另装 Python、Phenix 或整套 CCP4。\n内部 SAD/P+/DM 使用随包 NumPy/SciPy/Gemmi，建模精修使用随包 Buccaneer/REFMAC。不是全部算法由 OASIS 原创。\n当前内部算法为近似实现，不能沿用外部组合流程的 Rfree27.42% 结论。\nPhenix 对照模式在此包中禁止调用。数据文件由用户提供；运行写入新目录。\n这是由本机已有授权组件构建的本机评估包；公开再分发条件尚未落实，不是公开发行包。\n')
+    engine_text='、'.join(ENGINE_LABELS[n] for n in ENGINE_LABELS if n in engines)
+    dm_text='Parrot 密度修饰' if parrot else '内置 RESOLVE/MLHL 密度修饰'
+    (out/'使用说明.txt').write_text('OASIS4.3 本机免安装套件评估包（macOS Intel）\n\n双击 OASIS4.3.command；保持整个目录完整。无需另装 Python、Phenix 或整套 CCP4。\n随包引擎：'+engine_text+'；密度修饰：'+dm_text+'。内部 SAD/P+ 使用随包 NumPy/SciPy/Gemmi。不是全部算法由 OASIS 原创。\nPhenix 对照模式在此包中禁止调用。数据文件由用户提供；运行写入新目录。\n这是由本机已有授权组件构建的本机评估包；公开再分发条件尚未落实，不是公开发行包。\n')
     print(json.dumps({'bundle':str(out),'status':report['status'],'doctor':'passed'},indent=2))
 
 if __name__=='__main__':main()

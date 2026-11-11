@@ -73,3 +73,12 @@ def test_startup_probe_uses_application_environment_without_host_scratch(tmp_pat
     assert 'HOME' not in environment
     assert environment['CINCL'] == str(runtime / 'include')
     assert source['sha256'] == BUILDER.sha256(PATH.parents[1] / 'src/phasebuild/runtime.py')
+
+
+def test_engine_list_keeps_the_minimal_default_and_rejects_typos():
+    assert BUILDER.engine_names('') == ('cbuccaneer', 'refmac5')
+    assert BUILDER.engine_names(None) == ('cbuccaneer', 'refmac5')
+    assert BUILDER.engine_names('phaser, cparrot') == ('phaser', 'cparrot')
+    assert BUILDER.engine_names('cparrot,phaser,cparrot') == ('cparrot', 'phaser')
+    with pytest.raises(ValueError, match='Unknown engine'):
+        BUILDER.engine_names('cbuccaneer,cparot')

@@ -72,7 +72,7 @@ class FakeStages:
 @pytest.mark.parametrize('method',['pplus_internal','likelihood','pplus'])
 def test_nonbundled_auto_hand_routes_selected_inputs(tmp_path,inputs,monkeypatch,method):
     from phasebuild import bundled_pplus
-    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime:None)
+    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None:None)
     cfg=pipeline.validate({**inputs,'method':method,'auto_hand':True,'wavelength':2.0},inspect=False)
     stages=pipeline.stage_plan(cfg)
     assert [s['id'] for s in stages]==['prepare','hand','sad','dm','bridge','build']+(['finish'] if method=='pplus_internal' else [])

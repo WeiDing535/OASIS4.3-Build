@@ -14,10 +14,14 @@ from .data import fingerprint
 from .trust_workflow import dump,launch,sample_info
 
 
-def engine_layout(runtime):
+def engine_layout(runtime,dm_engine=None):
+    """Check the bundled engines; the RESOLVE/CCTBX tree is unused under Parrot."""
     runtime=Path(runtime).expanduser().resolve();density=runtime/'density'
-    for p in [runtime/'bin/phaser',density/'bin/oasis-density-python',density/'conda_base/bin/python2.7']:
+    required=[runtime/'bin/phaser']
+    if dm_engine!='parrot':required+=[density/'bin/oasis-density-python',density/'conda_base/bin/python2.7']
+    for p in required:
         if not p.is_file() or not os.access(p,os.X_OK):raise ValueError('自带引擎缺失，请使用完整 dev5 包：'+str(p))
+    if dm_engine=='parrot':return runtime,None
     for p in [density/'build/libtbx_env',density/'modules/solve_resolve/ext_ref_files']:
         if not p.exists():raise ValueError('自带密度修饰资源缺失：'+str(p))
     return runtime,density
@@ -29,7 +33,7 @@ def preflight(cfg):
     value=cfg.get('wavelength')
     if isinstance(value,bool) or not isinstance(value,(int,float)) or not np.isfinite(value) or not .1<=value<=10:
         raise ValueError('请填写实验 SAD 波长（Å，0.1–10）；程序不猜测波长')
-    engine_layout(cfg['runtime'])
+    engine_layout(cfg['runtime'],cfg.get('dm_engine'))
     if cfg.get('labels'):raise ValueError('自带引擎模式当前要求标准 F(+)/SIGF(+)/F(-)/SIGF(-) 列名')
     sad=gemmi.read_mtz_file(cfg['sad']);columns(sad,{'F(+)':'G','SIGF(+)':'L','F(-)':'G','SIGF(-)':'L'})
     read_sequences(cfg['sequence']);sample_info(cfg,sad)
@@ -83,7 +87,7 @@ def phase(cfg,output):
     from .oasis_options import pairs
     from .runtime import runtime_environment
     from . import trust_workflow
-    out=Path(output);runtime,density=engine_layout(cfg['runtime']);front=out/'phaser';front.mkdir()
+    out=Path(output);runtime,_=engine_layout(cfg['runtime'],cfg.get('dm_engine'));front=out/'phaser';front.mkdir()
     work=stage_work(cfg,front/'work.mtz');shutil.copyfile(cfg['sequence'],front/'sequence.fasta')
     if Path(cfg['heavy']).suffix.lower() in ('.pdb','.ent'):shutil.copyfile(cfg['heavy'],front/'heavy.pdb')
     else:gemmi.read_structure(cfg['heavy']).write_pdb(str(front/'heavy.pdb'))

@@ -162,3 +162,36 @@ def test_plan_probe_detects_parrot_before_the_run(monkeypatch):
     monkeypatch.setattr(parrot_dm,'locate',lambda *a,**k: '/opt/ccp4/bin/cparrot')
     assert engine_fallback({'dm_engine':'parrot'})==''
     assert engine_fallback({'dm_engine':'resolve'})==''
+
+
+def test_parrot_layout_does_not_require_the_resolve_density_tree(tmp_path, monkeypatch):
+    """A CCP4-derived runtime has phaser + cparrot but no RESOLVE/CCTBX tree."""
+    from phasebuild.bundled_pplus import engine_layout
+    runtime = tmp_path / 'runtime'
+    for name in ('phaser', 'cparrot'):
+        binary = runtime / 'bin' / name
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text('#!/bin/sh\n')
+        binary.chmod(0o755)
+    assert engine_layout(runtime, 'parrot') == (runtime.resolve(), None)
+    with pytest.raises(ValueError, match='自带引擎缺失'):
+        engine_layout(runtime, 'resolve')
+    with pytest.raises(ValueError, match='自带引擎缺失'):
+        engine_layout(runtime)
+
+
+def test_bundled_runtime_wins_over_a_host_ccp4_installation(tmp_path, monkeypatch):
+    from phasebuild import parrot_dm
+    bundled = tmp_path / 'bundle/runtime/bin/cparrot'
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text('#!/bin/sh\n')
+    bundled.chmod(0o755)
+    host = tmp_path / 'host/bin/cparrot'
+    host.parent.mkdir(parents=True)
+    host.write_text('#!/bin/sh\n')
+    host.chmod(0o755)
+    monkeypatch.setenv('PHASEBUILD_RUNTIME', str(bundled.parents[1]))
+    monkeypatch.setattr(parrot_dm.shutil, 'which', lambda name: str(host))
+    assert parrot_dm.locate() == str(bundled)
+    monkeypatch.delenv('PHASEBUILD_RUNTIME')
+    assert parrot_dm.locate(runtime=bundled.parents[1]) == str(bundled)
