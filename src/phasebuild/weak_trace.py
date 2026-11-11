@@ -23,7 +23,28 @@ def clash_free(residue,chain,density,used=(),backward=False):
     return True
 
 
-def grow_weak(density,xyz,maximum=30,beam_width=4,baseline=2.,maximum_weak_steps=2,backward=False,used=()):
+def lookahead_bonus(density,variants,chain,pairs,baseline,used=(),backward=False):
+    """Score one further residue before pruning the current coarse beam.
+
+    This ranks candidates only; future residues must still pass real growth
+    refinement and geometry checks before they enter the output model.
+    """
+    bonus=np.full(len(variants),-1.)
+    for i,residue in enumerate(variants):
+        # These candidates cannot enter the real growth beam, so avoid an
+        # expensive future search that cannot affect the selected branches.
+        if float(density.score(residue))<.5 or np.min(density.sample(residue[:3]))<-.5:
+            continue
+        if not clash_free(residue,chain,density,used,backward):continue
+        joined=np.concatenate([residue[None],chain] if backward else [chain,residue[None]])
+        future=np.array([prepend(residue,*p) if backward else extend(residue,*p) for p in pairs])
+        values=density.score(future);atoms=density.sample(future[:,:3]).min(axis=1)
+        valid=[j for j in range(len(future)) if values[j]>=.5 and atoms[j]>=-.5 and clash_free(future[j],joined,density,used,backward)]
+        if valid:bonus[i]=np.clip(float(np.max(values[valid]))-baseline,-1.,3.)
+    return bonus
+
+
+def grow_weak(density,xyz,maximum=30,beam_width=4,baseline=2.,maximum_weak_steps=2,backward=False,used=(),lookahead=False):
     if maximum_weak_steps<0 or maximum_weak_steps>3:raise ValueError('Weak-step budget must be 0..3')
     if len(xyz)<2 or maximum<len(xyz):return xyz.copy()
     beams=[(0.,xyz.copy(),0)];best=beams[0]
@@ -34,10 +55,13 @@ def grow_weak(density,xyz,maximum=30,beam_width=4,baseline=2.,maximum_weak_steps
         for bi,(cumulative,chain,weak) in enumerate(beams):
             variants=np.array([prepend(chain[0],*p) if backward else extend(chain[-1],*p) for p in (back_pairs if backward else pairs)])
             values=density.score(variants);atoms=density.sample(variants[:,:3]).min(axis=1)
-            for pi in np.argsort(values)[::-1]:
+            ranking=values.copy()
+            if lookahead:
+                ranking+=lookahead_bonus(density,variants,chain,back_pairs if backward else pairs,baseline,used,backward)
+            for pi in np.argsort(ranking)[::-1]:
                 if values[pi]<.5 or atoms[pi]<-.5:continue
                 if not clash_free(variants[pi],chain,density,used,backward):continue
-                coarse.append((cumulative+float(values[pi])-baseline,bi,pi))
+                coarse.append((cumulative+float(ranking[pi])-baseline,bi,pi))
                 # Several torsion alternatives per live beam, then a global budget.
                 if sum(x[1]==bi for x in coarse)>=beam_width:break
         coarse.sort(reverse=True);branches=[]

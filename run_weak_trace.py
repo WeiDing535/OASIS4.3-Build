@@ -1,5 +1,5 @@
 """Opt-in weak-map PhaseBuild search/growth using only map and unrelated profiles."""
-import argparse,json,sys,time
+import argparse,json,sys,time,os
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent/'src'))
 import numpy as np
@@ -29,7 +29,8 @@ def main():
   if args.legacy_growth:
    chain=grow(d,xyz,float(psi),args.max_length,4,2.);chain=grow_backward(d,chain,args.max_length,4,2.,used)
   else:
-   chain=grow_weak(d,xyz,args.max_length,4,used=used);chain=grow_weak(d,chain,args.max_length,4,backward=True,used=used)
+   lookahead=os.environ.get('OASIS_RESEARCH_LOOKAHEAD')=='1'
+   chain=grow_weak(d,xyz,args.max_length,4,used=used,lookahead=lookahead);chain=grow_weak(d,chain,args.max_length,4,backward=True,used=used,lookahead=lookahead)
   grown.append(chain)
   print('Seed %d/%d: grew %d residues'%(i+1,len(seeds),len(chain)),flush=True)
  pieces=[]

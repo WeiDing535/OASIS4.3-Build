@@ -20,7 +20,8 @@ from .refinement import reflection_partition, verify_free_flags
 from .runtime import resolve_runtime, runtime_environment
 
 
-def merge_experimental_phases(native_path, phase_path, output, representation='hl', free_value=0):
+def merge_experimental_phases(native_path, phase_path, output, representation='hl', free_value=0, phase_prefix='SAD_'):
+    if phase_prefix not in ('SAD_','DM_'):raise ValueError('Invalid phase prefix')
     if representation not in ['hl', 'phifom']:
         raise ValueError('Phase representation must be hl or phifom')
     native, partition = reflection_partition(native_path, free_value=free_value)
@@ -55,12 +56,13 @@ def merge_experimental_phases(native_path, phase_path, output, representation='h
             continue
         if representation == 'phifom' and not 0. <= values[1] <= 1.:
             raise ValueError('Experimental FOM outside [0,1]')
+        if phase_prefix=='DM_' and original[i,native.column_labels().index('FreeR_flag')]==free_value:continue
         priors[i] = values
         matched += 1
     if not matched:
         raise ValueError('No exact-HKL finite experimental phases matched native data')
-    dataset = native.add_dataset('original_experimental_phase_prior')
-    destination_labels = ['SAD_' + label for label in labels]
+    dataset = native.add_dataset('density_modified_work_phase_restraint' if phase_prefix=='DM_' else 'original_experimental_phase_prior')
+    destination_labels = [phase_prefix + label for label in labels]
     if any(label in native.column_labels() for label in destination_labels):
         raise ValueError('Native already has requested SAD prior columns')
     for label, kind in zip(destination_labels, types):
@@ -79,7 +81,7 @@ def merge_experimental_phases(native_path, phase_path, output, representation='h
     distances = native.make_d_array()
     report = {'native': fingerprint(native_path), 'phase_source': fingerprint(phase_path),
         'output': fingerprint(output), 'representation': representation,
-        'source_labels': labels, 'destination_labels': destination_labels,
+        'source_labels': labels, 'destination_labels': destination_labels, 'phase_source_kind':'density_modified_work' if phase_prefix=='DM_' else 'original_sad',
         'native_partition': partition, 'native_rows': len(original),
         'matched_prior_rows': matched, 'missing_prior_rows': int(missing.sum()),
         'matched_free_prior_rows': int(np.sum((flags == free_value) & ~missing)),
@@ -134,9 +136,19 @@ def parse_statistics(log_path, xml_path):
             'r_factor_precision_decimals': 4}
 
 
+def validate_phase_blur(value):
+    if value is None:return None
+    if not isinstance(value,(tuple,list)) or len(value)!=2 or any(isinstance(v,bool) or not isinstance(v,(int,float)) or not np.isfinite(v) for v in value) or not 0<value[0]<=1 or not 0<=value[1]<=500:
+        raise ValueError('Phase blur requires finite scale in (0,1] and B in [0,500]')
+    return tuple(float(v) for v in value)
+
+
 def refmac_with_experimental_prior(merged_mtz, model_path, output, use_prior=True,
                                    cycles=10, representation='hl', timeout=3600,
-                                   ccp4=None, free_value=0):
+                                   ccp4=None, free_value=0, phase_prefix='SAD_', phase_blur=None):
+    if phase_prefix not in ('SAD_','DM_'):raise ValueError('Invalid phase prefix')
+    phase_blur=validate_phase_blur(phase_blur)
+    if phase_blur is not None and not use_prior:raise ValueError('Phase blur requires an experimental prior')
     if representation not in ['hl', 'phifom'] or not isinstance(cycles, int) or cycles < 0:
         raise ValueError('Invalid phase representation or cycle count')
     native, partition = reflection_partition(merged_mtz, free_value=free_value)
@@ -160,9 +172,9 @@ def refmac_with_experimental_prior(merged_mtz, model_path, output, use_prior=Tru
     structure.write_pdb(str(out / 'input.pdb'))
     labels = ['HLA', 'HLB', 'HLC', 'HLD'] if representation == 'hl' else ['PHIB', 'FOM']
     if use_prior:
-        if any(native.column_with_label('SAD_' + label) is None for label in labels):
+        if any(native.column_with_label(phase_prefix + label) is None for label in labels):
             raise ValueError('Missing experimental prior columns')
-        phase_assignment = ' ' + ' '.join(label + '=SAD_' + label for label in labels)
+        phase_assignment = ' ' + ' '.join(label + '='+phase_prefix + label for label in labels)
     else:
         phase_assignment = ''
     low, high = partition['observed_resolution_low'] * 1.0001, partition['observed_resolution_high'] * .9999
@@ -170,6 +182,7 @@ def refmac_with_experimental_prior(merged_mtz, model_path, output, use_prior=Tru
         'REFI TYPE REST RESO %.6f %.6f\n' % (low, high) +
         'REFI RESI MLKF\nREFI BREF ISOT\nMAKE HYDR N HOUT N BUIL N\n' +
         'SCAL TYPE BULK\nSCAL MLSC WORK\nWEIGHT AUTO\nNCYC %d\nEND\n' % cycles)
+    if phase_blur is not None:keywords=keywords.replace('WEIGHT AUTO\n','REFI PHASE SCBLUR %.8g BBLUR %.8g\nWEIGHT AUTO\n'%tuple(phase_blur))
     (out / 'keywords.txt').write_text(keywords)
     command = [str(binary), 'HKLIN', 'input.mtz', 'XYZIN', 'input.pdb',
         'HKLOUT', 'refined.mtz', 'XYZOUT', 'refined.pdb', 'XMLOUT', 'refmac.xml']
@@ -178,11 +191,12 @@ def refmac_with_experimental_prior(merged_mtz, model_path, output, use_prior=Tru
         'input': original_input, 'staged_input': staged_input,
         'input_staging': 'Exact byte copy; short relative CCP4 file arguments to avoid legacy Fortran pathname truncation',
         'working_directory': str(out), 'binary': fingerprint(binary),
+        'phase_source_kind':'density_modified_work' if phase_prefix=='DM_' else 'original_sad',
         'use_experimental_prior': bool(use_prior), 'prior_representation': representation if use_prior else None,
         'keywords': keywords, 'command': command, 'requested_cycles': cycles,
-        'partition': partition, 'phase_blurring': 'REFMAC default SCBLUR1 BBLUR0; no tuned confidence',
+        'partition': partition, 'phase_blurring': {'scale':phase_blur[0],'B':phase_blur[1],'policy':'Explicit fixed confidence blurring; no Rfree selection'} if phase_blur is not None else 'REFMAC default SCBLUR1 BBLUR0; no tuned confidence',
         'selection': 'Fixed final cycle; no choice by Rfree or target-reference scores',
-        'limitation': 'Original upstream OASIS/DM priors already used free reflections; this is not an independent blind Rfree test.'}
+        'limitation': 'Upstream free-reflection exclusion depends on the supplied prior provenance. Later external-engine maps are not certified work-only; Rfree is not an independent end-to-end blind test.'}
     environment = runtime_environment(ccp4, scratch=out / 'scratch')
     report['scratch_directory'] = environment['CCP4_SCR']
     started = time.time()

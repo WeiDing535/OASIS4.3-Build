@@ -34,6 +34,16 @@ def test_worker_failure_preserves_output_and_stops_pipeline(monkeypatch,tmp_path
     assert json.loads((out/'gui_job.json').read_text())['status']=='failed'
 
 
+def test_record_keeps_the_child_process_id(monkeypatch,tmp_path):
+    out=tmp_path/'output'
+    steps=[dict(name='quick',command=[sys.executable,'-c','pass'],output=str(out/'one'),kind='build')]
+    stub(monkeypatch,out,steps)
+    jobs=runner.Jobs(tmp_path);job=jobs.start({})
+    wait_for(lambda:jobs.active is None)
+    record=json.loads((tmp_path/'.gui/jobs'/(job['id']+'.json')).read_text())
+    assert isinstance(record['pid'],int) and record['pid']>0
+
+
 def test_empty_trace_stops_with_actionable_error(monkeypatch,tmp_path):
     out=tmp_path/'output';trace=out/'trace'
     code='from pathlib import Path; p=Path('+repr(str(trace))+'); p.mkdir(); (p/"build_report.json").write_text(\'{"residues":0}\')'

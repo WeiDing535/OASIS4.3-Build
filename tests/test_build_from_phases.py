@@ -16,8 +16,8 @@ from phasebuild.trace import write_backbone
 from test_phase_refinement import make_mtz
 
 
-@pytest.mark.parametrize('seeded',[False,True])
-def test_unseeded_first_build_and_seeded_compatibility_fixed_last_model(tmp_path,monkeypatch,seeded):
+@pytest.mark.parametrize('seeded,empty',[(False,False),(True,False),(False,True)])
+def test_unseeded_first_build_and_seeded_compatibility_fixed_last_model(tmp_path,monkeypatch,seeded,empty):
     root=tmp_path/'runtime';(root/'bin').mkdir(parents=True)
     for name in ['cbuccaneer','refmac5']:
         path=root/'bin'/name;path.write_text('synthetic engine');path.chmod(0o755)
@@ -33,7 +33,10 @@ def test_unseeded_first_build_and_seeded_compatibility_fixed_last_model(tmp_path
     class FakeProcess:
         def __init__(self,command,**kwargs):
             commands.append(command)
-            shutil.copyfile(tmp_path/'builder.pdb',command[command.index('-pdbout')+1]);self.pid=999999
+            target=Path(command[command.index('-pdbout')+1])
+            if empty:target.write_text('CRYST1   36.000   36.000   36.000  90.00  90.00  90.00 P 1\nEND\n')
+            else:shutil.copyfile(tmp_path/'builder.pdb',target)
+            self.pid=999999
         def wait(self,timeout=None):return 0
         def poll(self):return 0
     def refine(native,model,output,cycles,ccp4=None,timeout=None):
@@ -42,6 +45,13 @@ def test_unseeded_first_build_and_seeded_compatibility_fixed_last_model(tmp_path
         return dict(statistics=dict(final=dict(cycle=cycles,r_work=.2,r_free=.15+n*.01)),free_flags_preserved=True)
     monkeypatch.setattr(hybrid_recycle.subprocess,'Popen',FakeProcess)
     monkeypatch.setattr(hybrid_recycle,'refmac_refine',refine)
+    if empty:
+        with pytest.raises(RuntimeError,match='Buccaneer produced an empty or invalid model'):
+            hybrid_recycle.recycle(maps,native,None,sequence,tmp_path/'output',ccp4=root,progress=lambda _:None)
+        report=json.loads((tmp_path/'output/hybrid_report.json').read_text())
+        assert report['status']=='failed' and report['stages']==[] and not refinements
+        assert not (tmp_path/'output/primary_model.cif').exists()
+        return
     report=hybrid_recycle.recycle(maps,native,seed if seeded else None,sequence,tmp_path/'output',ccp4=root,progress=lambda _:None)
     assert len(commands)==5 and len(refinements)==5
     assert [c[c.index('-cycles')+1] for c in commands]==['3','2','2','2','2']

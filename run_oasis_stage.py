@@ -18,6 +18,7 @@ def main(argv=None):
     p.add_argument('--copies',type=int,default=1);p.add_argument('--cycles',type=int,default=5)
     p.add_argument('--free-value',type=int,default=0);p.add_argument('--seed',type=int,default=20261023)
     p.add_argument('--reference');p.add_argument('--initial');p.add_argument('--output',required=True)
+    p.add_argument('--observation-output',help='Separate observation-only HL MTZ from the phase stage')
     p.add_argument('--method',choices=['likelihood','pplus'],default='likelihood')
     p.add_argument('--solvent-fraction',type=float)
     p.add_argument('--aoe',type=float,default=.5);p.add_argument('--triplet-weight',type=float,default=.1)
@@ -32,7 +33,11 @@ def main(argv=None):
     from phasebuild.sad_bridge import FLAG
     if a.stage=='phase':
         target=Path(a.output)
-        if target.exists() or target.with_suffix('.json').exists():raise FileExistsError(target)
+        observation_target=Path(a.observation_output) if a.observation_output else target.with_name(target.stem+'.observations.mtz')
+        outputs=[target,target.with_suffix('.json'),observation_target,observation_target.with_suffix('.json')]
+        if len({p.resolve() for p in outputs})!=4:raise ValueError('Phase and observation-prior outputs must be distinct')
+        for path in outputs:
+            if path.exists():raise FileExistsError(path)
         import gemmi,numpy,scipy
         from oasis_py.phasing import phase_native
         from oasis_py.sad import phase_sad_likelihood
@@ -48,11 +53,17 @@ def main(argv=None):
         else:
             result=phase_native(data,'sad',seq['asu_composition'],heavy=heavy,fpp=fpp,
                                 seed=a.seed,aoe=a.aoe,fit_difference=a.rank_fit,**options)
+        from phasebuild.observation_prior import observation_prior
+        from phasebuild.data import fingerprint
+        observations=observation_prior(data,result,heavy,fpp,a.method)
         write_mtz(target,data,result.phase,result.fom,result.hl,result.probability)
         meta={**result.metadata,'input':input_meta,'sequence_asu':seq,'source':data.source,
               'phase_method':a.method,'dependencies':dict(oasis_py=oasis_version,python=sys.version,
                   numpy=numpy.__version__,scipy=scipy.__version__,gemmi=gemmi.__version__)}
         target.with_suffix('.json').write_text(json.dumps(meta,indent=2,allow_nan=False)+'\n')
+        write_mtz(observation_target,data,observations.phase,observations.fom,observations.hl)
+        observation_target.with_suffix('.json').write_text(json.dumps(
+            {**observations.metadata,'source_phase_result':fingerprint(target)},indent=2,allow_nan=False)+'\n')
         import gemmi
         m=gemmi.read_mtz_file(a.output)
         if not all(x in m.column_labels() for x in ['HLA','HLB','HLC','HLD']):

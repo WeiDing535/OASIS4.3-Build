@@ -50,7 +50,8 @@ def test_phase_join_rejects_duplicates_and_invalid_fom(tmp_path):
         merge_experimental_phases(native, phase, tmp_path / 'two.mtz', 'phifom')
 
 
-def test_long_path_refinement_stages_identical_input_and_uses_short_relative_arguments(tmp_path, monkeypatch):
+@pytest.mark.parametrize('phase_blur',[None,(.7,20.)])
+def test_long_path_refinement_stages_identical_input_and_uses_short_relative_arguments(tmp_path, monkeypatch,phase_blur):
     from pathlib import Path
     from types import SimpleNamespace
     import phasebuild.phase_refinement as adapter
@@ -89,7 +90,18 @@ def test_long_path_refinement_stages_identical_input_and_uses_short_relative_arg
             'Ncyc    Rfact    Rfree\n0 0.4375 0.4333 0.58 3000 150 0.0148 1.27 1.56 0.89 0.1\n$TEXT:')
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(adapter.subprocess, 'run', fake_run)
-    result = adapter.refmac_with_experimental_prior(native, model, long_parent / 'out', cycles=0, ccp4=ccp4)
+    result = adapter.refmac_with_experimental_prior(native, model, long_parent / 'out', cycles=0, ccp4=ccp4,phase_blur=phase_blur)
+    if phase_blur is None:assert 'REFI PHASE SCBLUR' not in result['keywords']
+    else:
+        assert 'REFI PHASE SCBLUR 0.7 BBLUR 20\n' in result['keywords']
+        assert result['phase_blurring']['scale']==.7 and result['phase_blurring']['B']==20
     assert result['input']['sha256'] == result['staged_input']['sha256']
     assert result['free_flags_preserved']
     assert result['phase_modified_likelihood_active']
+
+@pytest.mark.parametrize('blur',[True,(0,20),(1.1,20),(.7,-1),(.7,float('nan')),(True,20),(.7,),(.7,501)])
+def test_invalid_phase_blurring_rejected_before_input_or_output(tmp_path,blur):
+    from phasebuild.phase_refinement import refmac_with_experimental_prior
+    with pytest.raises(ValueError,match='Phase blur'):
+        refmac_with_experimental_prior(tmp_path/'missing.mtz',tmp_path/'missing.cif',tmp_path/'out',phase_blur=blur)
+    assert not (tmp_path/'out').exists()

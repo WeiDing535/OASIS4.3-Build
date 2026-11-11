@@ -15,7 +15,8 @@ def test_negative_growth_evidence_has_bounded_budget():
  _,weak,ok=growth_evidence(2.5,previous_weak_steps=2);assert weak==0 and ok
 
 
-def test_recovers_ideal_peptide_across_two_weak_residues_without_coordinate_distortion():
+@pytest.mark.parametrize('lookahead',[False,True])
+def test_recovers_ideal_peptide_across_two_weak_residues_without_coordinate_distortion(lookahead):
  """A synthetic density trough blocks legacy growth but permits a correct bridge."""
  from phasebuild.geometry import template
  from phasebuild.weak_trace import grow_weak
@@ -32,6 +33,6 @@ def test_recovers_ideal_peptide_across_two_weak_residues_without_coordinate_dist
    return peaks[distance.argmin(axis=-1)]-3.*distance.min(axis=-1)
  field=SyntheticField();seed=peptide[:3].copy()
  hard=grow(field,seed,-42.,8,4,2.)
- recovered=grow_weak(field,seed,8,4)
+ recovered=grow_weak(field,seed,8,4,lookahead=lookahead)
  assert len(hard)==3 and len(recovered)==8
  np.testing.assert_allclose(recovered[:,:3],peptide[:,:3],atol=1e-5)

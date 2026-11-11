@@ -78,7 +78,7 @@ def prepare_sad(sad_path, native_path, output, free_value=0):
 
 
 def adapt_maps(native_path, experimental_path, dm_path, output, free_value=0):
-    """Use native F times final DM FOM once, and retain raw SAD HL separately."""
+    """Copy the DM probability phase and use native F times DM FOM once."""
     output = Path(output)
     if output.exists() or output.with_suffix('.audit.json').exists():raise FileExistsError(output)
     native, partition = reflection_partition(native_path, free_value=free_value)
@@ -91,7 +91,7 @@ def adapt_maps(native_path, experimental_path, dm_path, output, free_value=0):
     dm = {k: phase_data[i, [pl.index('PHIB'),pl.index('FOM')]] for i,k in enumerate(pk)}
     raw = {k: prior_data[i, [hl.index(x) for x in ['HLA','HLB','HLC','HLD']]] for i,k in enumerate(hk)}
     nl = native.column_labels();flags = original[:,nl.index('FreeR_flag')]
-    map_values = np.full((len(nk),3), np.nan, dtype=np.float32)
+    map_values = np.full((len(nk),4), np.nan, dtype=np.float32)
     matched = 0
     for i,k in enumerate(nk):
         # Free reflections must not re-enter the initial construction map.
@@ -101,15 +101,15 @@ def adapt_maps(native_path, experimental_path, dm_path, output, free_value=0):
             if not np.isfinite([p,m]).all() or not 0 <= m <= 1:
                 raise ValueError('Invalid final DM phase/FOM')
             f = original[i,nl.index('F')]
-            if np.isfinite(f):map_values[i] = [f*m,p,m];matched += 1
+            if np.isfinite(f):map_values[i] = [f*m,p,p,m];matched += 1
     if not matched:raise ValueError('No finite working native/map pairs match by HKL')
     # A missing original prior stays missing; the DM HL is never substituted.
     if not any(k in raw and np.isfinite(raw[k]).all() for k in nk):
         raise ValueError('No original SAD HL matches native HKLs')
-    for name in ['FWT','PHWT','FOM']:
+    for name in ['FWT','PHWT','PHCOMB','FOM']:
         if name in nl:raise ValueError('Native must be unmodified observations without map columns: '+name)
     dataset = native.add_dataset('pipeline_work_only_dm_map')
-    for name,kind in [('FWT','F'),('PHWT','P'),('FOM','W')]:native.add_column(name,kind,dataset.id)
+    for name,kind in [('FWT','F'),('PHWT','P'),('PHCOMB','P'),('FOM','W')]:native.add_column(name,kind,dataset.id)
     native.set_data(np.column_stack([original,map_values]))
     native.write_to_file(str(output))
     restored = np.array(gemmi.read_mtz_file(str(output)), copy=False)
@@ -120,7 +120,9 @@ def adapt_maps(native_path, experimental_path, dm_path, output, free_value=0):
               'native_columns_unchanged':True,'native_order_unchanged':True,'matched_work_map_rows':matched,
               'free_value':free_value,'native_partition':partition,
               'map_formula':'FWT = native F * final DM FOM, once; PHWT = final DM PHIB',
-              'prior_policy':'Separate pre-DM SAD HLA/HLB/HLC/HLD; never substitute DM/model posterior',
+              'probability_formula':'PHCOMB = final DM PHIB; FOM = final DM FOM',
+              'probability_phase':'PHCOMB',
+              'prior_policy':'Separate SAD observation-likelihood HLA/HLB/HLC/HLD; never substitute phase-improvement, DM or model posterior',
               'scope':'Upstream excludes free reflections. Later external-engine maps are not certified work-only.'}
     output.with_suffix('.audit.json').write_text(json.dumps(report,indent=2)+'\n')
     return report

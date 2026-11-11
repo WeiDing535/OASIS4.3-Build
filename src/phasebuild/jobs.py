@@ -136,6 +136,9 @@ class Jobs:
                                                    stdout=log,stderr=subprocess.STDOUT,
                                                    start_new_session=True)
                         self.processes[job['id']] = process
+                        # 记录子进程号，事后可核对是哪一次运行产生的目录。
+                        job['pid'] = process.pid
+                        self.persist(job)
                     code = process.wait()
                     with self.lock:
                         self.processes.pop(job['id'],None)

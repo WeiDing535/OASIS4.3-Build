@@ -58,12 +58,29 @@ class FakeStages:
             self.fail_dm=False;raise RuntimeError('synthetic interrupted DM')
         if self.real_phase and kind!='build':return pipeline.run_command(command,log,env)
         out=Path(command[command.index('--output')+1])
-        if kind in ['phase','dm']:write_phases(out,self.cfg['native'],dm=kind=='dm');return
+        if kind in ['phase','dm']:
+            write_phases(out,self.cfg['native'],dm=kind=='dm')
+            if kind=='phase':write_phases(Path(command[command.index('--observation-output')+1]),self.cfg['native'])
+            return
         out.mkdir();model=out/'primary_model.cif'
         write_backbone(model,[template(-63,-42,length=3)+[5,5,5]],SimpleNamespace(cell=gemmi.UnitCell(16,16,16,90,90,90),sg=gemmi.SpaceGroup('P 1')))
         (out/'hybrid_report.json').write_text(json.dumps({'engine':'phasebuild-integrated-external-buccaneer-refmac',
             'status':'completed','primary_model':fingerprint(model),'stages':[{'round':1}],
             'primary_metric':{'r_work':.2,'r_free':.3}}))
+
+
+@pytest.mark.parametrize('method',['pplus_internal','likelihood','pplus'])
+def test_nonbundled_auto_hand_routes_selected_inputs(tmp_path,inputs,monkeypatch,method):
+    from phasebuild import bundled_pplus
+    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime:None)
+    cfg=pipeline.validate({**inputs,'method':method,'auto_hand':True,'wavelength':2.0},inspect=False)
+    stages=pipeline.stage_plan(cfg)
+    assert [s['id'] for s in stages]==['prepare','hand','sad','dm','bridge','build']+(['finish'] if method=='pplus_internal' else [])
+    hand=Path(cfg['output'])/'02_hand'
+    if method!='pplus_internal':
+        assert str(hand/'selected_sad.mtz') in stages[2]['command']
+        assert str(hand/'refined_heavy.pdb') in stages[2]['command']
+    assert str(hand/'selected_native.mtz') in next(s for s in stages if s['id']=='build')['command']
 
 
 def test_bridge_preserves_native_and_uses_fom_once(tmp_path,inputs):
@@ -76,6 +93,64 @@ def test_bridge_preserves_native_and_uses_fom_once(tmp_path,inputs):
     np.testing.assert_allclose(np.asarray(result.column_with_label('FWT'))[work],np.asarray(original.column_with_label('F'))[work]*.5)
     assert np.isnan(np.asarray(result.column_with_label('FWT'))[~work]).all()
     assert Path(inputs['native']).read_bytes()==before and report['experimental_prior']['sha256']==fingerprint(phase)['sha256']
+
+
+def test_bridge_explicit_dm_centroid_overrides_stale_native_model_phase(tmp_path,inputs):
+    from phasebuild.hybrid_recycle import _construction_phase_columns
+    from phasebuild.data import audit
+    native=gemmi.read_mtz_file(inputs['native']);original=np.array(native,copy=True)
+    native.add_column('PHIC','P')
+    native.set_data(np.column_stack([original,np.full(len(original),270.)]))
+    native.write_to_file(inputs['native']);before=Path(inputs['native']).read_bytes()
+    phase=tmp_path/'prior.mtz';dm=tmp_path/'dm.mtz'
+    write_phases(phase,inputs['native']);write_phases(dm,inputs['native'],dm=True)
+    modified=gemmi.read_mtz_file(str(dm));a=np.array(modified,copy=True);labels=modified.column_labels()
+    a[:,labels.index('PHIB')]=(np.arange(len(a))*37.)%360
+    a[:,labels.index('FOM')]=np.linspace(.2,.8,len(a))
+    expected={tuple(row[:3].astype(int)):(row[labels.index('PHIB')],row[labels.index('FOM')]) for row in a}
+    modified.set_data(a[::-1]);modified.write_to_file(str(dm))
+    output=tmp_path/'building.mtz';report=bridge.adapt_maps(inputs['native'],phase,dm,output,7)
+    result=gemmi.read_mtz_file(str(output));values=np.array(result);out_labels=result.column_labels()
+    unchanged=np.array(gemmi.read_mtz_file(inputs['native']))
+    np.testing.assert_array_equal(values[:,:unchanged.shape[1]],unchanged)
+    for row in values:
+        mapped=row[[out_labels.index(label) for label in ['FWT','PHWT','PHCOMB','FOM']]]
+        if row[out_labels.index('FreeR_flag')]==7:
+            assert np.isnan(mapped).all()
+        else:
+            p,fom=expected[tuple(row[:3].astype(int))]
+            np.testing.assert_allclose(mapped,[row[out_labels.index('F')]*fom,p,p,fom])
+    assert _construction_phase_columns(audit(output))['probability_phase']=='PHCOMB'
+    assert report['probability_phase']=='PHCOMB'
+    assert Path(inputs['native']).read_bytes()==before
+
+
+def test_bridge_rejects_existing_native_combined_phase_without_overwriting(tmp_path,inputs):
+    native=gemmi.read_mtz_file(inputs['native']);a=np.array(native,copy=True)
+    native.add_column('PHCOMB','P');native.set_data(np.column_stack([a,np.full(len(a),180.)]))
+    native.write_to_file(inputs['native']);before=Path(inputs['native']).read_bytes()
+    phase=tmp_path/'prior.mtz';dm=tmp_path/'dm.mtz'
+    write_phases(phase,inputs['native']);write_phases(dm,inputs['native'],dm=True)
+    output=tmp_path/'building.mtz'
+    with pytest.raises(ValueError,match='PHCOMB'):
+        bridge.adapt_maps(inputs['native'],phase,dm,output,7)
+    assert not output.exists() and not output.with_suffix('.audit.json').exists()
+    assert Path(inputs['native']).read_bytes()==before
+
+
+@pytest.mark.skipif(sys.version_info<(3,12),reason='Unified engine uses Python 3.12')
+def test_native_combined_phase_fails_before_any_expensive_stage(inputs):
+    native=gemmi.read_mtz_file(inputs['native']);a=np.array(native,copy=True)
+    native.add_column('PHCOMB','P');native.set_data(np.column_stack([a,np.full(len(a),180.)]))
+    native.write_to_file(inputs['native'])
+    original={name:Path(inputs[name]).read_bytes()
+              for name in ['sad','native','sequence','heavy','reference']}
+    runner=FakeStages(inputs)
+    with pytest.raises(ValueError,match='downstream map/prior columns: PHCOMB'):
+        pipeline.run_pipeline(inputs,runner=runner,progress=lambda _:None)
+    assert runner.calls==[]
+    assert not Path(inputs['output']).exists()
+    for name,content in original.items():assert Path(inputs[name]).read_bytes()==content
 
 
 def test_conflicting_original_flags_fail_before_output(tmp_path,inputs):
@@ -107,11 +182,49 @@ def test_pipeline_restarts_from_verified_checkpoint_without_rephasing(inputs):
 
 
 @pytest.mark.skipif(sys.version_info<(3,12),reason='Unified engine uses Python 3.12')
-def test_checkpoint_tampering_and_protocol_changes_refuse_resume(inputs):
+@pytest.mark.parametrize('artifact',['experimental.mtz','observations.mtz'])
+def test_checkpoint_tampering_and_protocol_changes_refuse_resume(inputs,artifact):
     runner=FakeStages(inputs);pipeline.run_pipeline(inputs,runner=runner,progress=lambda x:None)
     with pytest.raises(ValueError,match='Resume refused'):pipeline.run_pipeline({**inputs,'phase_cycles':2},resume=True,runner=runner)
-    p=Path(inputs['output'])/'02_sad/experimental.mtz';p.write_bytes(p.read_bytes()+b'tamper')
+    p=Path(inputs['output'])/'02_sad'/artifact;p.write_bytes(p.read_bytes()+b'tamper')
     with pytest.raises(ValueError,match='artifact changed'):pipeline.run_pipeline(inputs,resume=True,runner=runner)
+
+
+@pytest.mark.parametrize('failed_stage',['dm','build'])
+def test_resume_preserves_each_failed_attempt_log(inputs,failed_stage):
+    delegate=FakeStages(inputs);attempts=0
+    def runner(command,log,env):
+        nonlocal attempts
+        stage='build' if command[2].endswith('run_build_from_phases.py') else command[3]
+        if stage==failed_stage:
+            attempts+=1
+            log.write('attempt %d diagnostics\n'%attempts)
+            if attempts<=2:raise RuntimeError('interrupted attempt %d'%attempts)
+        return delegate(command,log,env)
+    for resume in [False,True]:
+        with pytest.raises(RuntimeError,match='interrupted attempt'):
+            pipeline.run_pipeline(inputs,resume=resume,runner=runner,progress=lambda _:None)
+    report=pipeline.run_pipeline(inputs,resume=True,runner=runner,progress=lambda _:None)
+    assert report['status']=='completed' and attempts==3
+    saved=report['preserved_stage_logs']
+    assert [entry['stage'] for entry in saved]==[failed_stage,failed_stage]
+    for number,entry in enumerate(saved,1):
+        path=Path(entry['artifact']['path'])
+        assert path.read_text()=='attempt %d diagnostics\n'%number
+        assert fingerprint(path)==entry['artifact']
+    root=Path(inputs['output'])
+    assert (root/(failed_stage+'.log')).read_text()=='attempt 3 diagnostics\n'
+    assert delegate.calls.count('phase')==1
+    from phasebuild.oasis_workflow import collect_results
+    # A minimal substitute report has no per-round refinement records.
+    # Inspect the failed state to collect logs without claiming a final model.
+    state=json.loads((root/'pipeline_report.json').read_text())
+    state['status']='failed'
+    (root/'pipeline_report.json').write_text(json.dumps(state))
+    artifacts=collect_results(root)['artifacts']
+    for entry in saved:
+        assert any(a['path']==Path(entry['artifact']['path']).name and a['group']=='日志'
+                   for a in artifacts)
 
 
 def test_output_lock_rejects_a_second_runner(tmp_path):

@@ -29,7 +29,12 @@ def test_cli_passes_declared_free_value_to_fixed_prior(monkeypatch,tmp_path,scri
           '--output',str(tmp_path/'new-job'),'--runtime','runtime','--free-value',str(free_value)]
     if seeded:args+=['--model','seed.cif']
     module.main(args)
-    assert calls['prior']==('original.mtz',{'expected_sha256':'declared-hash','free_value':free_value})
+    assert calls['prior'][0]=='original.mtz'
+    assert calls['prior'][1]['expected_sha256']=='declared-hash'
+    assert calls['prior'][1]['free_value']==free_value
+    if not seeded:
+        assert calls['prior'][1]['source_kind']=='original_sad'
+        assert calls['prior'][1]['representation']=='hl'
     positional,options=calls['recycle']
     assert positional[2]==('seed.cif' if seeded else None)
     assert options['ccp4']=='runtime'
