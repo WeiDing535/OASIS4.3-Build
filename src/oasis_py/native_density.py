@@ -91,8 +91,15 @@ def reference_histogram(data, fom, reference_mtz, solvent_fraction=.5, max_grid_
         observed=np.sqrt(np.mean(f[r]**2/eps[r]))
         coeff[r]*=target/max(observed,1e-12)*float(np.mean(fom[w]))
     asu=gemmi.ComplexAsuData(m.cell,m.spacegroup,np.ascontiguousarray(h,dtype=np.int32),np.ascontiguousarray(coeff*np.exp(1j*phi),dtype=np.complex64))
-    shape=asu.get_size_for_hkl(sample_rate=3.)
-    if np.prod(shape)>max_grid_points:raise ValueError('Reference map exceeds grid memory limit')
+    # The reference is only used for a density histogram, which is a smooth
+    # distribution, so a coarser grid changes it negligibly.  Large reference
+    # cells (some are four times the working cell) exceed the memory budget at
+    # the default sample rate, so step the rate down instead of failing.
+    for rate in (3.,2.,1.5,1.):
+        shape=asu.get_size_for_hkl(sample_rate=rate)
+        if np.prod(shape)<=max_grid_points:break
+    else:
+        raise ValueError('Reference map exceeds grid memory limit even at sample rate 1')
     grid=asu.transform_f_phi_to_map(exact_size=shape)
     mask=protein_mask(grid,solvent_fraction,metric_filter(m.cell,shape,4.))
     return np.quantile(np.array(grid.array)[mask>.5],np.linspace(0,1,513))

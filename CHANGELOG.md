@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Adds `docs/NO_CCP4_REPLACEMENT.md`: measured feasibility of replacing the four
+  bundled CCP4 executables, with the REFMAC forward-model gap traced to the
+  bulk-solvent amplitude term.
+- Adds `run_refine.py --engine internal`, exposing the in-tree NumPy/SciPy
+  refinement engine without changing the default REFMAC path.
+- Fixes `internal_refine.atomic_attenuation` to always return an array, so the
+  zero overall-B case no longer raises during a refinement cycle.
+
 ## 0.8.3 — public source export, 2026-10-22
 
 - Publishes the recovered PhaseBuild source as OASIS4.3-Build.
