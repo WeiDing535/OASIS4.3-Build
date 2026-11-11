@@ -66,7 +66,14 @@ def _stage_plan(monkeypatch, tmp_path, **overrides):
     # Real placeholder files so the stage planner can fingerprint its inputs.
     for name in ('sad','native','sequence','heavy','reference'):
         (tmp_path/name).write_text('placeholder')
-    cfg=_validate(None, method='pplus_internal', sad=str(tmp_path/'sad'),
+    # A runnable placeholder keeps the Parrot route independent of any CCP4
+    # installed on the test host; without it validate() falls back to the
+    # internal engine and the planned command silently changes.
+    parrot=tmp_path/'cparrot'
+    parrot.write_text('#!/bin/sh\nexit 1\n')
+    parrot.chmod(0o755)
+    cfg=_validate(None, method='pplus_internal', dm_executable=str(parrot),
+                  sad=str(tmp_path/'sad'),
                   native=str(tmp_path/'native'), sequence=str(tmp_path/'sequence'),
                   heavy=str(tmp_path/'heavy'), reference=str(tmp_path/'reference'),
                   output=str(tmp_path/'out'), **overrides)
