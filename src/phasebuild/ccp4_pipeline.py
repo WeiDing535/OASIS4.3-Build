@@ -171,6 +171,19 @@ def run(native, phase_map, sequence, runtime, output, *, cycles=5, free_value=0,
                 stderr=subprocess.STDOUT,env=env,cwd=folder,timeout=timeout)
         if done.returncode or not build_pdb.is_file():
             raise RuntimeError('cbuccaneer failed in cycle %d; see %s'%(cycle,log))
+        if not _has_atoms(build_pdb):
+            # REFMAC cannot refine an empty model, and reporting that as a REFMAC
+            # crash would hide the actual result: the map carried no buildable
+            # density.  Record it and stop with a message that names the cause.
+            report={'engine':'oasis-buccaneer-refmac-pipeline','status':'no_model',
+                'parameters':dict(cycles=cycles,free_value=free_value,resolution=resolve_cycles),
+                'inputs':{k:fingerprint(v) for k,v in [('native',native),('phase_map',phase_map),('sequence',sequence)]},
+                'staged':staged,'residues_built':0,'stopped_at_cycle':cycle,
+                'stop_reason':'Buccaneer built no atoms from the density-modified map; REFMAC was not run',
+                'dm_map_kept':fingerprint(phase_map)}
+            (out/'hybrid_report.json').write_text(json.dumps(report,indent=2)+'\n')
+            raise RuntimeError('密度修饰后的图未建出任何残基（第 %d 轮 Buccaneer 0 原子）；未生成模型。'
+                'DM 相位图保留在 %s，可调整溶剂含量（dm_solvent）或密度修饰轮数后重跑'%(cycle,phase_map))
         refine_mtz=folder/'refine.mtz';refine_pdb=folder/'refine.pdb'
         labin=('  PHIB=PHIB FOM=FOM' if cycle==1 else
                '  HLA=HLACOMB HLB=HLBCOMB HLC=HLCCOMB HLD=HLDCOMB')
@@ -203,6 +216,13 @@ def run(native, phase_map, sequence, runtime, output, *, cycles=5, free_value=0,
         'requires_ccp4_python':False,'external_executables':['cbuccaneer','refmac5']}
     (out/'hybrid_report.json').write_text(json.dumps(report,indent=2)+'\n')
     return report
+
+
+def _has_atoms(pdb):
+    """True when the model has at least one coordinate record."""
+    try:lines=Path(pdb).read_text(errors='ignore').splitlines()
+    except OSError:return False
+    return any(line.startswith(('ATOM','HETATM')) for line in lines)
 
 
 def _refmac_final(log):

@@ -59,7 +59,24 @@ def _hand_name(row):
     return HAND_NAMES.get(row.get('hand'),str(row.get('hand')))
 
 
-def choose(reports,expected):
+UNVERIFIED_POLICY=('User-requested unverified continuation: %s. Handedness was not established by the work-only '
+                   'sequence evidence; this hand is carried forward only because the run was explicitly configured '
+                   'to continue without it. The resulting model must be treated as hand-unverified')
+
+
+def _input_hand(reports):
+    """The input hand when it is one of the candidates, else the first candidate."""
+    return next((r['hand'] for r in reports if r.get('hand')=='input_hand'),reports[0]['hand'])
+
+
+def _forced(hand,expected,threshold,reason,single_hand=False,other_hand_error=''):
+    return hand,dict(policy=UNVERIFIED_POLICY%reason,minimum_unique=threshold,expected_ASU_residues=expected,
+                     single_hand=single_hand,hand_verified=False,forced_unverified=True,refusal_reason=reason,
+                     other_hand_error=other_hand_error,selection_uses_Rfree=False,selection_uses_reference=False,
+                     selection_uses_refinement=False)
+
+
+def choose(reports,expected,allow_unverified=False):
     """Predeclared sequence-evidence gate; no R or reference-phase argument.
 
     Two computed hands are compared as before.  When exactly one hand cannot be
@@ -67,8 +84,15 @@ def choose(reports,expected):
     forward only if its own pilot reaches the minimum sequence evidence; the
     decision then rests on one hand, which the returned policy states explicitly
     instead of pretending handedness was cross-checked.
+
+    ``allow_unverified`` is the explicit opt-in for marginal data: when the
+    evidence gate would refuse but at least one hand was computed, the input
+    hand is carried forward with ``hand_verified=False`` and the refusal reason
+    preserved.  It never rescues a run in which neither hand produced a map, and
+    it never changes a decision the evidence already supports.
     """
     if not isinstance(expected,int) or expected<=0:raise ValueError('Positive ASU residue count required')
+    if not isinstance(allow_unverified,bool):raise ValueError('allow_unverified must be boolean')
     if len(reports)!=2:raise ValueError('双手判别需要两个完整候选，不能默认选择第一个文件')
     threshold=max(3,min(15,int(np.ceil(.15*expected))))
     complete=[r for r in reports if r.get('status') in ('completed','empty')]
@@ -80,7 +104,9 @@ def choose(reports,expected):
         survivor=complete[0];unique=survivor.get('unique',0)
         if threshold<=unique<=1.35*expected:
             return survivor['hand'],dict(policy='Only one hand could be computed (%s failed); the surviving map sequenced %d unique residues on its own, above the %d-residue minimum. Handedness rests on this single hand and was not cross-checked'%(_hand_name(failed[0]),unique,threshold),minimum_unique=threshold,expected_ASU_residues=expected,single_hand=True,hand_verified=False,other_hand_error=details,selection_uses_Rfree=False,selection_uses_reference=False,selection_uses_refinement=False)
-        raise ValueError('一手未完整完成，无法交叉判别手性（%s）；剩下的一手只有 %d 个唯一测序残基，低于 %d 的最低证据，不能当作已判定'%(details,unique,threshold))
+        reason='一手未完整完成，无法交叉判别手性（%s）；剩下的一手只有 %d 个唯一测序残基，低于 %d 的最低证据，不能当作已判定'%(details,unique,threshold)
+        if allow_unverified:return _forced(survivor['hand'],expected,threshold,reason,single_hand=True,other_hand_error=details)
+        raise ValueError(reason)
     ranked=sorted(reports,key=lambda r:(r.get('unique',0),r.get('sequenced',0),r.get('longest',0)),reverse=True)
     best,second=ranked
     # The pilot is deliberately short and may sequence only a small fraction
@@ -96,11 +122,15 @@ def choose(reports,expected):
         built_margin=max(20,int(np.ceil(.05*expected)))
         if (best.get('built',0)-second.get('built',0)>=built_margin and
                 best.get('built',0)>=1.75*max(1,second.get('built',0))):
-            return best['hand'],dict(policy='Maximum residues built after matched work-only three-cycle tracing when neither hand sequences; large absolute and ratio separation required',minimum_built_margin=built_margin,minimum_built_ratio=1.75,expected_ASU_residues=expected,selection_uses_Rfree=False,selection_uses_reference=False,selection_uses_refinement=False)
-    if best.get('unique',0)<threshold or best.get('unique',0)>1.35*expected:raise ValueError('两手都缺少足够的唯一测序残基；手性未能判定，请核验 SHELXD 子结构与数据是否匹配')
-    if best['unique']-second.get('unique',0)<margin:raise ValueError('两手测序证据过于接近；保留两手输出，拒绝静默选择')
-    return best['hand'],dict(policy='Maximum uniquely sequenced residues after matched work-only three-cycle tracing; minimum sequence evidence and separation required',minimum_unique=threshold,minimum_margin=margin,expected_ASU_residues=expected,selection_uses_Rfree=False,selection_uses_reference=False,selection_uses_refinement=False)
-
+            return best['hand'],dict(policy='Maximum residues built after matched work-only three-cycle tracing when neither hand sequences; large absolute and ratio separation required',minimum_built_margin=built_margin,minimum_built_ratio=1.75,expected_ASU_residues=expected,hand_verified=True,selection_uses_Rfree=False,selection_uses_reference=False,selection_uses_refinement=False)
+    if best.get('unique',0)<threshold or best.get('unique',0)>1.35*expected:
+        reason='两手都缺少足够的唯一测序残基；手性未能判定，请核验 SHELXD 子结构与数据是否匹配'
+    elif best['unique']-second.get('unique',0)<margin:
+        reason='两手测序证据过于接近；保留两手输出，拒绝静默选择'
+    else:
+        return best['hand'],dict(policy='Maximum uniquely sequenced residues after matched work-only three-cycle tracing; minimum sequence evidence and separation required',minimum_unique=threshold,minimum_margin=margin,expected_ASU_residues=expected,hand_verified=True,selection_uses_Rfree=False,selection_uses_reference=False,selection_uses_refinement=False)
+    if allow_unverified:return _forced(_input_hand(reports),expected,threshold,reason)
+    raise ValueError(reason)
 
 def pilot(cfg,root):
     from .hybrid_recycle import construction_command,_construction_phase_columns
@@ -152,9 +182,10 @@ def resolve(cfg,out,front,work):
         except Exception as exc:
             record.update(status='failed',error=str(exc))
         reports.append(record);dump(root/'candidate.json',record)
-    try:selected,policy=choose(reports,int(expected or 0))
+    allow_unverified=bool(cfg.get('allow_unverified_hand',False))
+    try:selected,policy=choose(reports,int(expected or 0),allow_unverified=allow_unverified)
     except ValueError as exc:
-        dump(out/'hand_selection.json',dict(status='ambiguous',candidates=reports,error=str(exc),selection_uses_Rfree=False));raise
+        dump(out/'hand_selection.json',dict(status='ambiguous',candidates=reports,error=str(exc),allow_unverified_hand=allow_unverified,selection_uses_Rfree=False));raise
     chosen=next(r for r in reports if r['hand']==selected);root=roots[selected]
     for row in chosen['phase_artifacts']:
         if fingerprint(row['path'])!=row:raise RuntimeError('Chosen hand phase artifact changed')
@@ -162,7 +193,8 @@ def resolve(cfg,out,front,work):
     shutil.copy2(root/'native.mtz',out/'selected_native.mtz');shutil.copy2(root/'prepared_sad.mtz',out/'selected_sad.mtz')
     dm_artifacts=chosen['dm_artifacts']
     report=dict(status='selected',selected_hand=selected,selected_spacegroup=chosen['spacegroup'],candidates=reports,policy=policy,
-        hand_verified=not policy.get('single_hand',False),single_hand_selection=bool(policy.get('single_hand',False)),
+        hand_verified=bool(policy.get('hand_verified',True)),single_hand_selection=bool(policy.get('single_hand',False)),
+        unverified_selection=bool(policy.get('forced_unverified',False)),
         selected_native=fingerprint(out/'selected_native.mtz'),selected_sad=fingerprint(out/'selected_sad.mtz'),selected_dm_artifacts=dm_artifacts,
         work=work,pilots_reused_for_final_model=False,original_input_files_modified=False)
     dump(out/'hand_selection.json',report)

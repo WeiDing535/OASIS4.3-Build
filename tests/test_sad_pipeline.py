@@ -69,6 +69,33 @@ class FakeStages:
             'primary_metric':{'r_work':.2,'r_free':.3}}))
 
 
+def test_stage_failure_reports_what_the_stage_log_said(inputs):
+    """A stage that exits nonzero must not surface as a bare exit code."""
+    cfg={**inputs,'method':'likelihood','solvent_fraction':.45}
+    def failing(command,log,env):
+        log.write('REFMAC: Check input coordinates\nRuntimeError: 密度修饰后的图未建出任何残基\n')
+        raise RuntimeError('Stage process exited with code 1')
+    with pytest.raises(RuntimeError) as caught:
+        pipeline.run_pipeline(cfg,runner=failing,progress=lambda x:None)
+    message=str(caught.value)
+    assert 'exited with code 1' in message and '未建出任何残基' in message
+
+
+def test_unverified_hand_continuation_is_an_explicit_auto_hand_option(tmp_path,inputs,monkeypatch):
+    from phasebuild import bundled_pplus
+    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None,need_density=False:None)
+    monkeypatch.setattr(bundled_pplus,'require_density',lambda cfg:Path(cfg['runtime'])/'density')
+    base={**inputs,'method':'pplus_bundled','auto_hand':True,'wavelength':2.0}
+    cfg=pipeline.validate(base,inspect=False)
+    assert cfg['allow_unverified_hand'] is False          # marginal data still fails closed by default
+    cfg=pipeline.validate({**base,'allow_unverified_hand':True},inspect=False)
+    assert cfg['allow_unverified_hand'] is True
+    with pytest.raises(ValueError,match='auto_hand'):
+        pipeline.validate({**base,'auto_hand':False,'allow_unverified_hand':True},inspect=False)
+    with pytest.raises(ValueError,match='boolean'):
+        pipeline.validate({**base,'allow_unverified_hand':'yes'},inspect=False)
+
+
 @pytest.mark.parametrize('method',['pplus_internal','likelihood','pplus'])
 def test_nonbundled_auto_hand_routes_selected_inputs(tmp_path,inputs,monkeypatch,method):
     from phasebuild import bundled_pplus

@@ -444,6 +444,13 @@ class App:
         self.auto_hand=self.tk.BooleanVar(value=True)
         self.auto_hand_box=ttk.Checkbutton(row,text='自动判手（双手试建，不用 R-free）',variable=self.auto_hand)
         self.auto_hand_box.pack(side='left')
+        row=ttk.Frame(build);row.pack(fill='x',pady=(0,2))
+        self.unverified_hand=self.tk.BooleanVar(value=False)
+        self.unverified_hand_box=ttk.Checkbutton(row,text='证据不足也按输入手继续（结果标注未验证）',variable=self.unverified_hand)
+        self.unverified_hand_box.pack(side='left')
+        ttk.Label(build,text='默认关闭：两手都算完但测序证据不足时，程序按失败处理并保留两手输出。'
+                             '勾选后优先沿用输入手继续建模，并在 hand_selection.json 与流水线报告里标注“手性未验证”。',
+                  style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
         for key in ESSENTIAL_GROUPS[3][1]:
             self._field(build,specs[key])
         for key,title,values,var in [('building_recipe','构建配方',RECIPES,'recipe'),
@@ -580,7 +587,7 @@ class App:
                         child.configure(state=state)
                     except Exception:
                         pass
-        for name,module,enabled in [('dm_engine_box','parrot','readonly'),('auto_hand_box','build','normal'),
+        for name,module,enabled in [('dm_engine_box','parrot','readonly'),('auto_hand_box','build','normal'),('unverified_hand_box','build','normal'),
                                     ('recipe_box','build','readonly'),('prior_box','build','readonly')]:
             widget=getattr(self,name,None)
             if widget is None:
@@ -658,6 +665,8 @@ class App:
                 self.build_model.set(bool(values['build_model']))
             if 'auto_hand' in values:
                 self.auto_hand.set(bool(values['auto_hand']))
+            if 'allow_unverified_hand' in values:
+                self.unverified_hand.set(bool(values['allow_unverified_hand']))
         protocol=values.get('protocol','')
         label=dict(PROTOCOLS).get(protocol)
         if label:
@@ -703,6 +712,7 @@ class App:
         values['dm_enabled']=bool(self.module_parrot.get())
         values['build_model']=bool(self.build_model.get()) and values['dm_enabled']
         values['auto_hand']=bool(self.auto_hand.get()) and values['build_model']
+        values['allow_unverified_hand']=bool(self.unverified_hand.get()) and values['auto_hand']
         protocol=dict((label,key) for key,label in PROTOCOLS).get(self.protocol.get(),'')
         if protocol:
             values['protocol']=protocol

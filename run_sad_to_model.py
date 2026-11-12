@@ -15,6 +15,7 @@ def build_parser():
     p.add_argument('--native',default='',help='Optional original mean observations; blank uses selected SAD observations')
     p.add_argument('--native-labels',default='')
     p.add_argument('--auto-hand',action=argparse.BooleanOptionalAction,default=None,help='Resolve both hands by masked work-only three-cycle sequence tracing; no Rfree selection')
+    p.add_argument('--allow-unverified-hand',action=argparse.BooleanOptionalAction,default=False,help='Explicit opt-in: when the two-hand sequence evidence is insufficient but at least one hand was computed, continue with the input hand and record the model as hand-unverified')
     p.add_argument('--refinement-prior',choices=['original_sad','dm_phifom'],default=None)
     p.add_argument('--per-round-cleanup',action=argparse.BooleanOptionalAction,default=False,help='Opt-in single-copy exact-sequence/work-map cleanup before each refinement; original model retained on refusal')
     p.add_argument('--canonical-dm-seed',action=argparse.BooleanOptionalAction,default=False,help='Opt-in map-only phase0.001deg/FOM1e-6 precision contract; original P+ results unchanged')

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import pytest
 from phasebuild import desktop,oasis_workflow as workflow
+from test_sad_pipeline import inputs
 
 
 def project(tmp_path):
@@ -17,6 +18,20 @@ def test_controller_defaults_and_plan_come_from_the_workflow(tmp_path):
     assert default['method']=='pplus_bundled' and default['dm_engine']=='parrot'
     assert 'profile' not in default
     assert 'gui_workflow' not in __import__('sys').modules
+
+
+def test_unverified_hand_switch_reaches_the_job_command(tmp_path,monkeypatch,inputs):
+    """The opt-in must be a real argv flag, not a silently dropped form value."""
+    from phasebuild import bundled_pplus
+    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None,need_density=False:None)
+    monkeypatch.setattr(bundled_pplus,'require_density',lambda cfg:Path(cfg['runtime'])/'density')
+    root=project(tmp_path)
+    base=dict(inputs,auto_hand=True,method='pplus_bundled',wavelength=2.0,
+              output=str(tmp_path/'run'))
+    for value,flag in [(False,'--no-allow-unverified-hand'),(True,'--allow-unverified-hand')]:
+        cfg,stages=workflow.make_plan(dict(base,allow_unverified_hand=value),root,inspect=False)
+        assert cfg['allow_unverified_hand'] is value
+        assert flag in stages[0]['command']
 
 
 def test_controller_rejects_a_retired_mode_without_creating_output(tmp_path):
@@ -83,6 +98,10 @@ def test_window_builds_and_collects_the_form(tmp_path):
         values=app.collect()
         assert values['method']=='pplus_bundled' and values['dm_engine']=='parrot'
         assert values['build_model'] is True and values['auto_hand'] is True
+        assert values['allow_unverified_hand'] is False   # default off: marginal evidence still fails closed
+        app.unverified_hand.set(True)
+        assert app.collect()['allow_unverified_hand'] is True
+        app.unverified_hand.set(False)
         assert values['copies']==2 and values['wavelength']==0.97918
         assert values['protocol']=='pplus_w8_weight' and values['building_recipe']=='pipeline'
         assert values['solvent_fraction'] is None  # blank means estimate, not ''

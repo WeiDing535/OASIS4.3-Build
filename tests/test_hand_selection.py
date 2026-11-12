@@ -36,6 +36,43 @@ def test_ambiguous_or_unphysical_evidence_fails_closed(rows):
  with pytest.raises(ValueError):hs.choose(rows,51)
 
 
+def test_insufficient_evidence_refuses_without_the_explicit_opt_in():
+    for rows in (reports(0,0),reports(4,2),reports(40,39)):
+        with pytest.raises(ValueError):
+            hs.choose(rows,51,allow_unverified=False)
+
+
+def test_opt_in_carries_the_input_hand_and_records_the_refusal():
+    rows=reports(4,2)
+    selected,policy=hs.choose(rows,51,allow_unverified=True)
+    assert selected=='input_hand'
+    assert policy['forced_unverified'] is True and policy['hand_verified'] is False
+    assert policy['single_hand'] is False
+    assert '缺少足够的唯一测序残基' in policy['refusal_reason']
+    assert not policy['selection_uses_Rfree'] and not policy['selection_uses_reference'] and not policy['selection_uses_refinement']
+
+
+def test_opt_in_never_rescues_a_run_where_neither_hand_computed():
+    rows=reports(0,0)
+    for row in rows:row.update(status='failed',error='missing engine')
+    with pytest.raises(ValueError,match='两手都没算出结果'):
+        hs.choose(rows,51,allow_unverified=True)
+
+
+def test_opt_in_does_not_change_a_decision_the_evidence_supports():
+    selected,policy=hs.choose(reports(40,6),51,allow_unverified=True)
+    assert selected=='input_hand' and policy['hand_verified'] is True
+    assert not policy.get('forced_unverified')
+
+
+def test_opt_in_carries_the_surviving_hand_when_the_other_failed_short_of_evidence():
+    rows=reports(4,0);rows[1].update(status='failed',error='missing engine')
+    selected,policy=hs.choose(rows,51,allow_unverified=True)
+    assert selected=='input_hand'
+    assert policy['forced_unverified'] is True and policy['single_hand'] is True
+    assert policy['hand_verified'] is False and 'missing engine' in policy['other_hand_error']
+
+
 def test_failed_opposite_hand_continues_only_on_its_own_positive_evidence():
  rows=reports(40,0);rows[1].update(status='failed',error='missing engine')
  selected,policy=hs.choose(rows,51)

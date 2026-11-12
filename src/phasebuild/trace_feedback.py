@@ -115,7 +115,17 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cyc
             phase_input(merged,dm_path,trace_in)
             traced=trace(trace_in,dm_path,sequence,runtime,folder/'trace',
                          resolution=trace_resolution,cycles=trace_cycles,progress=progress)
-            row['trace']=traced;model=traced['model']
+            row['trace']=traced
+            if traced['residues']<=0:
+                # Nothing was traced, so there is no Fcalc to feed into the next
+                # density-modification cycle.  Stop the feedback here and keep
+                # this cycle's DM map: crashing on an empty REFMAC input would
+                # throw away the map the user already has.
+                row['feedback_stopped']='trace built no residues, so no Fcalc could be fed back; this cycle\'s DM map is kept'
+                progress('feedback cycle %d: no residues traced, stopping the Fcalc feedback (keeping this cycle\'s DM map)'%(cycle+1))
+                history.append(row)
+                break
+            model=traced['model']
             progress('feedback cycle %d: %d residues in %d fragments'%(cycle+1,traced['residues'],traced['fragments']))
         history.append(row)
     final=out/'map_phases.mtz'

@@ -153,12 +153,16 @@ def phase(cfg,output):
             scattering=calculate(cfg['elements'],cfg['wavelength'])
         meta=json.loads((out/'experimental.json').read_text());meta.update(frontend='Bundled native Phaser EP_AUTO; both hands evaluated by work-only sequence tracing',external_phase_file_used=False);dump(out/'experimental.json',meta)
         policy='Both Phaser hands: P+ -> Wang/classic40 -> masked work-only three-cycle sequence tracing; no refinement, Rfree or reference selection'
-        if selected.get('single_hand_selection'):
+        if selected.get('unverified_selection'):
+            policy+='. The sequence evidence was insufficient, so the configured input-hand continuation was used; handedness is unverified for this run, see hand_selection.json'
+            print('警告：手性证据不足，按“证据不足也继续”的设置沿用了选中的手；本次结果手性未验证（详见 hand_selection.json）',file=sys.stderr)
+        elif selected.get('single_hand_selection'):
             policy+='. Only one hand could be computed, so handedness is unverified for this run; see hand_selection.json for the failed hand'
             print('警告：只有一手算出结果，本次手性未交叉验证（详见 hand_selection.json）',file=sys.stderr)
         dump(out/'frontend.json',{'engine':'Bundled native Phaser','binary':fingerprint(runtime/'bin/phaser'),'work':work,
             'prior':{'output':fingerprint(out/'native_observations.mtz')},'refined_substructure':fingerprint(out/'refined_heavy.pdb'),
             'pplus_scattering':scattering,'wavelength':cfg['wavelength'],'hand_policy':policy,'hand_verified':selected.get('hand_verified',True),
+            'unverified_selection':bool(selected.get('unverified_selection',False)),
             'hand_selection':fingerprint(out/'hand_selection.json'),'selected_hand':selected['selected_hand'],'selected_spacegroup':selected['selected_spacegroup'],
             'inputs':{k:fingerprint(cfg[k]) for k in ['sad','native','heavy','sequence']},'third_party_engines':True,'requires_separate_suite_installation':False})
         return

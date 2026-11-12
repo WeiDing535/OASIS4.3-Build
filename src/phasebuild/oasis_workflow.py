@@ -112,7 +112,7 @@ def make_plan(config, project, python=None, inspect=True):
         if '--'+key.replace('_','-') not in supported:continue
         if key=='build_semet':
             if value:command.append('--build-semet')
-        elif key in ('trust_cleanup','trust_stability','trust_partial_cleanup','trust_work_weight','auto_fpp','input_columns','auto_hand','canonical_dm_seed','per_round_cleanup','dm_anisotropy','dm_enabled'):command.append('--'+key.replace('_','-') if value else '--no-'+key.replace('_','-'))
+        elif key in ('trust_cleanup','trust_stability','trust_partial_cleanup','trust_work_weight','auto_fpp','input_columns','auto_hand','allow_unverified_hand','canonical_dm_seed','per_round_cleanup','dm_anisotropy','dm_enabled'):command.append('--'+key.replace('_','-') if value else '--no-'+key.replace('_','-'))
         elif key=='build_model':command.append('--build-model' if value else '--no-build-model')
         elif key=='rank_fit':
             if value:command.append('--rank-fit')

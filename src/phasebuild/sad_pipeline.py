@@ -20,7 +20,7 @@ DEFAULTS = dict(copies='auto', phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
                 triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True, dm_enabled=True,
                 observation_prior='', composition_sequence='', phenix_bin='', trust_kl=.0005, trust_cleanup=True, trust_stability=False, trust_partial_cleanup=False, trust_work_weight=False, trust_wang_radius=14., wavelength=None,
-                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='resolve',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all')
+                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, allow_unverified_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='resolve',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all')
 
 FALLBACK_NOTICE=('密度修饰引擎已回退到内置 RESOLVE/MLHL（原因：%s）。'
                  'trace/Fcalc 反馈已关闭；本次结果不能与 Parrot 协议（十案例流程）直接比较。')
@@ -38,6 +38,8 @@ def validate(config, inspect=True):
     if not isinstance(cfg['auto_hand'],bool):raise ValueError('auto_hand must be boolean')
     if cfg['auto_hand'] and cfg['method']=='pplus_trust':raise ValueError('External comparison does not support automatic hands')
     if cfg['auto_hand'] and not cfg['build_model']:raise ValueError('Automatic hands require model building')
+    if not isinstance(cfg['allow_unverified_hand'],bool):raise ValueError('allow_unverified_hand must be boolean')
+    if cfg['allow_unverified_hand'] and not cfg['auto_hand']:raise ValueError('证据不足继续只用于自动判手：请同时开启自动判手（auto_hand）')
     if cfg['refinement_prior'] not in ('original_sad','dm_phifom'):raise ValueError('Unknown refinement phase source')
     if cfg['refinement_prior']=='dm_phifom' and cfg['method']!='pplus_bundled':raise ValueError('DM phase restraints currently require bundled P+')
     if not isinstance(cfg['canonical_dm_seed'],bool):raise ValueError('Canonical DM seed must be boolean')
@@ -341,6 +343,18 @@ def stage_plan(cfg, python=None):
     return stages if cfg.get('build_model',True) else stages[:3]
 
 
+def _log_reason(log_path):
+    """The stage log's own last error line, so a bare exit code still names the cause."""
+    try:lines=[line.strip() for line in Path(log_path).read_text(errors='ignore').splitlines() if line.strip()]
+    except OSError:return '日志不可读'
+    for line in reversed(lines):
+        if line.startswith(('RuntimeError:','ValueError:','OSError:','FileNotFoundError:')) or 'ERROR:' in line.upper():
+            for prefix in ('RuntimeError: ','ValueError: ','OSError: ','FileNotFoundError: '):
+                if line.startswith(prefix):return line[len(prefix):][:300]
+            return line[:300]
+    return lines[-1][:300] if lines else '日志为空'
+
+
 def source_identity():
     root=Path(__file__).resolve().parents[2]
     files=list((root/'src').rglob('*.py'))+[root/'run_oasis_stage.py',root/'run_sad_to_model.py',root/'run_build_from_phases.py',root/'run_pplus_trust_stage.py',root/'run_hand_preselection.py']
@@ -484,15 +498,22 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
                     state.setdefault('preserved_stage_logs',[]).append(
                         dict(stage=stage['id'],artifact=fingerprint(preserved)))
                     save()
-                with log_path.open('x') as log:runner(stage['command'],log,env)
+                try:
+                    with log_path.open('x') as log:runner(stage['command'],log,env)
+                except (RuntimeError,OSError) as error:
+                    # A bare "exit code 1" hides what the stage actually said.
+                    raise RuntimeError('%s（%s：%s）'%(error,stage['name'],_log_reason(log_path))) from error
             artifacts=[fingerprint(path) for path in stage['outputs']]
             state['completed'].append(dict(id=stage['id'],name=stage['name'],artifacts=artifacts));save()
             hand_report=out/'02_sad/hand_selection.json'
             if stage['id']=='sad' and hand_report.is_file():
                 hand=json.loads(hand_report.read_text())
                 state['hand_selection']=dict(selected_hand=hand.get('selected_hand'),hand_verified=hand.get('hand_verified',True),
-                                             single_hand=bool(hand.get('single_hand_selection',False)),policy=hand.get('policy'))
-                if hand.get('single_hand_selection'):
+                                             single_hand=bool(hand.get('single_hand_selection',False)),
+                                             unverified=bool(hand.get('unverified_selection',False)),policy=hand.get('policy'))
+                if hand.get('unverified_selection'):
+                    state['scope']+=' 注意：手性证据不足，按“证据不足也继续”的设置沿用了选中的手；本次模型的手性未经验证。'
+                elif hand.get('single_hand_selection'):
                     state['scope']+=' 注意：本次只有一手算出结果，手性未经交叉验证，选中的手来自该手自身的测序证据。'
                 save()
         if not cfg['build_model']:

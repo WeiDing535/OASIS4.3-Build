@@ -23,7 +23,8 @@ def defaults(project):
                 ccp4=default_runtime(), refine=True, rounds=5, cycles=10,
                 map_mode='rebuild', map_amplitude='FWT',map_phase='PHWT',rotations=512, refine_count=96, max_length=30,
                 max_residues=65, beam_width=4, selection_cutoff=2.5, min_score=2.0,
-                amplitude='F', sigma='SIGF', free_column='FreeR_flag', free_value=0)
+                amplitude='F', sigma='SIGF', free_column='FreeR_flag', free_value=0,
+                allow_unverified_hand=False)
 
 
 def _inspect_hybrid_inputs(cfg):
@@ -79,7 +80,7 @@ def make_sad_plan(cfg, project, python=None, inspect=True):
                   copies=cfg['copies'], phase_cycles=cfg['phase_cycles'], dm_cycles=cfg['dm_cycles'],
                   rounds=cfg['rounds'], cycles=cfg['cycles'], free_value=cfg['free_value'],
                   labels=cfg['sad_labels'], runtime=cfg['ccp4'], output=str(out/'00_sad_to_model'),
-                  build_semet=False)
+                  build_semet=False, allow_unverified_hand=cfg.get('allow_unverified_hand',False))
     checked=validate(values, inspect=inspect)
     cfg.update(output=str(out),refine=True,model='',map='',phase_prior='',ccp4=checked['runtime'])
     command=[python or sys.executable,'-u',str(project/'run_sad_to_model.py')]

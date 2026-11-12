@@ -2,6 +2,8 @@
 
 These tests use synthetic MTZs and never execute Parrot, Buccaneer or REFMAC.
 """
+from pathlib import Path
+import json
 import numpy as np
 import gemmi
 import pytest
@@ -58,6 +60,55 @@ def test_work_only_input_excludes_free_rows(tmp_path):
     flags=np.asarray(m.column_with_label('FreeR_flag'))
     assert info['work_rows']==2 and info['excluded']==1
     assert 0 not in flags.tolist(),'free reflections must never enter density modification'
+
+
+def test_empty_trace_stops_the_feedback_and_keeps_the_dm_map(tmp_path,monkeypatch):
+    """A marginal map can trace nothing; that must not discard the DM map."""
+    work=tmp_path/'work.mtz';work.write_text('x');prior=tmp_path/'prior.mtz';prior.write_text('x')
+    sequence=tmp_path/'seq.fasta';sequence.write_text('>a\nAAAA\n')
+    dm_models=[]
+    monkeypatch.setattr(trace_feedback,'merge_work',lambda src,dest:Path(dest).write_text('x'))
+    monkeypatch.setattr(trace_feedback,'phase_input',lambda w,d,dest:Path(dest).write_text('x'))
+    monkeypatch.setattr(trace_feedback,'merge_phase_map',lambda w,d,dest:Path(dest).write_text('x') or {'work_rows':1})
+    def fake_dm(work_mtz,prior_mtz,destination,solvent_fraction,**kw):
+        Path(destination).write_text('x');dm_models.append(kw.get('model_pdb'))
+        return {'dm_cycles':kw.get('cycles')}
+    def fake_trace(work_mtz,phase_mtz,seq,runtime,output_dir,**kw):
+        model=Path(output_dir)/'model.pdb';model.parent.mkdir(parents=True,exist_ok=True);model.write_text('END\n')
+        return {'model':str(model),'residues':0,'fragments':0}
+    monkeypatch.setattr(parrot_dm,'run',fake_dm)
+    monkeypatch.setattr(trace_feedback,'trace',fake_trace)
+    report=trace_feedback.run(work,prior,sequence,'runtime',tmp_path/'out',solvent_fraction=.5,feedback_cycles=3)
+    assert len(report['history'])==1                 # no second cycle was attempted
+    assert 'no residues' in report['history'][0]['feedback_stopped']
+    assert dm_models==[None]                          # the empty model was never fed back
+    assert Path(report['final_map']).is_file()
+    assert (tmp_path/'out/feedback_report.json').is_file()
+
+
+def test_build_cycle_with_no_atoms_stops_before_refmac(tmp_path,monkeypatch):
+    """An empty Buccaneer model must be reported as "no model", not as a REFMAC crash."""
+    native=_mtz(tmp_path/'native.mtz',[[1,0,0,10.0,1.0,0]],extra=[('FP','F'),('SIGFP','Q'),('FreeR_flag','I')])
+    dm=_mtz(tmp_path/'dm.mtz',[[1,0,0,10.0,1.0,45.0,0.8]],extra=[('FP','F'),('SIGFP','Q'),
+        ('PHIB','P'),('FOM','W')])
+    sequence=tmp_path/'seq.fasta';sequence.write_text('>a\nAAAA\n')
+    runtime=tmp_path/'runtime';runtime.mkdir()
+    calls=[]
+    class Done:returncode=0
+    def fake_run(command,**kw):
+        calls.append(command[0])
+        if 'cbuccaneer' in str(command[0]):
+            out=Path(kw['input'].split('pdbout ')[1].splitlines()[0].strip())
+            out.write_text('REMARK nothing was built\nEND\n')
+        return Done()
+    monkeypatch.setattr(ccp4_pipeline,'_find',lambda name,rt:str(tmp_path/name))
+    monkeypatch.setattr(ccp4_pipeline.subprocess,'run',fake_run)
+    with pytest.raises(RuntimeError) as caught:
+        ccp4_pipeline.run(native,dm,sequence,runtime,tmp_path/'out',cycles=3)
+    assert '未建出任何残基' in str(caught.value)
+    assert not any('refmac' in str(c) for c in calls)   # REFMAC never ran on an empty model
+    report=json.loads((tmp_path/'out/hybrid_report.json').read_text())
+    assert report['status']=='no_model' and report['residues_built']==0
 
 
 def test_merge_phase_map_writes_pipeline_schema_and_skips_free(tmp_path):
