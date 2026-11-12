@@ -487,6 +487,14 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
                 with log_path.open('x') as log:runner(stage['command'],log,env)
             artifacts=[fingerprint(path) for path in stage['outputs']]
             state['completed'].append(dict(id=stage['id'],name=stage['name'],artifacts=artifacts));save()
+            hand_report=out/'02_sad/hand_selection.json'
+            if stage['id']=='sad' and hand_report.is_file():
+                hand=json.loads(hand_report.read_text())
+                state['hand_selection']=dict(selected_hand=hand.get('selected_hand'),hand_verified=hand.get('hand_verified',True),
+                                             single_hand=bool(hand.get('single_hand_selection',False)),policy=hand.get('policy'))
+                if hand.get('single_hand_selection'):
+                    state['scope']+=' 注意：本次只有一手算出结果，手性未经交叉验证，选中的手来自该手自身的测序证据。'
+                save()
         if not cfg['build_model']:
             modified=bool(cfg.get('dm_enabled',True))
             state.update(status='completed',current='complete',
