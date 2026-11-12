@@ -104,12 +104,55 @@ cd /Volumes/Fast_4T/Deepseek-Oasis
 python3 work/noCCP4/compare_map_phases.py   # 写出 work/noCCP4/map_phase_comparison.json
 ```
 
+### 3.2 DM 引擎内部的消融：差距不是任何一个旋钮
+
+既然差距出在密度修饰本身，就直接在 DM 引擎里做单旋钮消融。全部用 DM-only 运行（`--no-build-model`，只看 `FWT/PHWT` 图），逐循环 dump 系数（`OASIS_INTERNAL_DM_TRACE`）后与 campaign 模型比 complex CC。先做两个案例（3O2E 最差、7TBS 中等），确认方向后再上十案例。
+
+| 变体 | 3O2E | 7TBS | 说明 |
+| --- | --- | --- | --- |
+| 基线：`mlhl` + 掩膜平滑 4.0 Å | 0.432 | 0.487 | 现发布路径 |
+| 掩膜平滑 3.0 Å | 0.443 | 0.495 | 边际改善 |
+| `combine=map`（照搬 Parrot 的纯图迭代，不做相位组合） | **0.076** | **0.060** | 崩溃 |
+| 多分辨率阶梯 `auto` + 3.0 Å，40 轮 | 0.412 | 0.499 | 3O2E 变差 |
+| 多分辨率阶梯 `auto` + 3.0 Å，100 轮 | 0.418 | 0.499 | 加轮次不救 |
+| `gamma=0`（去掉扰动校正） | 0.375 | 0.446 | 变差 |
+| Wang 球影响掩膜（半径按溶剂比校准）+ 3.0 Å | **0.491** | 0.495 | 3O2E +0.048，7TBS 持平 |
+
+四个直接结论：
+
+1. **加轮次无效**：complex CC 在第 8–10 轮就饱和，之后 30 轮不动（40 轮与 100 轮差 <0.01）。所以不是"迭代不足"，是**迭代不动点太低**。
+2. **照搬 Parrot 的纯图迭代会崩**：去掉 MLHL 相位组合、只用修饰后的图当下一轮系数，弱 SAD 先验下 CC 掉到 0.06–0.08。MLHL 锚定是必需的，这条捷径不通。
+3. **多分辨率阶梯不涨**：100 轮 `auto` 阶梯对 3O2E 反而低于单分辨率（0.418 vs 0.443），对 7TBS 只 +0.004。Parrot 的低分辨率起步要靠它自己的掩膜/加权配合，单独搬过来无效。
+4. **掩膜确实有毛病，但不是主因**：把内部掩膜与"由 campaign 模型原子膨胀 2.2 Å + 空间群展开"的真值掩膜比，`variance` 掩膜平均占据 0.735（真值 0.507，即过度包含约 45 %），掩膜 CC 只有 0.505；换成按溶剂比校准半径的 Wang 掩膜后占据 0.647、CC 0.561。**掩膜质量确实提高了，十案例均值却是 0.558 → 0.546（−0.012，单例 −0.075…+0.059）**——掩膜不是那 0.125 的来源。
+
+十案例 Wang 掩膜逐例（对照 §3 的基线列）：3O2E 0.491、5D9D 0.491、5HHK 0.692、6HF7 0.599、6ZPP 0.561、7E1D 0.470、7ENM 0.679、7TBS 0.495、7TFQ 0.450、7TJ1 0.529，均值 0.546。
+
+由此得到本轮最重要的判断：**内部 DM 与 Parrot 的差距不在某个可调参数，而在算法的整体结构**——Parrot/DM 是"多分辨率 + 逐轮重建掩膜 + 按壳层 σ_A 加权的相位组合 + NCS/溶剂平均"一整套联动，任何单项照搬都不涨。要让 complex CC 从 0.558 走到 0.68，需要的是 DMMULTI 级别的重写（约 1500–2000 行 + 逐案例标定），不是调参。
+
+复现（十案例 DM-only，4 进程，约 25 分钟）：
+
+```bash
+cd /Volumes/Fast_4T/Deepseek-Oasis
+OASIS_INTERNAL_DM_MASK=wang OASIS_INTERNAL_DM_MASK_RADIUS=3.0 \
+  python3 work/noCCP4/run_dm_only_all.py
+python3 work/noCCP4/dm_only_gain.py dm_only_trace_wang
+```
+
+单案例逐循环 trace（写入 `cycle_NN.mtz` 与最后一轮的掩膜/图）：
+
+```bash
+DM_TRACE_DIR=$PWD/work/noCCP4/dm_trace DM_TRACE_OUT=$PWD/work/noCCP4/dm_trace_runs \
+  python3 work/noCCP4/run_dm_trace.py 3_3o2e_9I_1K_P42212 19_7tbs_3SE_I222
+```
+
+消融开关全部是环境变量，默认值复现发布路径：`OASIS_INTERNAL_DM_MASK`（`variance`/`wang`）、`OASIS_INTERNAL_DM_WANG_RADIUS`、`OASIS_INTERNAL_DM_WANG_EDGE`、`OASIS_INTERNAL_DM_MASK_RADIUS`、`OASIS_INTERNAL_DM_COMBINE`（`mlhl`/`map`）、`OASIS_INTERNAL_DM_GAMMA`、`OASIS_INTERNAL_DM_LADDER`、`OASIS_INTERNAL_DM_TRACE`。
+
 ## 4. 达到 SHELXE 水平还差什么
 
 | 能力 | SHELXE | 我们现在 | 差什么 |
 | --- | --- | --- | --- |
 | SAD 定相 | SHELXD | `internal_pplus.phase`（NumPy SAD 似然 + P+ 信任域） | 无 |
-| 密度修饰 | 球影响范围 DM | `internal_pplus.seeded_dm`（NumPy MLHL） | **增益 0.279 vs Parrot 的 0.416**，终点 complex CC 低 0.125；这是唯一实质缺口 |
+| 密度修饰 | 球影响范围 DM | `internal_pplus.seeded_dm`（NumPy MLHL） | **增益 0.279 vs Parrot 的 0.416**，终点 complex CC 低 0.125；§3.2 的七项单旋钮消融都不涨，需 DMMULTI 级重写 |
 | 多聚丙氨酸 trace | 内建 autotracing | `trace.py` 等原型约 2400 行，**未接入** | 接入 + 十案例验收 |
 | 质量指标 | pseudo-free CC / FOM / mapCC | 有 R/R-free；地图验收脚本已就位（`work/noCCP4/compare_map_phases.py`） | 把地图相关系数接进流水线报告 |
 | 约束精修 | 无 | 内部精修器（原型） | **不需要**（SHELXE 不做） |
@@ -119,7 +162,7 @@ python3 work/noCCP4/compare_map_phases.py   # 写出 work/noCCP4/map_phase_compa
 
 但按第 3 节的量化结果，**这条链现在还没到 SHELXE 水平**：密度修饰差 0.125，这是必须先补的一项。补齐顺序建议是：
 
-1. 内部 DM 追平 Parrot（目标 complex CC ≥ 0.68，十案例逐例不低于 SHELXE − 0.03）。可调的点都在 `internal_pplus.seeded_dm` 里：溶剂掩膜半径、压平强度、直方图匹配的启用与轮数、相位组合权重、以及 MLHL 的 σ_A 估计。
+1. 内部 DM 追平 Parrot（目标 complex CC ≥ 0.68，十案例逐例不低于 SHELXE − 0.03）。**不要再去调参**：§3.2 已经把掩膜半径、掩膜构造（variance → 校准 Wang）、压平/直方图、相位组合方式（MLHL vs 纯图迭代）、扰动校正、分辨率阶梯、轮数（40 → 100）逐个试过，单项最好也只有 +0.05，十案例均值不涨。要补的是结构：逐轮由当前图重建掩膜、按壳层 σ_A 与 FOM 加权的相位组合、多分辨率阶梯与掩膜联动、NCS/溶剂平均，四者一起才构成 DMMULTI 的行为。
 2. 再把 `trace.py` 接入流水线，输出 SHELXE 式的多聚丙氨酸 `trial.pdb`。
 3. 两项都到位后，才谈"纯自研可发布"。
 
@@ -128,7 +171,7 @@ python3 work/noCCP4/compare_map_phases.py   # 写出 work/noCCP4/map_phase_compa
 - 内部 DM 在 6ZPP、5HHK 上曾因参考图网格内存上限失败（`reference_histogram` 的 `max_grid_points`）。`native_density.py` 的采样率自适应已经把 1tqw 参考图从 9.95 M 点降到 2.76 M 点，三个案例重跑通过。
 - 6HF7 曾因输入重原子模型带 ANISOU 被内部后端拒绝。现在 `read_atoms(..., project_anisotropic=True)` 把各向异性 ADP 投影到 U_iso = trace(U)/3，并发出可见的 `UserWarning`（不是静默降级）；内部 P+/DM/信任域三处调用点启用，其余调用点仍默认拒绝。
 - 5HHK、6HF7 的十案例重跑已完成：内部 P+ → 内部 DM → Buccaneer → REFMAC 的最终模型为 5HHK 26.22/28.92（campaign 25.94/28.82）、6HF7 25.34/29.17（campaign 26.02/29.04）、6ZPP 30.54/33.36（campaign 30.04/31.31）。也就是说，密度修饰图差 0.10–0.13 时，后端的 Buccaneer/REFMAC 基本把这个差距吸收掉了（R-free 差 0.10–2.05 点）。
-- 全套测试 792 passed。
+- 全套测试 639 passed（`PYTHONPATH=src .conda-unified/bin/python -m pytest tests -q`）。
 
 ## 6. 口径说明与已知局限
 

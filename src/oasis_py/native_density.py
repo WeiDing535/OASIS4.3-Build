@@ -45,6 +45,33 @@ def protein_mask(grid, solvent_fraction, kernel):
     return expit((variance-(lo+hi)/2)/width)
 
 
+def wang_mask(grid, solvent_fraction, kernel, cell, radius=None, edge=1.0):
+    """Sphere-of-influence (Wang) mask with a solvent-fraction calibration.
+
+    A high-variance core is dilated to a radius chosen so that the mask covers
+    exactly 1-solvent_fraction of the cell; the edge is softened by a 1 A
+    Gaussian. The previous logistic-on-variance mask was over-inclusive
+    (mean 0.735 for a 0.49 solvent fraction) and poorly localised.
+    """
+    from scipy.ndimage import distance_transform_edt, gaussian_filter
+    rho=np.array(grid.array,dtype=float)
+    variance=np.maximum(smooth(rho*rho,kernel)-smooth(rho,kernel)**2,0)
+    grid.array[:]=variance;grid.symmetrize_avg();variance=np.array(grid.array,dtype=float)
+    grid.array[:]=rho
+    shape=variance.shape
+    sampling=(cell.a/shape[0],cell.b/shape[1],cell.c/shape[2])
+    core_fraction=float(np.clip((1-solvent_fraction)*0.5,0.02,0.9))
+    core=variance>=float(np.quantile(variance,1-core_fraction))
+    pad=int(np.ceil((radius or 6.0)/min(sampling)))+2
+    distance=distance_transform_edt(np.pad(~core,pad,mode='wrap'),sampling=sampling)
+    distance=distance[pad:-pad,pad:-pad,pad:-pad]
+    if radius is None:
+        radius=float(np.quantile(distance,1-solvent_fraction))
+    inside=(distance<=radius).astype(float)
+    mask=gaussian_filter(inside,sigma=[edge/s for s in sampling],mode='wrap')
+    return mask
+
+
 def histogram_transform(rho, mask, target_quantiles):
     """Smooth monotonic empirical histogram map plus solvent flattening."""
     ordered=rho[mask>.5]

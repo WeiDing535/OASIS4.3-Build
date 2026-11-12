@@ -6,6 +6,7 @@ Phaser/RESOLVE development branch. Building uses separately bundled engines.
 """
 from pathlib import Path
 import json
+import os
 import gemmi
 import numpy as np
 from .trust_workflow import dump,sample_info
@@ -60,13 +61,19 @@ def phase(cfg,output):
         'Phenix_executed':False,'Phaser_input_used':False,'quality_claim':'Independent experimental route; no transfer of SEC17 external-branch Rfree claims'})
 
 
-def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,random_seed):
+def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,random_seed,trace_dir=None,
+              combine='mlhl',mask_radius=4.0,ladder=None,gamma_scale=1.0,mask_kind='variance',
+              wang_radius=None,wang_edge=1.0):
     """Frozen original HL + separate initial P+ map, never posterior-as-data."""
     from oasis_py.density_mlhl import fit_shells
     from oasis_py.native_density import (working_grid_size,metric_filter,reference_histogram,
-        protein_mask,histogram_transform,apply_transform)
+        protein_mask,wang_mask,histogram_transform,apply_transform)
     from oasis_py.sad import posterior_moments
     from oasis_py.phasing import PhaseResult
+    if combine not in ('mlhl','map'):raise ValueError('Invalid DM combination '+repr(combine))
+    if mask_kind not in ('variance','wang'):raise ValueError('Invalid DM mask kind '+repr(mask_kind))
+    if ladder is not None and (not ladder or any(c is not None and float(c)<=0 for c in ladder)):
+        raise ValueError('Invalid DM resolution ladder')
     prior=np.asarray(observation.hl,dtype=float).copy()
     if prior.shape!=(len(data.f),4) or not np.isfinite(prior).all():raise ValueError('Invalid fixed observation HL')
     phase=np.asarray(seed_phase,dtype=float);fom=np.asarray(seed_fom,dtype=float)
@@ -74,26 +81,87 @@ def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,ra
         raise ValueError('Invalid independent P+ seed')
     coefficients=data.f*fom*np.exp(1j*phase)
     def asu(values):return gemmi.ComplexAsuData(data.cell,data.spacegroup,np.ascontiguousarray(data.hkl),np.ascontiguousarray(values,dtype=np.complex64))
-    shape,rate=working_grid_size(asu(coefficients),8_000_000);kernel=metric_filter(data.cell,shape,4.)
+    shape,rate=working_grid_size(asu(coefficients),8_000_000);kernel=metric_filter(data.cell,shape,mask_radius)
     target=reference_histogram(data,fom,reference);rng=np.random.default_rng(random_seed);history=[];hl=prior.copy()
-    for cycle in range(cycles):
-        grid=asu(coefficients).transform_f_phi_to_map(exact_size=shape);rho=np.array(grid.array,dtype=float)
-        mask=protein_mask(grid,solvent,kernel);modified,mapping=histogram_transform(rho,mask,target)
+    spacing=1.0/np.sqrt((data.hkl**2/np.array([data.cell.a,data.cell.b,data.cell.c])**2).sum(axis=1))
+    steps=[None] if not ladder else list(ladder)
+    schedule=[];remaining=cycles
+    for index,cutoff in enumerate(steps):
+        count=max(1,remaining) if index==len(steps)-1 else max(1,remaining//(len(steps)-index))
+        schedule.extend([cutoff]*count);remaining-=count
+    schedule=schedule[:cycles]
+    for cycle,cutoff in enumerate(schedule):
+        active=np.ones(len(data.f),bool) if cutoff is None else (spacing>=float(cutoff))
+        if not active.any():continue
+        current=np.where(active,coefficients,0).astype(complex)
+        grid=asu(current).transform_f_phi_to_map(exact_size=shape);rho=np.array(grid.array,dtype=float)
+        mask=(wang_mask(grid,solvent,kernel,data.cell,radius=wang_radius,edge=wang_edge)
+              if mask_kind=='wang' else protein_mask(grid,solvent,kernel))
+        modified,mapping=histogram_transform(rho,mask,target)
         noise=rng.normal(size=shape);grid.array[:]=noise;grid.symmetrize_avg();noise=np.array(grid.array,dtype=float);noise-=noise.mean()
         noise*=max(rho.std(),1e-12)*.01/max(noise.std(),1e-12)
         perturbed=apply_transform(rho+noise,mask,mapping)
         gamma=float(np.clip(np.sum(noise*(perturbed-modified))/max(np.sum(noise*noise),1e-30),0,.95))
+        gamma=min(gamma*gamma_scale,.95)
         grid.array[:]=modified-gamma*rho;grid.symmetrize_avg()
         fc=gemmi.transform_map_to_f_phi(grid).get_value_by_hkl(data.hkl).astype(complex)
-        field,d,fit=fit_shells(data,fc,prior,samples=72)
-        hl=prior.copy();hl[:,0]+=field.real;hl[:,1]+=field.imag
-        phase,fom=posterior_moments(data,hl)
-        coefficients=2*data.f*fom*np.exp(1j*phase)-d*fc
-        row={'cycle':cycle+1,'mean_fom':float(fom.mean()),'gamma':gamma,'shell_fit':fit};history.append(row)
+        if combine=='map':
+            # Parrot-style map iteration: no phase combination with the weak
+            # SAD prior, the modified map is its own coefficient set.
+            updated=fc.astype(complex);fit={}
+        else:
+            field,d,fit=fit_shells(data,fc,prior,samples=72)
+            hl=prior.copy();hl[:,0]+=field.real;hl[:,1]+=field.imag
+            phase,fom=posterior_moments(data,hl)
+            updated=2*data.f*fom*np.exp(1j*phase)-d*fc
+        coefficients=np.where(active,updated,coefficients).astype(complex)
+        if trace_dir is not None:
+            _write_map_coefficients(Path(trace_dir)/f'cycle_{cycle+1:02d}.mtz',data,coefficients)
+            if cycle==len(schedule)-1:
+                Path(trace_dir).mkdir(parents=True,exist_ok=True)
+                np.save(Path(trace_dir)/'mask_last.npy',mask.astype(np.float32))
+                np.save(Path(trace_dir)/'rho_last.npy',rho.astype(np.float32))
+        map_fom=float(np.clip(np.abs(coefficients)/np.maximum(data.f,1e-12),0,1)[active].mean())
+        row={'cycle':cycle+1,'mean_fom':float(fom.mean()),'map_fom':map_fom,'gamma':gamma,'shell_fit':fit,
+             'resolution_cutoff':None if cutoff is None else float(cutoff)};history.append(row)
         print(json.dumps({'internal_DM_cycle':cycle+1,'mean_fom':row['mean_fom']}),flush=True)
+    if combine=='map':
+        fom=np.clip(np.abs(coefficients)/np.maximum(data.f,1e-12),0,1);phase=np.angle(coefficients)
     return PhaseResult(phase,fom,None,hl,{'method':'internal_fixed_observation_MLHL_seeded_DM','backend':'NumPy/SciPy/Gemmi only; no external executable',
         'cycles':history,'grid_shape':shape,'grid_sample_rate':rate,'seed_map':'P+ first moment once','fixed_HL':'Original internal observation likelihood, never accumulated',
         'limitations':['Approximate mask, reference histogram, shell scale and field cap inherited from internal MLHL DM','No automatic NCS; not RESOLVE/Parrot/Phenix equivalent']}),coefficients
+
+
+def _ladder_from_env(data):
+    """Multi-resolution DM schedule: low-resolution shells first (Parrot-like)."""
+    spec=os.environ.get('OASIS_INTERNAL_DM_LADDER','').strip()
+    if not spec:return None
+    d_min=float(1.0/np.sqrt(np.max((data.hkl**2/np.array([data.cell.a,data.cell.b,data.cell.c])**2).sum(axis=1))))
+    if spec=='auto':
+        cutoffs=[];value=8.0
+        while value>d_min*1.25:cutoffs.append(round(value,2));value*=0.75
+        cutoffs.append(None);return cutoffs
+    values=[float(x) for x in spec.split(',') if x.strip()]
+    return values+[None]
+
+
+def _dm_options():
+    """Ablation switches for the internal DM; all defaults reproduce shipping behaviour."""
+    return {'combine':os.environ.get('OASIS_INTERNAL_DM_COMBINE','mlhl'),
+        'gamma_scale':float(os.environ.get('OASIS_INTERNAL_DM_GAMMA','1.0')),
+        'mask_kind':os.environ.get('OASIS_INTERNAL_DM_MASK','variance'),
+        'wang_radius':(None if not os.environ.get('OASIS_INTERNAL_DM_WANG_RADIUS') else float(os.environ['OASIS_INTERNAL_DM_WANG_RADIUS'])),
+        'wang_edge':float(os.environ.get('OASIS_INTERNAL_DM_WANG_EDGE','1.0')),
+        'mask_radius':float(os.environ.get('OASIS_INTERNAL_DM_MASK_RADIUS','4.0'))}
+
+
+def _write_map_coefficients(path,data,coefficients):
+    """Debug aid: dump one DM cycle so the per-cycle map gain is measurable."""
+    path.parent.mkdir(parents=True,exist_ok=True)
+    m=gemmi.Mtz(with_base=True);m.spacegroup=data.spacegroup;m.set_cell_for_all(data.cell);m.add_dataset('internal_DM_cycle')
+    for name,kind in [('FWT','F'),('PHWT','P')]:m.add_column(name,kind)
+    m.set_data(np.column_stack([data.hkl,abs(coefficients),np.rad2deg(np.angle(coefficients))]).astype(np.float32))
+    m.write_to_file(str(path))
 
 
 def dm(cfg,output):
@@ -104,7 +172,10 @@ def dm(cfg,output):
     seed=gemmi.read_mtz_file(str(parent/'02_sad/experimental.mtz'));lookup={tuple(h):i for i,h in enumerate(seed.make_miller_array())};ix=[lookup[tuple(h)] for h in data.hkl]
     phase=np.deg2rad(np.asarray(seed.column_with_label('PHIB'))[ix]);fom=np.asarray(seed.column_with_label('FOM'))[ix]
     seq=sample_info(cfg,data);solvent=seq['solvent_fraction'] if cfg['solvent_fraction'] is None else cfg['solvent_fraction']
-    result,coeff=seeded_dm(data,original,phase,fom,solvent,cfg['reference'],cycles=cfg['dm_cycles'],random_seed=cfg['seed'])
+    trace=os.environ.get('OASIS_INTERNAL_DM_TRACE')
+    result,coeff=seeded_dm(data,original,phase,fom,solvent,cfg['reference'],cycles=cfg['dm_cycles'],random_seed=cfg['seed'],
+        trace_dir=Path(trace)/Path(output).parent.name if trace else None,
+        ladder=_ladder_from_env(data),**_dm_options())
     m=gemmi.Mtz(with_base=True);m.spacegroup=data.spacegroup;m.set_cell_for_all(data.cell);m.add_dataset('internal_DM')
     for name,kind in [('F','F'),('SIGF','Q'),('FWT','F'),('PHWT','P'),('PHIB','P'),('FOM','W')]+[(x,'A') for x in ['HLA','HLB','HLC','HLD']]:m.add_column(name,kind)
     m.set_data(np.column_stack([data.hkl,data.f,data.sigf,abs(coeff),np.rad2deg(np.angle(coeff)),np.rad2deg(result.phase),result.fom,result.hl]).astype(np.float32));m.write_to_file(str(out/'map_phases.mtz'))
