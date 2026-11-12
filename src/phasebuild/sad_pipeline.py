@@ -101,8 +101,11 @@ def validate(config, inspect=True):
         cfg.update(phenix_bin='',phase_cycles=100)
         if cfg.get('observation_prior'):raise ValueError('自带模式不接受外部相位文件')
         cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None))
-        from .bundled_pplus import engine_layout
+        from .bundled_pplus import engine_layout,require_density
         engine_layout(cfg['runtime'],cfg.get('dm_engine'))
+        # The bundled route drives P+ refinement and the two-hand pilot with the
+        # package's RESOLVE/CCTBX tree, which a bare external CCP4 does not have.
+        require_density(cfg)
     if trusted:
         # The P+ trust-region phase stage itself never needs Phenix; only the
         # original RESOLVE/CCTBX density-modification backend did. When the

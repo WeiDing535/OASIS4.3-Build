@@ -52,14 +52,37 @@ def pilot_metrics(model,xml):
     return counts
 
 
+HAND_NAMES={'input_hand':'输入手','opposite_hand':'反向手'}
+
+
+def _hand_name(row):
+    return HAND_NAMES.get(row.get('hand'),str(row.get('hand')))
+
+
 def choose(reports,expected):
-    """Predeclared sequence-evidence gate; no R or reference-phase argument."""
+    """Predeclared sequence-evidence gate; no R or reference-phase argument.
+
+    Two computed hands are compared as before.  When exactly one hand cannot be
+    computed at all (engine failure, Buccaneer failure), the survivor is carried
+    forward only if its own pilot reaches the minimum sequence evidence; the
+    decision then rests on one hand, which the returned policy states explicitly
+    instead of pretending handedness was cross-checked.
+    """
     if not isinstance(expected,int) or expected<=0:raise ValueError('Positive ASU residue count required')
     if len(reports)!=2:raise ValueError('双手判别需要两个完整候选，不能默认选择第一个文件')
-    if any(r.get('status') not in ('completed','empty') for r in reports):raise ValueError('至少一手计算未完整完成，无法可靠判别；请查看候选日志')
+    threshold=max(3,min(15,int(np.ceil(.15*expected))))
+    complete=[r for r in reports if r.get('status') in ('completed','empty')]
+    failed=[r for r in reports if r.get('status') not in ('completed','empty')]
+    if failed:
+        details='；'.join('%s：%s'%(_hand_name(r),r.get('error') or '未完成') for r in failed)
+        if not complete:
+            raise ValueError('两手都没算出结果，手性无法判别（%s）'%details)
+        survivor=complete[0];unique=survivor.get('unique',0)
+        if threshold<=unique<=1.35*expected:
+            return survivor['hand'],dict(policy='Only one hand could be computed (%s failed); the surviving map sequenced %d unique residues on its own, above the %d-residue minimum. Handedness rests on this single hand and was not cross-checked'%(_hand_name(failed[0]),unique,threshold),minimum_unique=threshold,expected_ASU_residues=expected,single_hand=True,hand_verified=False,other_hand_error=details,selection_uses_Rfree=False,selection_uses_reference=False,selection_uses_refinement=False)
+        raise ValueError('一手未完整完成，无法交叉判别手性（%s）；剩下的一手只有 %d 个唯一测序残基，低于 %d 的最低证据，不能当作已判定'%(details,unique,threshold))
     ranked=sorted(reports,key=lambda r:(r.get('unique',0),r.get('sequenced',0),r.get('longest',0)),reverse=True)
     best,second=ranked
-    threshold=max(3,min(15,int(np.ceil(.15*expected))))
     # The pilot is deliberately short and may sequence only a small fraction
     # of a large/multicopy ASU.  Cap the absolute separation requirement just
     # like the evidence threshold; otherwise four-copy targets can have clear
@@ -120,7 +143,8 @@ def resolve(cfg,out,front,work):
             data,_,_=read_sad_pairs(staged,free_label=FLAG,free_value=cfg['free_value']);sample=trust.sample_info(local,data);expected=sample['asu_residues']
             model=phase/'refined_heavy.pdb';shutil.copy2(raw.with_suffix('.pdb'),model)
             prior=phase/'native_observations.mtz';b.extract_prior(raw,data,prior)
-            local.update(heavy=str(model),observation_prior=str(prior),density_runtime=str(Path(cfg['runtime'])/'density'))
+            local.update(heavy=str(model),observation_prior=str(prior),
+                         density_runtime=cfg.get('density_runtime') or str(Path(cfg['runtime'])/'density'))
             trust.phase(local,phase);trust.dm(local,dm);trust.bridge(local,bridge)
             record.update(pilot(local,root))
             record['phase_artifacts']=[fingerprint(phase/name) for name in ('experimental.mtz','experimental.json','observations.mtz','observations.json','native_observations.mtz','refined_heavy.pdb')]
@@ -138,6 +162,7 @@ def resolve(cfg,out,front,work):
     shutil.copy2(root/'native.mtz',out/'selected_native.mtz');shutil.copy2(root/'prepared_sad.mtz',out/'selected_sad.mtz')
     dm_artifacts=chosen['dm_artifacts']
     report=dict(status='selected',selected_hand=selected,selected_spacegroup=chosen['spacegroup'],candidates=reports,policy=policy,
+        hand_verified=not policy.get('single_hand',False),single_hand_selection=bool(policy.get('single_hand',False)),
         selected_native=fingerprint(out/'selected_native.mtz'),selected_sad=fingerprint(out/'selected_sad.mtz'),selected_dm_artifacts=dm_artifacts,
         work=work,pilots_reused_for_final_model=False,original_input_files_modified=False)
     dump(out/'hand_selection.json',report)

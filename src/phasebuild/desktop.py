@@ -608,6 +608,8 @@ class App:
         else:
             lines.append('未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1。')
             lines.append('模块 1 输出相位、FOM 与 MTZ；已装 CCP4 但不在默认位置时，在上方“CCP4 位置”里填根目录或 ccp4.setup 路径，再点“重新检测”。')
+        if located and not (Path(located)/'density/bin/oasis-density-python').is_file():
+            lines.append('注意：%s 是外部 CCP4 安装，没有包内密度修饰引擎（density/）；P+ 定相与双手判别需要便携包的 runtime，请把“CCP4 位置”指向 …/OASIS4.3-…-portable local/runtime。'%located)
         if not self.module_parrot.get():
             lines.append('模块 2 已关闭：跳过密度修饰，直接输出 P+ 相位；模块 3 需要修饰后的图，已一并关闭。')
         elif not self.module_build.get():

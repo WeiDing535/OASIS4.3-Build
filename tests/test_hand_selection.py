@@ -36,9 +36,13 @@ def test_ambiguous_or_unphysical_evidence_fails_closed(rows):
  with pytest.raises(ValueError):hs.choose(rows,51)
 
 
-def test_failed_opposite_hand_is_not_misreported_as_resolved():
- rows=reports(40,0);rows[1]['status']='failed'
- with pytest.raises(ValueError,match='未完整'):hs.choose(rows,51)
+def test_failed_opposite_hand_continues_only_on_its_own_positive_evidence():
+ rows=reports(40,0);rows[1].update(status='failed',error='missing engine')
+ selected,policy=hs.choose(rows,51)
+ assert selected=='input_hand' and policy['single_hand'] and not policy['hand_verified']
+ assert 'missing engine' in policy['other_hand_error'] and not policy['selection_uses_Rfree']
+ weak=reports(4,0);weak[1].update(status='failed',error='missing engine')
+ with pytest.raises(ValueError,match='未完整'):hs.choose(weak,51)
 
 
 def test_large_multicopy_asu_accepts_clear_short_pilot_separation():

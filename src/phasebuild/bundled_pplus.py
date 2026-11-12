@@ -6,6 +6,7 @@ third-party kernels; copied licensed components are for local evaluation only.
 from pathlib import Path
 import json
 import os
+import sys
 import shutil
 import gemmi
 import numpy as np
@@ -14,11 +15,51 @@ from .data import fingerprint
 from .trust_workflow import dump,launch,sample_info
 
 
-def engine_layout(runtime,dm_engine=None):
+DENSITY_ENGINE='bin/oasis-density-python'
+
+
+def density_root(cfg):
+    """Locate the bundled RESOLVE/CCTBX tree, which is not part of CCP4.
+
+    ``runtime`` is the installation that supplies Phaser and the optional
+    Parrot/Buccaneer/REFMAC programs; it may legitimately be a bare CCP4.  The
+    P+ likelihood refinement and the two-hand pilot are driven by the copied
+    RESOLVE/CCTBX tree, so that tree is resolved separately: an explicit
+    ``density_runtime``, ``PHASEBUILD_DENSITY``, ``<runtime>/density``, then the
+    package's own runtime next to the application directory.
+    """
+    runtime=Path(cfg['runtime']).expanduser()
+    explicit=str(cfg.get('density_runtime') or os.environ.get('PHASEBUILD_DENSITY') or '')
+    candidates=[]
+    if explicit:
+        path=Path(explicit).expanduser()
+        candidates+=[path] if path.name=='density' else [path,path/'density']
+    candidates.append(runtime/'density')
+    app=Path(__file__).resolve().parents[2]
+    for base in (app,app.parent):
+        candidates+=[base/'runtime/density',base/'density']
+    for path in candidates:
+        engine=path/DENSITY_ENGINE
+        if engine.is_file() and os.access(engine,os.X_OK):return path.resolve()
+    return None
+
+
+def require_density(cfg):
+    """Fail before Phaser starts, with the one sentence that fixes it."""
+    density=density_root(cfg)
+    if density is None:
+        raise ValueError(
+            '这次运行缺“包内密度修饰引擎”'+DENSITY_ENGINE+'：当前运行时 '+str(Path(cfg['runtime']).expanduser())
+            +' 里没有 density/，它只是外部 CCP4 安装。请把“CCP4 位置”指向便携包的 runtime 目录'
+            '（例如 …/OASIS4.3-…-portable local/runtime，里面有 density/ 和 bin/），或直接启动便携包里的 OASIS4.3')
+    return density
+
+
+def engine_layout(runtime,dm_engine=None,density=None,need_density=False):
     """Check the bundled engines; the RESOLVE/CCTBX tree is unused under Parrot."""
-    runtime=Path(runtime).expanduser().resolve();density=runtime/'density'
+    runtime=Path(runtime).expanduser().resolve();density=Path(density).expanduser().resolve() if density else runtime/'density'
     required=[runtime/'bin/phaser']
-    if dm_engine!='parrot':required+=[density/'bin/oasis-density-python',density/'conda_base/bin/python2.7']
+    if dm_engine!='parrot' or need_density:required+=[density/DENSITY_ENGINE,density/'conda_base/bin/python2.7']
     for p in required:
         if not p.is_file() or not os.access(p,os.X_OK):
             raise ValueError('P+ 引擎缺失：'+str(p)+'。若“CCP4 位置”填的是外部安装，请确认它有 bin/phaser，或清空该栏改用包内运行时')
@@ -88,7 +129,8 @@ def phase(cfg,output):
     from .oasis_options import pairs
     from .runtime import runtime_environment
     from . import trust_workflow
-    out=Path(output);runtime,_=engine_layout(cfg['runtime'],cfg.get('dm_engine'));front=out/'phaser';front.mkdir()
+    out=Path(output);density=require_density(cfg);cfg=dict(cfg,density_runtime=str(density))
+    runtime,_=engine_layout(cfg['runtime'],cfg.get('dm_engine'),density=density,need_density=True);front=out/'phaser';front.mkdir()
     work=stage_work(cfg,front/'work.mtz');shutil.copyfile(cfg['sequence'],front/'sequence.fasta')
     if Path(cfg['heavy']).suffix.lower() in ('.pdb','.ent'):shutil.copyfile(cfg['heavy'],front/'heavy.pdb')
     else:gemmi.read_structure(cfg['heavy']).write_pdb(str(front/'heavy.pdb'))
@@ -110,9 +152,13 @@ def phase(cfg,output):
             from .anomalous_scattering import calculate
             scattering=calculate(cfg['elements'],cfg['wavelength'])
         meta=json.loads((out/'experimental.json').read_text());meta.update(frontend='Bundled native Phaser EP_AUTO; both hands evaluated by work-only sequence tracing',external_phase_file_used=False);dump(out/'experimental.json',meta)
+        policy='Both Phaser hands: P+ -> Wang/classic40 -> masked work-only three-cycle sequence tracing; no refinement, Rfree or reference selection'
+        if selected.get('single_hand_selection'):
+            policy+='. Only one hand could be computed, so handedness is unverified for this run; see hand_selection.json for the failed hand'
+            print('警告：只有一手算出结果，本次手性未交叉验证（详见 hand_selection.json）',file=sys.stderr)
         dump(out/'frontend.json',{'engine':'Bundled native Phaser','binary':fingerprint(runtime/'bin/phaser'),'work':work,
             'prior':{'output':fingerprint(out/'native_observations.mtz')},'refined_substructure':fingerprint(out/'refined_heavy.pdb'),
-            'pplus_scattering':scattering,'wavelength':cfg['wavelength'],'hand_policy':'Both Phaser hands: P+ -> Wang/classic40 -> masked work-only three-cycle sequence tracing; no refinement, Rfree or reference selection',
+            'pplus_scattering':scattering,'wavelength':cfg['wavelength'],'hand_policy':policy,'hand_verified':selected.get('hand_verified',True),
             'hand_selection':fingerprint(out/'hand_selection.json'),'selected_hand':selected['selected_hand'],'selected_spacegroup':selected['selected_spacegroup'],
             'inputs':{k:fingerprint(cfg[k]) for k in ['sad','native','heavy','sequence']},'third_party_engines':True,'requires_separate_suite_installation':False})
         return
@@ -142,7 +188,7 @@ def dm(cfg,output):
         from .hand_selection import copy_selected_dm
         return copy_selected_dm(cfg,output)
     from . import trust_workflow
-    out=Path(output);_,density=engine_layout(cfg['runtime']);model=out.parent/'02_sad/refined_heavy.pdb'
+    out=Path(output);density=require_density(cfg);model=out.parent/'02_sad/refined_heavy.pdb'
     meta=json.loads((out.parent/'02_sad/frontend.json').read_text())
     if fingerprint(model)['sha256']!=meta['refined_substructure']['sha256']:raise ValueError('Refined substructure changed before density modification')
     trust_workflow.dm({**cfg,'heavy':str(model),'density_runtime':str(density)},out)

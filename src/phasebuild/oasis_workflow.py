@@ -34,8 +34,15 @@ def cli_options(project):
 
 def defaults(project):
     project=Path(project)
-    candidates=[project/'runtime',project/'dist/OASIS4.3-dev12-portable local/runtime',project/'dist/OASIS4.3-dev11-portable local/runtime',project/'dist/OASIS4.3-dev10-portable local/runtime',project/'dist/OASIS4.3-dev9-portable local/runtime',project/'dist/OASIS4.3-dev8-portable local/runtime',project/'dist/OASIS4.3-dev7-portable local/runtime',project/'dist/OASIS4.3-dev6-portable local/runtime',project/'dist/OASIS4.3-dev5d-portable local/runtime',project/'dist/OASIS4.3-dev5-portable local/runtime',project/'dist/OASIS4.3-Build-macOS-Intel-0.8.3-local/runtime']
-    runtime=next((p for p in candidates if (p/'bin/cbuccaneer').is_file() and (p/'bin/refmac5').is_file()),None)
+    candidates=[project/'runtime']
+    for folder in (project/'dist',project.parent):
+        if folder.is_dir():candidates+=sorted(folder.glob('OASIS4.3*portable*/runtime'),reverse=True)
+    candidates+=[project/'dist/OASIS4.3-Build-macOS-Intel-0.8.3-local/runtime']
+    usable=[p for p in candidates if (p/'bin/cbuccaneer').is_file() and (p/'bin/refmac5').is_file()]
+    # A runtime that also carries the package's RESOLVE/CCTBX tree is the only
+    # one that can run the bundled P+ route end to end; prefer it over a bare
+    # external CCP4 installation.
+    runtime=next((p for p in usable if (p/'density/bin/oasis-density-python').is_file()),None) or (usable[0] if usable else None)
     runtime=str(runtime) if runtime else (default_runtime() or '')
     cfg=dict(DEFAULTS)
     cfg['phenix_bin']=''
