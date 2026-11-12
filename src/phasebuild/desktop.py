@@ -299,8 +299,10 @@ class App:
             self.history.heading(key,text=title)
             self.history.column(key,width=width,anchor='center' if key in ('started','status','rwork') else 'w')
         y=ttk.Scrollbar(frame,orient='vertical',command=self.history.yview)
-        self.history.configure(yscrollcommand=y.set)
-        y.pack(side='right',fill='y');self.history.pack(fill='both',expand=True)
+        x=ttk.Scrollbar(frame,orient='horizontal',command=self.history.xview)
+        self.history.configure(yscrollcommand=y.set,xscrollcommand=x.set)
+        y.pack(side='right',fill='y');x.pack(side='bottom',fill='x')
+        self.history.pack(fill='both',expand=True)
         self.history.bind('<<TreeviewSelect>>',self.on_select_job)
         self.history.bind('<Double-1>',lambda event:self.on_open())
         self.tabs.add(frame,text='任务记录')
@@ -340,6 +342,10 @@ class App:
                                 ('rfree','R-free',90),('cycles','精修周期',80)]:
             self.tree.heading(key,text=title)
             self.tree.column(key,width=width,anchor='center' if key!='engine' else 'w')
+        ty=ttk.Scrollbar(frame,orient='vertical',command=self.tree.yview)
+        tx=ttk.Scrollbar(frame,orient='horizontal',command=self.tree.xview)
+        self.tree.configure(yscrollcommand=ty.set,xscrollcommand=tx.set)
+        ty.pack(side='right',fill='y');tx.pack(side='bottom',fill='x')
         self.tree.pack(fill='both',expand=True)
         self.tabs.add(frame,text='精修结果')
 
