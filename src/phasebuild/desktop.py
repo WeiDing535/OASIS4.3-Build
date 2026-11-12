@@ -25,8 +25,18 @@ STATUS_NAMES={'queued':'等待运行','running':'正在运行','stopping':'正�
               'failed':'失败','success':'已完成','imported':'已导入（仅查看）','interrupted':'界面曾中断'}
 IMPORTED_NOTE='导入的既有结果：只读目录，不会重新运行；可查看曲线/表格、导出结果、保存模型。'
 METHODS=[('pplus_bundled','P+ 自带引擎（推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
-         ('pplus_internal','内部 P+（实验性）'),('likelihood','连续 SAD'),('pplus','旧版直接法 P+')]
+         ('pplus_internal','内部 P+（实验性，不用于正式解析）'),('likelihood','连续 SAD'),
+         ('pplus','旧版直接法 P+')]
 METHOD_NAMES=dict(METHODS)
+# Shown under the method radios; the internal chain is the one that must not be
+# mistaken for a validated route (see docs/NO_CCP4_REPLACEMENT.md).
+METHOD_HINTS={
+ 'pplus_bundled':'标定配方：P+ 定相 + Parrot 密度修饰 + Buccaneer/REFMAC，十案例 R-free 落在对照 ±5 点内。',
+ 'pplus_trust':'外部对照：Phaser 做 SAD，P+ 只接密度修饰之后的相位。',
+ 'pplus_internal':'实验性：SAD 定相已到 Phaser 水平，但密度修饰比 Parrot 低约 0.13（图相关 0.56 vs 0.69），'
+                  '且没有自动追踪；结果只用于研究对比，不要用来定结构。',
+ 'likelihood':'连续 SAD：不经过 P+，直接用似然法定相，作为对照使用。',
+ 'pplus':'旧版直接法 P+：保留用于复现历史结果。'}
 PROTOCOLS=[('','不使用参数方案'),('pplus_w8_weight','P+ · Wang8＋精修权重搜索（标定配方）'),
            ('pplus_w8','P+ · Wang8'),('pplus_w14','P+ · Wang14'),('stable_w14','稳定化 P+ · Wang14')]
 RECIPES=[('pipeline','自带 Buccaneer/REFMAC 流程（推荐）'),('ccp4','外部 CCP4 流程'),('legacy','旧版逐轮流程')]
@@ -366,6 +376,9 @@ class App:
         for key,label in METHODS:
             ttk.Radiobutton(box,text=label,value=key,variable=self.method,
                             command=self._method_changed).pack(anchor='w')
+        self.method_hint=self.tk.StringVar(value=METHOD_HINTS.get(self.method.get(),''))
+        ttk.Label(box,textvariable=self.method_hint,style='Hint.TLabel',wraplength=520,
+                  justify='left').pack(fill='x',padx=(2,0),pady=(4,0))
         row=ttk.Frame(box);row.pack(fill='x',pady=(4,0))
         ttk.Label(row,text='P+ 参数方案').pack(side='left')
         self.protocol=self.tk.StringVar(value='')
@@ -384,6 +397,9 @@ class App:
         self.dm_engine=self.tk.StringVar(value='parrot')
         ttk.Combobox(row,textvariable=self.dm_engine,values=[label for _,label in ENGINES],
                      state='readonly',width=30).pack(side='left')
+        ttk.Label(sample,text='Parrot 是十案例标定的配方。内部密度修饰只能由命令行/环境变量开启，'
+                              '属实验性（图相关 0.56 vs Parrot 0.69），窗口里不提供。',
+                  style='Hint.TLabel',wraplength=520,justify='left').pack(fill='x',padx=(2,0))
 
         build=self._section('建模与精修')
         row=ttk.Frame(build);row.pack(fill='x',pady=2)
@@ -458,6 +474,9 @@ class App:
 
     def _method_changed(self,*_):
         method=self.method.get()
+        hint=getattr(self,'method_hint',None)
+        if hint is not None:
+            hint.set(METHOD_HINTS.get(method,''))
         for key,field in self.fields.items():
             only=field['only']
             if not only:

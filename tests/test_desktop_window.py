@@ -42,6 +42,15 @@ def test_every_form_field_is_a_workflow_option():
     assert {'sad','heavy','sequence','elements','wavelength','copies','output'} <= covered
 
 
+def test_every_method_carries_a_hint_and_the_internal_route_is_flagged():
+    """The experimental chain must be labelled in the form, not only in the docs."""
+    assert set(desktop.METHOD_HINTS)=={key for key,_ in desktop.METHODS}
+    assert '实验性' in desktop.METHOD_NAMES['pplus_internal']
+    assert '实验性' in desktop.METHOD_HINTS['pplus_internal']
+    assert '推荐' in desktop.METHOD_NAMES['pplus_bundled']
+    assert 'Parrot' in desktop.METHOD_HINTS['pplus_bundled']
+
+
 def test_protocol_and_engine_labels_round_trip():
     for key,label in desktop.PROTOCOLS:
         assert dict((label,value) for value,label in desktop.PROTOCOLS)[label]==key
@@ -77,6 +86,10 @@ def test_window_builds_and_collects_the_form(tmp_path):
         assert values['copies']==2 and values['wavelength']==0.97918
         assert values['protocol']=='pplus_w8_weight' and values['building_recipe']=='pipeline'
         assert values['solvent_fraction'] is None  # blank means estimate, not ''
+        assert app.method_hint.get()==desktop.METHOD_HINTS['pplus_bundled']
+        app.method.set('pplus_internal')
+        app._method_changed()
+        assert '实验性' in app.method_hint.get()
     finally:
         app.root.destroy()
 

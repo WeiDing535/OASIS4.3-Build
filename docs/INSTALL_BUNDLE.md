@@ -167,6 +167,20 @@ python -B package_oasis.py --output /new/path.zip
 
 生成精简源码包（**不含** Buccaneer/REFMAC/Parrot 运行时）。在已装 CCP4 的机器上可直接从源码树运行；缺 Parrot 时会回退到内置引擎，并明确报出回退原因（见 [README](../README.md) 与 `docs/LINUX.md`）。
 
+## 包内的自研模块是实验性的（默认关闭）
+
+包里有三个自研替换件，**都不在默认路径上**，只用于研究对比；出结构请一律用 `pplus_bundled`：
+
+| 模块 | 开关 | 状态 |
+| --- | --- | --- |
+| 自研 SAD 定相 `pplus_internal` | 窗口方法选项 / `--method pplus_internal` | 可用：输入相位图相关 0.279（Phaser 0.272） |
+| 自研密度修饰 `internal_pplus.seeded_dm` | 命令行/环境变量 `OASIS_INTERNAL_DM_*` | 实验性：终点图相关 0.558（Parrot 0.688） |
+| 自研自动追踪 `trace.py` | 未接入流水线 | 原型：SHELXE 级地图上也只长出 3–8 残基碎片 |
+
+- 窗口里 `内部 P+` 标着"实验性，不用于正式解析"，方法下方直接写上述数字；密度修饰下拉框只有 Parrot/RESOLVE。
+- 判断依据与复现命令：`docs/NO_CCP4_REPLACEMENT.md`、`docs/SHELXE_BASELINE.md` §3.3/§3.4。
+- 为什么要留在包里：它们是"能不能不依赖 CCP4"这条线的实测记录，去掉就无法复现结论；但它们**不是**可以替代 Parrot/Buccaneer 的选项。
+
 ## 为什么不能直接给一个公开链接
 
 - 第三方引擎的许可不允许把它们的二进制公开再分发；`bundle.json` 的 `public_redistribution_ready: false` 就是这个意思。
