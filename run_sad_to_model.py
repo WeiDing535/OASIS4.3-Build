@@ -28,6 +28,10 @@ def build_parser():
     p.add_argument('--reference',default='');p.add_argument('--runtime');p.add_argument('--labels',default='')
     p.add_argument('--build-model',action=argparse.BooleanOptionalAction,default=True,
                    help='Enable Buccaneer/REFMAC (default); --no-build-model stops after DM without external engines')
+    p.add_argument('--dm-enabled',action=argparse.BooleanOptionalAction,default=True,
+                   help='Enable density modification (Parrot/RESOLVE); --no-dm-enabled stops after P+ phasing and implies --no-build-model')
+    p.add_argument('--lite',action='store_true',
+                   help='精简版：只做 P+ 定相（等价 --no-dm-enabled --no-build-model），输出相位/FOM/MTZ')
     p.add_argument('--method',choices=['likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'],default=None,help='New-run default: bundled P+ Wang8 with work-weight search; explicit historical methods retained for reproducibility')
     p.add_argument('--solvent-fraction',type=float)
     p.add_argument('--aoe',type=float,default=.5)
@@ -68,6 +72,11 @@ def build_parser():
 def main(argv=None):
     p=build_parser()
     args=vars(p.parse_args(argv));resume=args.pop('resume');check=args.pop('check')
+    if args.pop('lite'):
+        # 精简版 is one decision, not two: phasing only, no density modification,
+        # no external builder.  The dependency is enforced here so a stale flag
+        # combination cannot promise a stage that will not run.
+        args.update(dm_enabled=False,build_model=False,auto_hand=False)
     endpoints=[int(x) for x in str(args.pop('feedback_endpoints') or '').replace(' ','').split(',') if x]
     solvents=[]
     for token in str(args.pop('dm_solvents') or '').replace(' ','').split(','):
@@ -83,6 +92,9 @@ def main(argv=None):
     if new_default:args['method']='pplus_bundled'
     profile=args['method']=='pplus_bundled' and (new_default or bool(args['elements']) or args['auto_fpp'])
     if new_default:args['input_columns']=True
+    if not args['dm_enabled']:
+        args['build_model']=False
+        if args['auto_hand'] is None:args['auto_hand']=False
     if args['auto_hand'] is None:args['auto_hand']=profile and args['build_model']
     if args['refinement_prior'] is None:args['refinement_prior']='dm_phifom' if profile else 'original_sad'
     if args['building_recipe'] is None:args['building_recipe']='pipeline' if profile else 'legacy'

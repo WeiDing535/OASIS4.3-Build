@@ -18,7 +18,7 @@ from .sad_bridge import inspect_inputs, prepare_sad, adapt_maps, FLAG
 DEFAULTS = dict(copies='auto', phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 free_value=0, seed=20261023, labels='', build_semet=False,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
-                triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True,
+                triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True, dm_enabled=True,
                 observation_prior='', composition_sequence='', phenix_bin='', trust_kl=.0005, trust_cleanup=True, trust_stability=False, trust_partial_cleanup=False, trust_work_weight=False, trust_wang_radius=14., wavelength=None,
                 elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='resolve',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all')
 
@@ -61,6 +61,12 @@ def validate(config, inspect=True):
         scattering=calculate(cfg['elements'],cfg['wavelength'])
         cfg['elements']=','.join(scattering['elements']);cfg['fpp']=scattering['fpp_argument']
     if not isinstance(cfg['build_model'],bool):raise ValueError('build_model must be boolean')
+    if not isinstance(cfg['dm_enabled'],bool):raise ValueError('dm_enabled must be boolean')
+    if not cfg['dm_enabled']:
+        # Density modification produces the map the builder builds into: without
+        # it there is nothing to build from, so the run stops after phasing.
+        if cfg['build_model']:raise ValueError('Buccaneer 需要密度修饰后的图；请启用密度修饰或关闭建模')
+        cfg['feedback_cycles']=0
     bundled=cfg.get('method')=='pplus_bundled'
     if not cfg['build_model']:
         cfg.update(rounds=DEFAULTS['rounds'],cycles=DEFAULTS['cycles'])
@@ -85,7 +91,7 @@ def validate(config, inspect=True):
         auto_cycles=int(cfg.get('dm_cycles',0))==int(DEFAULTS['dm_cycles'])
         if auto_cycles:cfg['dm_cycles']=40
         # 反馈轮数是本方法的核心步骤；2 轮是十套标定主要终点，未显式给出时启用。
-        if cfg.get('dm_engine')=='parrot' and int(cfg.get('feedback_cycles',0))==int(DEFAULTS['feedback_cycles']):
+        if cfg['dm_enabled'] and cfg.get('dm_engine')=='parrot' and int(cfg.get('feedback_cycles',0))==int(DEFAULTS['feedback_cycles']):
             cfg['feedback_cycles']=2
         # 标定配方固定使用 0.50 溶剂含量：Parrot 的掩膜对 1% 的差异敏感，
         # 7TFQ 在序列估计值 0.493 下从 36.9% 恶化到 49.1%。显式值优先。
@@ -328,6 +334,7 @@ def stage_plan(cfg, python=None):
                                else 'Parrot 密度修饰 + %d 轮工作集 trace/Fcalc 反馈'%cfg['feedback_cycles']),
             command=[python,'-u',str(root/'run_trace_feedback.py'),'--config',str(out/'pipeline_report.json'),'--output',str(dm)],
             outputs=[str(dm/'map_phases.mtz'),str(dm/'map_phases.json')])
+    if not cfg.get('dm_enabled',True):return stages[:2]
     return stages if cfg.get('build_model',True) else stages[:3]
 
 
@@ -478,10 +485,12 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
             artifacts=[fingerprint(path) for path in stage['outputs']]
             state['completed'].append(dict(id=stage['id'],name=stage['name'],artifacts=artifacts));save()
         if not cfg['build_model']:
-            state.update(status='completed',current='complete',current_name='定相与密度修饰完成（未启用建模）',
+            modified=bool(cfg.get('dm_enabled',True))
+            state.update(status='completed',current='complete',
+                         current_name=('定相与密度修饰完成（未启用建模）' if modified else 'P+ 定相完成（未启用密度修饰与建模）'),
                          primary_model=None,primary_metric=None,experimental_prior=fingerprint(out/'02_sad/observations.mtz'),
                          pre_dm_result=fingerprint(out/'02_sad/experimental.mtz'),
-                         dm_phases=fingerprint(out/'03_dm/map_phases.mtz'))
+                         dm_phases=fingerprint(out/'03_dm/map_phases.mtz') if modified else None)
             save();return state
         build_report=json.loads((out/'05_build/hybrid_report.json').read_text())
         if build_report.get('status')!='completed':raise RuntimeError('Construction/refinement endpoint is incomplete')

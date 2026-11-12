@@ -105,14 +105,16 @@ def make_plan(config, project, python=None, inspect=True):
         if '--'+key.replace('_','-') not in supported:continue
         if key=='build_semet':
             if value:command.append('--build-semet')
-        elif key in ('trust_cleanup','trust_stability','trust_partial_cleanup','trust_work_weight','auto_fpp','input_columns','auto_hand','canonical_dm_seed','per_round_cleanup','dm_anisotropy'):command.append('--'+key.replace('_','-') if value else '--no-'+key.replace('_','-'))
+        elif key in ('trust_cleanup','trust_stability','trust_partial_cleanup','trust_work_weight','auto_fpp','input_columns','auto_hand','canonical_dm_seed','per_round_cleanup','dm_anisotropy','dm_enabled'):command.append('--'+key.replace('_','-') if value else '--no-'+key.replace('_','-'))
         elif key=='build_model':command.append('--build-model' if value else '--no-build-model')
         elif key=='rank_fit':
             if value:command.append('--rank-fit')
         elif value is not None:command.extend(['--'+key.replace('_','-'),str(value)])
     checked.update(output=str(outer),mode='sad_to_model',explore=False,explore_workers=workers)
     if protocol is not None:checked['protocol']=protocol
-    return checked,[dict(name='OASIS4.3：定相 → 密度修饰'+(' → Buccaneer → REFMAC' if checked['build_model'] else '（未启用建模）'),kind='sad_to_model',
+    chain=(' → 密度修饰 → Buccaneer → REFMAC' if checked.get('dm_enabled',True) and checked['build_model']
+           else ' → 密度修饰（未启用建模）' if checked.get('dm_enabled',True) else '（精简版：只做 P+ 定相）')
+    return checked,[dict(name='OASIS4.3：定相'+chain,kind='sad_to_model',
                          output=str(outer/'00_sad_to_model'),command=command)]
 
 
@@ -196,6 +198,9 @@ def describe_plan(cfg):
     active['building_recipe']=cfg.get('building_recipe','legacy')
     if cfg.get('phase_blur_scale') is not None:active['phase_blur']={'SCBLUR':cfg['phase_blur_scale'],'BBLUR':cfg['phase_blur_b'],'policy':'预先声明的 DM 相位置信度修正，不按 Rfree 选择'}
     active['build_model']=cfg.get('build_model',True)
+    active['dm_enabled']=cfg.get('dm_enabled',True)
+    if not active['dm_enabled']:
+        active['dm_engine']='未启用（精简版只做 P+ 定相）'
     if cfg.get('feedback_endpoints'):
         active['feedback_endpoints']=cfg['feedback_endpoints']
         if cfg.get('dm_solvents'):active['dm_solvents']=cfg['dm_solvents']
@@ -307,6 +312,7 @@ def phase_statistics(path):
 
 def _engine_label(method,cfg,dm_meta):
  """Report the density-modification engine that actually ran, not the method default."""
+ if not cfg.get('dm_enabled',True):return '未启用（精简版只做 P+ 定相）'
  if cfg.get('dm_engine_requested')=='parrot' and cfg.get('dm_engine_fallback'):
   return '内置 RESOLVE/MLHL（Parrot 不可用，已回退）'
  engine=(dm_meta.get('parameters') or {}).get('engine') or cfg.get('dm_engine')
@@ -344,7 +350,8 @@ def collect_results(directory):
     report=read_json(pipe/'05_build/hybrid_report.json') if building else {}
     labels=[('prepare','输入核验'),('sad','P+ 优化' if cfg.get('method') in ('pplus_trust','pplus_internal','pplus_bundled') else 'SAD 定相'),('dm','密度修饰'),('bridge','建模地图'),('build','Buccaneer / REFMAC')]
     if cfg.get('method') in ('pplus_trust','pplus_internal','pplus_bundled'):labels.append(('finish','序列锚定去重 / 后精修' if cfg.get('trust_partial_cleanup') else '完整链清理 / 后精修'))
-    if not building:labels=labels[:3]
+    if not cfg.get('dm_enabled',True):labels=labels[:2]
+    elif not building:labels=labels[:3]
     stages=[]
     for key,label in labels:
         status='completed' if key in completed else state.get('status','waiting') if state.get('current')==key else 'waiting'
@@ -377,11 +384,18 @@ def collect_results(directory):
         metrics.append(dict(stage=post_label,round=cfg['rounds']+1,r_work=stats.get('r_work'),r_free=stats.get('r_free'),
             cycles=30,free_preserved=ref.get('free_flags_preserved'),engine='REFMAC · 振幅似然 / 固定权重',model=str((pipe/'06_finish/model.cif').relative_to(root))))
     pipeline_complete=state.get('status')=='completed'
-    if pipeline_complete and not building:
+    modified=bool(cfg.get('dm_enabled',True))
+    if pipeline_complete and not building and modified:
         expected=state.get('dm_phases',{}).get('sha256')
         phase_file=pipe/'03_dm/map_phases.mtz'
         if not phase_file.is_file() or not expected or fingerprint(phase_file)['sha256']!=expected:
             raise ValueError('最终密度修饰相位与流程记录的哈希不一致')
+    if pipeline_complete and not building and not modified:
+        # A lite run ends at phasing: certify that artifact instead.
+        expected=(state.get('pre_dm_result') or {}).get('sha256')
+        phase_file=pipe/'02_sad/experimental.mtz'
+        if not phase_file.is_file() or not expected or fingerprint(phase_file)['sha256']!=expected:
+            raise ValueError('最终 P+ 相位与流程记录的哈希不一致')
     complete=pipeline_complete and building and report.get('status')=='completed'
     model=pipe/'primary_model.cif' if complete else root/metrics[-1]['model'] if metrics else None
     if complete:
@@ -408,8 +422,15 @@ def collect_results(directory):
                          ('sad','02_sad/observations.mtz','SAD 纯观测似然 HL（用于 P+ 与密度修饰）' if cfg.get('refinement_prior')=='dm_phifom' else 'SAD 纯观测似然 HL（固定精修先验）'),
                          ('dm','03_dm/map_phases.mtz','密度修饰后相位与 FOM'),
                          ('bridge','04_bridge/building.mtz','初始 Buccaneer 建模地图')]:
-        if key in completed:add(pipe/name,'最终密度修饰相位与 FOM' if key=='dm' and not building and pipeline_complete else 'P+ 更新相位 / FOM / 概率（不含 HL）' if key=='sad' and name.endswith('experimental.mtz') and cfg.get('method') in ('pplus_trust','pplus_internal','pplus_bundled') else role,
-                              '主要结果' if key=='dm' and not building and pipeline_complete else '相位与地图')
+        if key in completed:
+            if key=='sad' and name.endswith('experimental.mtz') and not modified:
+                # The lite edition stops here, so this file is the deliverable.
+                add(pipe/name,'最终 P+ 相位与 FOM（精简版终点）','主要结果')
+            elif key=='dm' and not building and pipeline_complete:
+                add(pipe/name,'最终密度修饰相位与 FOM','主要结果')
+            else:
+                add(pipe/name,'P+ 更新相位 / FOM / 概率（不含 HL）' if key=='sad' and name.endswith('experimental.mtz') and cfg.get('method') in ('pplus_trust','pplus_internal','pplus_bundled') else role,
+                    '相位与地图')
     if complete:
         last=pipe/'05_build'/(('cycle_%02d'%cfg['rounds']) if build_report.get('status')=='completed' else ('round_%02d_refine'%cfg['rounds']))
         add(last/(('refine.mtz') if build_report.get('status')=='completed' else 'refined.mtz'),'最后一轮精修地图','主要结果')
@@ -466,7 +487,7 @@ def collect_results(directory):
                 sample=raw_meta.get('sequence_asu',{}),anomalous_scattering=state.get('anomalous_scattering'),
                 primary_metric=metrics[-1] if metrics else None,primary_complete=complete,
                 build_model=building,pipeline_complete=pipeline_complete,
-                final_phases=str((pipe/'03_dm/map_phases.mtz').relative_to(root)) if pipeline_complete and not building else None,
+                final_phases=str(((pipe/'03_dm/map_phases.mtz') if modified else (pipe/'02_sad/experimental.mtz')).relative_to(root)) if pipeline_complete and not building else None,
                 final_model=str(model.relative_to(root)) if model and model.is_file() else None,
                 preview=preview,residues=sum(len(c['points']) for c in preview),chains=len(preview),
                 artifacts=artifacts,error=state.get('error'),selection_policy=endpoint.get('selection','fixed_final_round'),cleanup_status=endpoint.get('cleanup_status'),cleanup_reason=endpoint.get('cleanup_reason'),cleanup_kind=endpoint.get('cleanup_kind'))
@@ -522,7 +543,8 @@ def enrich_job(job):
         label='第 %d / %d 轮 · %s'%(round_number,state['config']['rounds'],'REFMAC 精修' if sub=='refmac' else 'Buccaneer 构建')
         folder=pipe/'05_build'/('round_%02d_%s'%(round_number,'refine' if sub=='refmac' else 'build'))
         logs+=list(folder.glob('*.log'))
-    job['pipeline_progress']=dict(completed=len(state.get('completed',[])),total=(6 if state['config'].get('method') in ('pplus_trust','pplus_internal','pplus_bundled') else 5) if state['config'].get('build_model',True) else 3,current=label,
+    lite=not state['config'].get('dm_enabled',True)
+    job['pipeline_progress']=dict(completed=len(state.get('completed',[])),total=2 if lite else (6 if state['config'].get('method') in ('pplus_trust','pplus_internal','pplus_bundled') else 5) if state['config'].get('build_model',True) else 3,current=label,
                                   revision=[state.get('updated'),build.get('current'),len(build.get('stages',[]))])
     parts=[]
     for path in logs:

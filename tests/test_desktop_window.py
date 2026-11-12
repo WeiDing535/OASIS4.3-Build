@@ -54,7 +54,7 @@ def test_every_method_carries_a_hint_and_the_internal_route_is_flagged():
 def test_protocol_and_engine_labels_round_trip():
     for key,label in desktop.PROTOCOLS:
         assert dict((label,value) for value,label in desktop.PROTOCOLS)[label]==key
-    assert dict(desktop.ENGINES)['parrot']=='CCP4 Parrot 密度修饰（推荐）'
+    assert dict(desktop.ENGINES)['parrot']=='CCP4 Parrot（推荐）'
 
 
 def fill(app,values):
@@ -462,7 +462,7 @@ def test_window_names_relaunches_and_deletes_history_rows(tmp_path,monkeypatch):
     controller=desktop.Controller(project(tmp_path))
     config=dict(controller.defaults(),sad=str(tmp_path/'old.mtz'),heavy=str(tmp_path/'old.pdb'),
                 sequence=str(tmp_path/'old.fasta'),wavelength=0.97918,copies=2,
-                output=str(tmp_path/'old_run'),dm_cycles=12)
+                output=str(tmp_path/'old_run'),seed=7)
     rows=[dict(id='done',created=100,updated=110,status='success',output=str(tmp_path/'old_run'),
                name='7E1D 重跑',completed=6,total=6,error=None,method='pplus_bundled',
                label='old.mtz',method_name='P+ 自带引擎',r_work=0.28,r_free=0.31),
@@ -498,7 +498,7 @@ def test_window_names_relaunches_and_deletes_history_rows(tmp_path,monkeypatch):
         assert app.fields['sad']['var'].get()==str(tmp_path/'old.mtz')
         assert app.fields['wavelength']['var'].get()=='0.97918'
         assert app.task_name.get()=='7E1D 重跑'
-        assert app.advanced.get() is True            # dm_cycles was not the default
+        assert app.advanced.get() is True            # seed was not the default
         output=app.fields['output']['var'].get()
         assert output!=str(tmp_path/'old_run') and Path(output).name.startswith('oasis_')
         assert app.tabs.index(app.tabs.select())==4  # the plan page shows the reused setup
@@ -613,5 +613,52 @@ def test_results_page_draws_the_r_work_and_r_free_curve(tmp_path):
         texts=[app.chart.canvas.itemcget(item,'text') for item in app.chart.canvas.find_all()
                if app.chart.canvas.type(item)=='text']
         assert any('至少两轮' in text for text in texts)
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_optional_modules_follow_ccp4_detection_and_gate_building(tmp_path,monkeypatch):
+    """Parrot and Buccaneer default on when CCP4 is found, off with a notice when not."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    from phasebuild import module_detection
+    def report(parrot,build):
+        modules={'parrot':dict(title='Parrot 密度修饰',available=parrot,path=None,reason=''),
+                 'build':dict(title='Buccaneer 建模 + REFMAC 精修',available=build,path=None,
+                              reason='',refmac=build)}
+        return dict(available=parrot or build,modules=modules,summary='',
+                    ccp4_ready=parrot and build,searched=[])
+    monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None: report(False,False))
+    app=desktop.App(desktop.Controller(project(tmp_path)))
+    try:
+        app.root.update_idletasks()
+        app.fields['wavelength']['var'].set('0.97918')
+        app.fields['copies']['var'].set('1')
+        assert app.module_parrot.get() is False and app.module_build.get() is False
+        assert str(app.build_check.cget('state'))=='disabled'
+        hint=app.module_hint.get()
+        assert '未检测到 CCP4' in hint and '模块 1 输出相位' in hint
+        values=app.collect()
+        assert values['dm_enabled'] is False and values['build_model'] is False
+        monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None: report(True,True))
+        app._detect_modules()
+        assert app.module_parrot.get() is True and app.module_build.get() is True
+        assert '已检测到 CCP4' in app.module_hint.get()
+        assert str(app.build_check.cget('state'))=='normal'
+        values=app.collect()
+        assert values['dm_enabled'] is True and values['build_model'] is True
+        app.module_parrot.set(False);app._modules_changed()
+        assert app.module_build.get() is False
+        assert str(app.build_check.cget('state'))=='disabled'
+        assert '模块 2 已关闭' in app.module_hint.get()
+        assert str(app.fields['dm_cycles']['row'].winfo_children()[1].cget('state'))=='disabled'
+        values=app.collect()
+        assert values['dm_enabled'] is False and values['build_model'] is False
+        app.module_parrot.set(True);app._modules_changed()
+        assert str(app.fields['dm_cycles']['row'].winfo_children()[1].cget('state'))=='normal'
     finally:
         app.root.destroy()

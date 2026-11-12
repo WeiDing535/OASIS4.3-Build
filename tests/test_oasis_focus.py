@@ -210,6 +210,28 @@ def test_desktop_phases_only_job_is_successful_and_reports_three_stages(inputs,t
     assert workflow.collect_results(job['output'])['final_phases']=='00_sad_to_model/03_dm/map_phases.mtz'
 
 
+def test_lite_job_reports_two_stages_and_certifies_the_sad_phases(inputs,tmp_path):
+    """The lite edition stops after P+: phases, FOM and an MTZ, no map, no model."""
+    from phasebuild.jobs import Jobs
+    project=tmp_path/'project';project.mkdir()
+    (project/'run_sad_to_model.py').symlink_to(root()/'run_sad_to_model.py')
+    jobs=Jobs(project,workflow=workflow)
+    job=jobs.start({**inputs,'dm_enabled':False,'build_model':False,'runtime':''})
+    jobs.worker.join(timeout=25)
+    saved=jobs.get(job['id'])
+    assert saved['status']=='success',saved.get('log')
+    assert saved['pipeline_progress']['total']==saved['pipeline_progress']['completed']==2
+    assert len(saved['plan']['stages'])==2 and '精简版' in saved['steps'][0]['name']
+    result=workflow.collect_results(job['output'])
+    assert result['pipeline_complete'] and not result['primary_complete']
+    assert len(result['stages'])==2 and result['final_model'] is None and result['metrics']==[]
+    assert result['final_phases']=='00_sad_to_model/02_sad/experimental.mtz'
+    assert result['dm_engine'] and '未启用' in result['dm_engine']
+    assert any(f['group']=='主要结果' and f['path']==result['final_phases'] for f in result['artifacts'])
+    (Path(job['output'])/result['final_phases']).write_bytes(b'tampered')
+    with pytest.raises(ValueError,match='哈希'):workflow.collect_results(job['output'])
+
+
 def test_fixed_endpoint_grid_reports_its_retained_endpoint(tmp_path):
     """--feedback-endpoints keeps one pipeline per endpoint; the front ends must
     resolve the selection instead of reporting an empty case root."""

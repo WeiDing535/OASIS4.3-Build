@@ -153,6 +153,22 @@ def test_native_combined_phase_fails_before_any_expensive_stage(inputs):
     for name,content in original.items():assert Path(inputs[name]).read_bytes()==content
 
 
+def test_lite_plan_stops_after_phasing_and_refuses_to_build(tmp_path,inputs):
+    """Without density modification there is no modified map, so nothing is built."""
+    config=dict(inputs,output=str(tmp_path/'lite'),dm_enabled=False,build_model=False)
+    cfg=pipeline.validate(config)
+    assert [stage['id'] for stage in pipeline.stage_plan(cfg)]==['prepare','sad']
+    assert cfg['feedback_cycles']==0          # no trace feedback without DM
+    assert cfg['dm_enabled'] is False
+    with pytest.raises(ValueError,match='Buccaneer'):
+        pipeline.validate(dict(config,build_model=True))
+
+
+def test_dm_enabled_keeps_the_full_plan(tmp_path,inputs):
+    cfg=pipeline.validate(dict(inputs,output=str(tmp_path/'full'),dm_enabled=True,build_model=True))
+    assert [stage['id'] for stage in pipeline.stage_plan(cfg)]==['prepare','sad','dm','bridge','build']
+
+
 def test_conflicting_original_flags_fail_before_output(tmp_path,inputs):
     p=Path(inputs['sad']);m=gemmi.read_mtz_file(str(p));a=np.array(m,copy=True);a[0,-1]=3;m.set_data(a);m.write_to_file(str(p))
     target=tmp_path/'prepared.mtz'

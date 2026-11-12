@@ -39,8 +39,8 @@ METHOD_HINTS={
  'pplus':'旧版直接法 P+：保留用于复现历史结果。'}
 PROTOCOLS=[('','不使用参数方案'),('pplus_w8_weight','P+ · Wang8＋精修权重搜索（标定配方）'),
            ('pplus_w8','P+ · Wang8'),('pplus_w14','P+ · Wang14'),('stable_w14','稳定化 P+ · Wang14')]
-RECIPES=[('pipeline','自带 Buccaneer/REFMAC 流程（推荐）'),('ccp4','外部 CCP4 流程'),('legacy','旧版逐轮流程')]
-ENGINES=[('parrot','CCP4 Parrot 密度修饰（推荐）'),('resolve','RESOLVE 密度修饰')]
+RECIPES=[('pipeline','自带 Buccaneer/REFMAC'),('ccp4','外部 CCP4 流程'),('legacy','旧版逐轮流程')]
+ENGINES=[('parrot','CCP4 Parrot（推荐）'),('resolve','RESOLVE 密度修饰')]
 PRIORS=[('dm_phifom','密度修饰相位 + 模型振幅'),('original_sad','原始 SAD 相位')]
 
 # key, title, kind, hint, options, only-methods
@@ -58,6 +58,8 @@ FIELD_SPECS=[
  ('solvent_fraction','溶剂比例（留空自动估算）','optional','0–1 之间；留空按序列与晶胞估算。',None,None),
  ('phase_cycles','定相迭代周期','int','1–100。',None,None),
  ('dm_cycles','密度修饰周期','int','1–100；标定配方为 40。',None,None),
+ ('dm_mask_radius','掩膜过滤半径（Å）','float','Parrot 溶剂掩膜的过滤半径；默认 3.0。',None,None),
+ ('feedback_cycles','trace 反馈轮数','int','每轮用部分模型 Fcalc 反馈给密度修饰；0 表示不反馈，标定配方为 2–3。',None,None),
  ('rounds','Buccaneer / REFMAC 轮数','int','1–20；默认 5 轮。',None,None),
  ('cycles','每轮 REFMAC 精修周期','int','1–200；默认每轮 10 周期。',None,None),
  ('trust_wang_radius','单流程 Wang 掩膜半径（Å）','float','仅单流程使用；多流程固定 14 / 8 Å。',None,('pplus_trust','pplus_bundled')),
@@ -74,13 +76,13 @@ FIELD_SPECS=[
 
 # What an experiment needs is on the form; the calibrated constants, the run
 # resources and the rare overrides wait behind “显示高级参数”.
-ESSENTIAL_GROUPS=[('输入文件',('sad','heavy','sequence','elements','wavelength','output')),
-                  ('样本与密度修饰',('copies','solvent_fraction')),
-                  ('建模与精修',('rounds','cycles'))]
+ESSENTIAL_GROUPS=[('输入文件',('sad','heavy','sequence','elements','wavelength','copies','output')),
+                  ('P+ 定相',('phase_cycles','trust_kl','max_per_target')),
+                  ('Parrot 密度修饰',('solvent_fraction','dm_cycles','dm_mask_radius','feedback_cycles')),
+                  ('Buccaneer / REFMAC',('rounds','cycles','runtime'))]
 ADVANCED_GROUPS=[('输入细节',('native','observation_prior','composition_sequence','labels','free_value')),
-                 ('循环与采样',('phase_cycles','dm_cycles','max_per_target','seed')),
-                 ('P+ 优化',('trust_wang_radius','trust_kl')),
-                 ('运行资源与终点组合',('reference','runtime','feedback_endpoints','dm_solvents'))]
+                 ('P+ 掩膜与采样',('trust_wang_radius','seed')),
+                 ('运行资源与终点组合',('reference','feedback_endpoints','dm_solvents'))]
 
 
 class Controller:
@@ -231,7 +233,7 @@ class App:
         tk,ttk=self.tk,self.ttk
         bar=ttk.Frame(self.root,padding=(10,8));bar.pack(side='top',fill='x')
         ttk.Label(bar,text='OASIS4.3',font=('Helvetica',16,'bold')).pack(side='left')
-        ttk.Label(bar,text='单波长异常散射 → 密度修饰 → Buccaneer → REFMAC',
+        ttk.Label(bar,text='单波长异常散射 → 密度修饰（可选）→ Buccaneer / REFMAC（可选）',
                   style='Hint.TLabel').pack(side='left',padx=(10,0),pady=(4,0))
         self.status=ttk.Label(bar,text='就绪',style='Status.TLabel')
         self.status.pack(side='right')
@@ -370,53 +372,78 @@ class App:
         ttk.Entry(row,textvariable=self.task_name).pack(side='left',fill='x',expand=True)
         ttk.Label(task,text='可选：给这次任务起个名字（如“7E1D 重跑”），任务记录里显示它，'
                             '相同参数、不同数据也能一眼分清。',
-                  style='Hint.TLabel',wraplength=520,justify='left').pack(fill='x',padx=(2,0))
-        box=self._section('定相方法')
-        self.method=self.tk.StringVar(value=self.defaults.get('method','pplus_bundled'))
-        for key,label in METHODS:
-            ttk.Radiobutton(box,text=label,value=key,variable=self.method,
-                            command=self._method_changed).pack(anchor='w')
-        self.method_hint=self.tk.StringVar(value=METHOD_HINTS.get(self.method.get(),''))
-        ttk.Label(box,textvariable=self.method_hint,style='Hint.TLabel',wraplength=340,
+                  style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
+        modules=self._section('运行模块（按本机 CCP4 检测结果默认勾选）')
+        row=ttk.Frame(modules);row.pack(fill='x',pady=2)
+        self.module_phase=self.tk.BooleanVar(value=True)
+        ttk.Checkbutton(row,text='模块 1 · P+ 定相（必做）',variable=self.module_phase,
+                        state='disabled').pack(side='left')
+        self.module_parrot=self.tk.BooleanVar(value=True)
+        self.parrot_check=ttk.Checkbutton(row,text='模块 2 · Parrot 密度修饰',
+                                          variable=self.module_parrot,command=self._modules_changed)
+        self.parrot_check.pack(side='left',padx=(18,0))
+        row=ttk.Frame(modules);row.pack(fill='x',pady=(2,0))
+        self.module_build=self.tk.BooleanVar(value=True)
+        self.build_check=ttk.Checkbutton(row,text='模块 3 · Buccaneer 建模 + REFMAC 精修',
+                                         variable=self.module_build,command=self._modules_changed)
+        self.build_check.pack(side='left')
+        ttk.Button(row,text='重新检测 CCP4',command=self._detect_modules).pack(side='left',padx=(12,0))
+        self.module_hint=self.tk.StringVar(value='正在检测本机 CCP4…')
+        ttk.Label(modules,textvariable=self.module_hint,style='Hint.TLabel',wraplength=340,
                   justify='left').pack(fill='x',padx=(2,0),pady=(4,0))
-        row=ttk.Frame(box);row.pack(fill='x',pady=(4,0))
-        ttk.Label(row,text='P+ 参数方案').pack(side='left')
-        self.protocol=self.tk.StringVar(value='')
-        ttk.Combobox(row,textvariable=self.protocol,values=[label for _,label in PROTOCOLS],
-                     state='readonly',width=34).pack(side='left',padx=6)
+        self._detect_modules(initial=True)
 
         inputs=self._section('输入文件')
         for key in ESSENTIAL_GROUPS[0][1]:
             self._field(inputs,specs[key])
 
-        sample=self._section('样本与密度修饰')
+        phase=self._section('① P+ 定相参数')
+        self.method=self.tk.StringVar(value=self.defaults.get('method','pplus_bundled'))
+        for key,label in METHODS:
+            ttk.Radiobutton(phase,text=label,value=key,variable=self.method,
+                            command=self._method_changed).pack(anchor='w')
+        self.method_hint=self.tk.StringVar(value=METHOD_HINTS.get(self.method.get(),''))
+        ttk.Label(phase,textvariable=self.method_hint,style='Hint.TLabel',wraplength=340,
+                  justify='left').pack(fill='x',padx=(2,0),pady=(4,0))
+        row=ttk.Frame(phase);row.pack(fill='x',pady=(4,0))
+        ttk.Label(row,text='P+ 参数方案').pack(side='left')
+        self.protocol=self.tk.StringVar(value='')
+        ttk.Combobox(row,textvariable=self.protocol,values=[label for _,label in PROTOCOLS],
+                     state='readonly',width=34).pack(side='left',padx=6)
         for key in ESSENTIAL_GROUPS[1][1]:
-            self._field(sample,specs[key])
-        row=ttk.Frame(sample);row.pack(fill='x',pady=2)
-        ttk.Label(row,text='密度修饰引擎',width=26,anchor='w').pack(side='left')
-        self.dm_engine=self.tk.StringVar(value='parrot')
-        ttk.Combobox(row,textvariable=self.dm_engine,values=[label for _,label in ENGINES],
-                     state='readonly',width=30).pack(side='left')
-        ttk.Label(sample,text='Parrot 是十案例标定的配方。内部密度修饰只能由命令行/环境变量开启，'
-                              '属实验性（图相关 0.56 vs Parrot 0.69），窗口里不提供。',
-                  style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
+            self._field(phase,specs[key])
 
-        build=self._section('建模与精修')
-        row=ttk.Frame(build);row.pack(fill='x',pady=2)
-        self.build_model=self.tk.BooleanVar(value=True)
-        ttk.Checkbutton(row,text='Buccaneer 建模 + REFMAC 精修',variable=self.build_model).pack(side='left')
-        self.auto_hand=self.tk.BooleanVar(value=True)
-        ttk.Checkbutton(row,text='自动判手（双手试建，不用 R-free）',variable=self.auto_hand).pack(side='left',padx=12)
+        dm=self._section('② Parrot 密度修饰参数')
+        row=ttk.Frame(dm);row.pack(fill='x',pady=2)
+        ttk.Label(row,text='密度修饰引擎',width=18,anchor='w').pack(side='left')
+        self.dm_engine=self.tk.StringVar(value='parrot')
+        self.dm_engine_box=ttk.Combobox(row,textvariable=self.dm_engine,values=[label for _,label in ENGINES],
+                                        state='readonly',width=22)
+        self.dm_engine_box.pack(side='left',fill='x',expand=True,padx=(0,2))
+        ttk.Label(dm,text='Parrot 是十案例标定的配方。内部密度修饰只能由命令行/环境变量开启，'
+                          '属实验性（图相关 0.56 vs Parrot 0.69），窗口里不提供。',
+                  style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
         for key in ESSENTIAL_GROUPS[2][1]:
+            self._field(dm,specs[key])
+
+        build=self._section('③ Buccaneer 建模 + REFMAC 精修参数')
+        row=ttk.Frame(build);row.pack(fill='x',pady=2)
+        self.auto_hand=self.tk.BooleanVar(value=True)
+        self.auto_hand_box=ttk.Checkbutton(row,text='自动判手（双手试建，不用 R-free）',variable=self.auto_hand)
+        self.auto_hand_box.pack(side='left')
+        for key in ESSENTIAL_GROUPS[3][1]:
             self._field(build,specs[key])
         for key,title,values,var in [('building_recipe','构建配方',RECIPES,'recipe'),
                                      ('refinement_prior','精修相位来源',PRIORS,'prior')]:
             row=ttk.Frame(build);row.pack(fill='x',pady=2)
-            ttk.Label(row,text=title,width=26,anchor='w').pack(side='left')
+            ttk.Label(row,text=title,width=18,anchor='w').pack(side='left')
             variable=self.tk.StringVar(value=values[0][1])
-            ttk.Combobox(row,textvariable=variable,values=[label for _,label in values],
-                         state='readonly',width=30).pack(side='left')
-            setattr(self,var,variable);setattr(self,var+'_values',values)
+            box=ttk.Combobox(row,textvariable=variable,values=[label for _,label in values],
+                             state='readonly',width=22)
+            box.pack(side='left',fill='x',expand=True,padx=(0,2))
+            setattr(self,var,variable);setattr(self,var+'_values',values);setattr(self,var+'_box',box)
+        # One name for the module-3 switch: saved jobs and tests use build_model.
+        self.build_model=self.module_build
 
         # The advanced parameters stay out of the way until they are asked for:
         # they are calibrated constants or run resources, not experiment inputs.
@@ -453,7 +480,7 @@ class App:
             ttk.Entry(row,textvariable=var).pack(side='left',fill='x',expand=True)
         else:
             ttk.Entry(row,textvariable=var,width=16).pack(side='left')
-        ttk.Label(parent,text=hint,style='Hint.TLabel',wraplength=520,
+        ttk.Label(parent,text=hint,style='Hint.TLabel',wraplength=340,
                   justify='left').pack(fill='x',padx=(2,0))
         self.fields[key]=dict(var=var,kind=kind,title=title,only=only,row=row)
 
@@ -472,8 +499,87 @@ class App:
         if path:
             var.set(path)
 
+    # ------------------------------------------------------------- modules
+    def _detect_modules(self,initial=False):
+        """Default the optional modules from what this machine actually has."""
+        from . import module_detection
+        runtime=self.defaults.get('runtime') or None
+        field=getattr(self,'fields',{}).get('runtime')
+        if field is not None:
+            runtime=field['var'].get().strip() or runtime
+        self._module_report=module_detection.detect(runtime)
+        modules=self._module_report['modules']
+        self.module_parrot.set(modules['parrot']['available'])
+        self.module_build.set(modules['build']['available'])
+        self._modules_changed()
+
+    def _modules_changed(self,*_):
+        """Building needs a density-modified map, so module 3 follows module 2."""
+        modules=(getattr(self,'_module_report',None) or {}).get('modules') or {}
+        parrot_ok=bool((modules.get('parrot') or {}).get('available'))
+        build_ok=bool((modules.get('build') or {}).get('available'))
+        if not parrot_ok:
+            self.module_parrot.set(False)      # a reused record cannot ask for what is missing
+        if not self.module_parrot.get():
+            self.module_build.set(False)
+        self.parrot_check.configure(state='normal' if parrot_ok else 'disabled')
+        self.build_check.configure(state='normal' if build_ok and self.module_parrot.get() else 'disabled')
+        if not self.module_build.get():
+            hand=getattr(self,'auto_hand',None)
+            if hand is not None:
+                hand.set(False)
+        self._sync_module_state()
+        self._refresh_module_hint()
+
+    def _sync_module_state(self):
+        on={'parrot':self.module_parrot.get(),'build':self.module_build.get()}
+        for index,module in ((2,'parrot'),(3,'build')):
+            state='normal' if on[module] else 'disabled'
+            for key in ESSENTIAL_GROUPS[index][1]:
+                field=getattr(self,'fields',{}).get(key)
+                if not field:
+                    continue
+                if key=='runtime':
+                    continue    # the user may point detection at a CCP4 bin dir
+                for child in field['row'].winfo_children()[1:]:
+                    try:
+                        child.configure(state=state)
+                    except Exception:
+                        pass
+        for name,module,enabled in [('dm_engine_box','parrot','readonly'),('auto_hand_box','build','normal'),
+                                    ('recipe_box','build','readonly'),('prior_box','build','readonly')]:
+            widget=getattr(self,name,None)
+            if widget is None:
+                continue
+            try:
+                widget.configure(state=enabled if on[module] else 'disabled')
+            except Exception:
+                pass
+        self._method_changed()
+
+    def _refresh_module_hint(self):
+        report=getattr(self,'_module_report',None) or {}
+        modules=report.get('modules') or {}
+        lines=[]
+        if report.get('ccp4_ready'):
+            lines.append('已检测到 CCP4：模块 2、3 默认勾选，可随时取消。')
+        elif report.get('available'):
+            missing=[item['title'] for item in modules.values() if not item['available']]
+            lines.append('只检测到部分 CCP4：默认勾选可用模块；未找到 '+'、'.join(missing)+'。')
+        else:
+            lines.append('未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1。')
+            lines.append('模块 1 输出相位、FOM 与 MTZ；需要密度修饰或建模，请安装 CCP4 或设置 CCP4/CBIN 后点“重新检测”。')
+        if not self.module_parrot.get():
+            lines.append('模块 2 已关闭：跳过密度修饰，直接输出 P+ 相位；模块 3 需要修饰后的图，已一并关闭。')
+        elif not self.module_build.get():
+            lines.append('模块 3 已关闭：停在密度修饰后的相位与地图。')
+        self.module_hint.set('\n'.join(lines))
+
     def _method_changed(self,*_):
-        method=self.method.get()
+        variable=getattr(self,'method',None)
+        if variable is None:
+            return
+        method=variable.get()
         hint=getattr(self,'method_hint',None)
         if hint is not None:
             hint.set(METHOD_HINTS.get(method,''))
@@ -502,10 +608,15 @@ class App:
         engine=dict(ENGINES).get(values.get('dm_engine'))
         if engine:
             self.dm_engine.set(engine)
-        if 'build_model' in values:
-            self.build_model.set(bool(values['build_model']))
-        if 'auto_hand' in values:
-            self.auto_hand.set(bool(values['auto_hand']))
+        # Module 2/3 start from what this machine has; a reused record keeps its
+        # own choice, so only a real config (strict=False) may override them.
+        if not strict:
+            if 'dm_enabled' in values:
+                self.module_parrot.set(bool(values['dm_enabled']))
+            if 'build_model' in values:
+                self.build_model.set(bool(values['build_model']))
+            if 'auto_hand' in values:
+                self.auto_hand.set(bool(values['auto_hand']))
         protocol=values.get('protocol','')
         label=dict(PROTOCOLS).get(protocol)
         if label:
@@ -517,6 +628,8 @@ class App:
             if isinstance(value,bool):
                 value=''
             field['var'].set('' if value is None else str(value))
+        if hasattr(self,'module_hint'):
+            self._modules_changed()
 
     def collect(self):
         values=dict(self.defaults)
@@ -546,8 +659,9 @@ class App:
         values['dm_engine']=dict((label,key) for key,label in ENGINES).get(self.dm_engine.get(),'parrot')
         values['building_recipe']=dict((label,key) for key,label in RECIPES).get(self.recipe.get(),'pipeline')
         values['refinement_prior']=dict((label,key) for key,label in PRIORS).get(self.prior.get(),'dm_phifom')
-        values['build_model']=bool(self.build_model.get())
-        values['auto_hand']=bool(self.auto_hand.get())
+        values['dm_enabled']=bool(self.module_parrot.get())
+        values['build_model']=bool(self.build_model.get()) and values['dm_enabled']
+        values['auto_hand']=bool(self.auto_hand.get()) and values['build_model']
         protocol=dict((label,key) for key,label in PROTOCOLS).get(self.protocol.get(),'')
         if protocol:
             values['protocol']=protocol
@@ -636,6 +750,7 @@ class App:
         self._fill(self.controller.defaults())
         self.task_name.set('')
         self.fields['output']['var'].set(str(self._fresh_output()))
+        self._detect_modules()
         self._method_changed()
         self.progress.configure(value=0)
         self.stop_button.configure(state='disabled')

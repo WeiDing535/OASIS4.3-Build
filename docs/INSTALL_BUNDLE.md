@@ -97,6 +97,18 @@ dist/OASIS4.3-portable/
 - 目标机器必须与构建机器同架构：这里产出的是 macOS Intel x86_64；Apple Silicon 需要先有 arm64 的 CCP4 运行时。
 - 这个包只在你（或你的组）已有的授权范围内使用，**不要把它当公开发行包再分发**。
 
+### 窗口里的三个模块与 CCP4 检测
+
+`./oasis gui` 的表单把流程拆成三个模块：① P+ 定相（必做）、② Parrot 密度修饰、③ Buccaneer/REFMAC。后两个是 CCP4 程序，启动时按以下顺序找可执行文件：表单里的"运行目录"`bin/` → `CBIN`/`CCP4_BIN`/`OASIS_CCP4_BIN` → `CCP4`/`CCP4_ROOT` → `/Applications/ccp4-*/bin`、`/opt/ccp4*/bin`、`/usr/local/ccp4*/bin` → `PATH`。
+
+- 找到 `cparrot`：模块 2 默认勾选；找到 `cbuccaneer` **且** `refmac5`：模块 3 默认勾选。
+- 都没找到：两个模块默认关闭、参数组置灰，提示"未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1"。装上 CCP4 或设好 `CCP4`/`CBIN` 后点「重新检测」即可。
+- 模块 3 依赖模块 2（Buccaneer 从密度修饰后的图开始建）；关掉模块 2 会自动关掉并置灰模块 3。
+
+只勾模块 1 就是精简版：输出 `02_sad/experimental.mtz`（相位/FOM/PPLUS）与 `observations.mtz`，**没有模型、没有 R-free**。3O2E 实测约 2 分钟、5763 反射、mean FOM 0.482、图相关 0.123（三段链是 0.549）。命令行等价写法是 `--lite` 或 `--no-dm-enabled`，详见 `docs/LITE_MODULE_20261112.md`。
+
+注意：免安装包自带的运行时里已经含 Phaser 前端与 Parrot/Buccaneer/REFMAC，所以只要包完整，检测就会通过，不需要目标机器另装 CCP4；`docs/INSTALL_BUNDLE.md` 方式 C（纯源码）才需要本机 CCP4。
+
 ## 方式 B：从维护者处拿现成构建（私有分发）
 
 只带四个引擎的包压缩后很小，不需要分卷：
@@ -193,3 +205,4 @@ python -B package_oasis.py --output /new/path.zip
 - `packaging/build_installation_free.py` —— 组装免安装包并跑干净环境自检
 - `packaging/audit_linux_runtime.py` —— Linux 运行时审计（尚未提供完整包）
 - `package_oasis.py` —— 精简源码包
+- `src/phasebuild/module_detection.py` —— 窗口启动时的 CCP4 模块检测（找不到是正常返回值）
