@@ -31,7 +31,7 @@ def phase(cfg,output):
     from oasis_py.phasing import sad_hl
     from oasis_py.relations import build_relations
     out=Path(output);data,single,input_meta=read_sad_pairs(cfg['prepared_sad'],free_label=FLAG,free_value=cfg['free_value'])
-    seq=sample_info(cfg,data);heavy=read_atoms(cfg['heavy'],data)
+    seq=sample_info(cfg,data);heavy=read_atoms(cfg['heavy'],data,project_anisotropic=True)
     fpp={gemmi.Element(k).name:float(v) for k,v in pairs(cfg['fpp']).items()}
     raw=structure_factors(data,heavy,fpp);alpha,fit=fit_anomalous_scale(data,raw)
     sf=alpha*raw;error=.1;sigma=np.hypot(data.sigdano,error*abs(sf))

@@ -237,7 +237,7 @@ def validate(config, inspect=True):
         if bundled:
             from .heavy_scattering import read_heavy
             heavy=read_heavy(cfg['heavy'],data)
-        else:heavy=read_atoms(cfg['heavy'],data)
+        else:heavy=read_atoms(cfg['heavy'],data,project_anisotropic=True)
         import gemmi
         elements={}
         for name,value in pairs(cfg['fpp']).items():

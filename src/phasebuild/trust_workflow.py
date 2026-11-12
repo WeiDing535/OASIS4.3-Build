@@ -61,7 +61,7 @@ def read_inputs(cfg, sad_path):
     if cfg.get('method')=='pplus_bundled':
         from .heavy_scattering import read_heavy
         heavy=read_heavy(cfg['heavy'],data)
-    else:heavy=read_atoms(cfg['heavy'],data)
+    else:heavy=read_atoms(cfg['heavy'],data,project_anisotropic=True)
     fpp={gemmi.Element(k).name:float(v) for k,v in pairs(cfg['fpp']).items()}
     return data,prior,seq,heavy,fpp,meta
 

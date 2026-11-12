@@ -256,25 +256,43 @@ def read_structure_checked(path):
     return gemmi.read_structure(str(path)),repairs
 
 
-def read_atoms(path,data):
+def read_atoms(path,data,project_anisotropic=False):
+    """Read atoms as fractional coordinates with isotropic ADPs.
+
+    The native phasing prototype is isotropic only.  Anisotropic input
+    (ANISOU records) is refused by default; with project_anisotropic=True the
+    ADP tensor is projected onto U_iso = trace(U)/3 instead, which is what the
+    isotropic model can represent.  The projection is reported as a warning so
+    that a downstream comparison cannot silently mix the two models.
+    """
     st,_=read_structure_checked(path)
     if len(st)!=1: raise ValueError('Use a single-model coordinate file')
     if st.cell.is_crystal() and not np.allclose(st.cell.parameters,data.cell.parameters,rtol=1e-4,atol=1e-3):
         raise ValueError('Model and reflection unit cells differ; reindex/transform first')
     if st.spacegroup_hm and gemmi.SpaceGroup(st.spacegroup_hm).operations()!=data.spacegroup.operations():
         raise ValueError('Model and reflection space-group settings differ')
-    xyz=[];elements=[];occ=[];b=[]
+    xyz=[];elements=[];occ=[];b=[];projected=[]
     for chain in st[0]:
         for residue in chain:
             for atom in residue:
                 if atom.occ<=0: continue
                 if atom.element.atomic_number==0:
                     raise ValueError(f'Unknown element at {chain.name}/{residue.seqid}/{atom.name}')
+                b_iso=atom.b_iso
                 if atom.aniso.nonzero():
-                    raise ValueError('Native prototype supports isotropic ADPs; use reference backend for anisotropic models')
+                    if not project_anisotropic:
+                        raise ValueError('Native prototype supports isotropic ADPs; use reference backend for anisotropic models')
+                    if not b_iso>0:
+                        tensor=atom.aniso
+                        b_iso=8*np.pi**2*(tensor.u11+tensor.u22+tensor.u33)/3
+                    projected.append(f'{chain.name}/{residue.seqid}/{atom.name}')
                 p=data.cell.fractionalize(atom.pos)
                 xyz.append([p.x,p.y,p.z]);elements.append(atom.element.name)
-                occ.append(atom.occ);b.append(atom.b_iso)
+                occ.append(atom.occ);b.append(b_iso)
+    if projected:
+        warnings.warn(f'{path}: projected {len(projected)} anisotropic ADP(s) onto U_iso '
+                      f'(trace(U)/3) for the isotropic native model; first {projected[0]}',
+                      UserWarning,stacklevel=2)
     return Atoms(xyz,elements,occ,b)
 
 
