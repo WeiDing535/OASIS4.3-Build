@@ -174,9 +174,9 @@ def test_parrot_layout_does_not_require_the_resolve_density_tree(tmp_path, monke
         binary.write_text('#!/bin/sh\n')
         binary.chmod(0o755)
     assert engine_layout(runtime, 'parrot') == (runtime.resolve(), None)
-    with pytest.raises(ValueError, match='自带引擎缺失'):
+    with pytest.raises(ValueError, match='P\\+ 引擎缺失'):
         engine_layout(runtime, 'resolve')
-    with pytest.raises(ValueError, match='自带引擎缺失'):
+    with pytest.raises(ValueError, match='P\\+ 引擎缺失'):
         engine_layout(runtime)
 
 

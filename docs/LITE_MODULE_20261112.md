@@ -53,14 +53,16 @@ python run_sad_to_model.py --no-build-model ...  # 只到密度修饰
 表单自上而下：
 
 1. **任务名称**
-2. **运行模块（按本机 CCP4 检测结果默认勾选）**：模块 1 固定勾选并置灰；模块 2、3 各一个复选框，旁边是「重新检测 CCP4」按钮和一行检测结论。
+2. **运行模块（按本机 CCP4 检测结果默认勾选）**：模块 1 固定勾选并置灰；模块 2、3 各一个复选框，下面依次是「CCP4 位置（可选）」——留空用包内运行时，装在其它的地方时填安装根目录或 `ccp4.setup` / bashrc 的路径——、这一栏的说明、「重新检测 CCP4」按钮和一行检测结论。
 3. **输入文件**：SAD MTZ、重原子 PDB、序列、元素、波长、份数、新输出目录。
 4. **① P+ 定相参数**：P+ 后端单选、P+ 参数方案、定相迭代周期、每反射 KL 上限、每个目标的关系上限。
 5. **② Parrot 密度修饰参数**：密度修饰引擎、溶剂比例、密度修饰周期、掩膜过滤半径、trace 反馈轮数。
-6. **③ Buccaneer 建模 + REFMAC 精修参数**：自动判手、Buccaneer/REFMAC 轮数、每轮 REFMAC 周期、Buccaneer/REFMAC 运行目录、构建配方、精修相位来源。
+6. **③ Buccaneer 建模 + REFMAC 精修参数**：自动判手、Buccaneer/REFMAC 轮数、每轮 REFMAC 周期、构建配方、精修相位来源。
 7. **显示高级参数**（默认收起）：输入细节、P+ 掩膜与采样、运行资源与终点组合。
 
-关闭某个模块时，它下面的参数框整组置灰——不是隐藏，让人看得见"关了哪些"。"Buccaneer / REFMAC 运行目录"是例外，始终可编辑，因为检测 CCP4 时也会读它。
+关闭某个模块时，它下面的参数框整组置灰——不是隐藏，让人看得见"关了哪些"。唯一的例外是「CCP4 位置」：它不属于任何模块，始终可编辑，因为检测和运行都要读它。
+
+文件、目录类字段一律排成两行——标题一行，输入框和「浏览…」一行（`_field()`）。早期版本把输入框 `side='left', expand=True` 排在按钮前面，窗口一窄按钮就被挤出可视区；现在按钮先占位、输入框吃掉剩余宽度，1180×1050 下实测每行 361 px：输入框 263 px、按钮 94 px。`tests/test_desktop_window.py::test_browse_buttons_stay_visible_and_ccp4_location_feeds_detection` 会真的建窗口量像素，防止再退化。
 
 ## 4. CCP4 检测
 
@@ -68,11 +70,12 @@ python run_sad_to_model.py --no-build-model ...  # 只到密度修饰
 
 按顺序在这些目录里找（命中即止）：
 
-1. 表单里"Buccaneer / REFMAC 运行目录"指向的目录及其 `bin/`（打包运行时走这条）；
-2. 环境变量 `CBIN`、`CCP4_BIN`、`OASIS_CCP4_BIN`；
-3. 环境变量 `CCP4`、`CCP4_ROOT` 及其 `bin/`；
-4. `/Applications/ccp4-*/bin`、`/opt/ccp4*/bin`、`/usr/local/ccp4*/bin`（双击启动的 GUI 几乎继承不到环境变量，所以显式找安装位置）；
-5. `PATH` 的每一项。
+1. 表单里「CCP4 位置（可选）」填的值：目录 → 它自己和它的 `bin/`；`ccp4.setup` / bashrc → 解析里面的 `CCP4=`、`CCP4_ROOT=`、`CBIN=`、`CCP4_BIN=` 赋值（展开 `$HOME`），得到安装目录；
+2. 包内运行时的 `bin/`（免安装包默认走这条）；
+3. 环境变量 `CBIN`、`CCP4_BIN`、`OASIS_CCP4_BIN`；
+4. 环境变量 `CCP4`、`CCP4_ROOT` 及其 `bin/`；
+5. `/Applications/ccp4-*/bin`、`/opt/ccp4*/bin`、`/usr/local/ccp4*/bin`（双击启动的 GUI 几乎继承不到环境变量，所以显式找安装位置）；
+6. `PATH` 的每一项。
 
 判定规则：
 
@@ -90,6 +93,36 @@ python run_sad_to_model.py --no-build-model ...  # 只到密度修饰
 重新用"沿用参数"载入一条旧记录时，记录里的开关优先；但如果记录要求一个本机现在没有的模块，复选框会被压回关闭状态——不会留一个点了必然失败的勾。
 
 检测结果只影响**默认值**，不影响可执行性判断：用户仍可手动勾选（模块 2 可勾），真正运行前的校验在 `sad_pipeline.validate()`，那里会给出具体缺哪个程序。
+
+### 4.1 装在别处怎么办
+
+「CCP4 位置」这一栏同时是**运行目录**：子进程一律按 `<root>/bin/<exe>` 启动，运行环境还会清掉继承来的 `CCP4*`（`runtime_environment()`）。所以"检测到了"必须等价于"跑得起来"，两者共用同一个值：
+
+- 填目录：`/opt/ccp4-9` 和 `/opt/ccp4-9/bin` 都认，统一归一到根目录；
+- 填脚本：`ccp4.setup`、`.bashrc` 都行，解析出 `CCP4=` 后把**根目录写回这一栏**，定相、密度修饰、建模都改用它；
+- 解析不出来（或填的目录里没有这些程序）：提示"`<文件名>` 里没有找到 CCP4 / CBIN 赋值"或"`<目录>` 里没找到 CCP4 程序"，并把「CCP4 位置」改回默认运行时——否则这一栏会带着一个跑不起来的目录进到运行里。提示里同时写出实际用的是哪个安装。
+
+CCP4 自带的 `phaser` 就能当 P+ 的前端，所以一个完整的 CCP4 安装足以跑完整条链。实测（3O2E，本机 `/Applications/ccp4-9`）：
+
+- 精简版 `--runtime /Applications/ccp4-9`：5763 反射、mean FOM 0.482，与包内运行时逐位一致；
+- 完整链同一 `--runtime`：P+ → Parrot → 2 轮 trace 反馈 → Buccaneer/REFMAC 全部从 `/Applications/ccp4-9/bin` 启动并跑通（见 4.2）。
+
+代价是要求这个安装"什么都有"：若填的外部 CCP4 缺 `bin/phaser`，P+ 会直接报"P+ 引擎缺失：…/bin/phaser"，并提示清空该栏、改回包内运行时。
+
+### 4.2 两种运行时的对照（3O2E）
+
+同一台机器、同一份输入，只换 `--runtime`：
+
+| 运行 | `--runtime` | 结果 |
+|---|---|---|
+| 精简版 | 包内运行时 | 5763 反射、mean FOM 0.482，`02_sad/experimental.mtz` sha256 `87a1be53…` |
+| 精简版 | `/Applications/ccp4-9` | 5763 反射、mean FOM 0.482，MTZ 逐字节相同 |
+| 完整链（feedback 2、溶剂 0.5） | 包内运行时（十案例记录 `endpoint_fb2_s0.50`） | R/R-free 46.97/53.07 |
+| 完整链（同一协议） | `/Applications/ccp4-9` | R/R-free 46.97/53.07；`02_sad`、`03_dm` 的 MTZ 与左行逐字节相同 |
+
+换成外部 CCP4 只改了 `phaser`、`cparrot`、`cbuccaneer`、`refmac5` 的路径（`pipeline_report.json` 的 `config.dm_executable` 与 `runtime.root` 可见），相位、密度修饰图、模型全部一致；参考结构也直接取 `ccp4-9/lib/data/reference_structures/reference-1tqw.*`，不用另外准备。
+
+顺带一条容易看错的：十案例表里 3O2E 的 41.14/42.64 是 feedback 3 那个终点（`endpoint_fb3`），feedback 2 是 46.97/53.07。两个数在同一台机器上都能复现，差别来自反馈轮数，不是运行时。
 
 ## 5. 实测记录（3O2E，精简版）
 

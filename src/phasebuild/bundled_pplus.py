@@ -20,7 +20,8 @@ def engine_layout(runtime,dm_engine=None):
     required=[runtime/'bin/phaser']
     if dm_engine!='parrot':required+=[density/'bin/oasis-density-python',density/'conda_base/bin/python2.7']
     for p in required:
-        if not p.is_file() or not os.access(p,os.X_OK):raise ValueError('自带引擎缺失，请使用完整 dev5 包：'+str(p))
+        if not p.is_file() or not os.access(p,os.X_OK):
+            raise ValueError('P+ 引擎缺失：'+str(p)+'。若“CCP4 位置”填的是外部安装，请确认它有 bin/phaser，或清空该栏改用包内运行时')
     if dm_engine=='parrot':return runtime,None
     for p in [density/'build/libtbx_env',density/'modules/solve_resolve/ext_ref_files']:
         if not p.exists():raise ValueError('自带密度修饰资源缺失：'+str(p))

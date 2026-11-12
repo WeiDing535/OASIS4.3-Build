@@ -388,7 +388,7 @@ def test_advanced_parameters_stay_hidden_until_asked_for(tmp_path):
         assert app.advanced_box.winfo_manager()==''      # never packed at start
         essential=[key for _,keys in desktop.ESSENTIAL_GROUPS for key in keys]
         advanced=[key for _,keys in desktop.ADVANCED_GROUPS for key in keys]
-        assert set(essential)|set(advanced)==set(app.fields)
+        assert set(essential)|set(advanced)|set(desktop.MODULE_FIELDS)==set(app.fields)
         assert app.fields['sad']['row'].winfo_ismapped()
         assert not app.fields['native']['row'].winfo_ismapped()
         app.advanced.set(True);app._toggle_advanced();app.root.update_idletasks()
@@ -632,7 +632,7 @@ def test_optional_modules_follow_ccp4_detection_and_gate_building(tmp_path,monke
                               reason='',refmac=build)}
         return dict(available=parrot or build,modules=modules,summary='',
                     ccp4_ready=parrot and build,searched=[])
-    monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None: report(False,False))
+    monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None,location=None: report(False,False))
     app=desktop.App(desktop.Controller(project(tmp_path)))
     try:
         app.root.update_idletasks()
@@ -644,7 +644,7 @@ def test_optional_modules_follow_ccp4_detection_and_gate_building(tmp_path,monke
         assert '未检测到 CCP4' in hint and '模块 1 输出相位' in hint
         values=app.collect()
         assert values['dm_enabled'] is False and values['build_model'] is False
-        monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None: report(True,True))
+        monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None,location=None: report(True,True))
         app._detect_modules()
         assert app.module_parrot.get() is True and app.module_build.get() is True
         assert '已检测到 CCP4' in app.module_hint.get()
@@ -660,5 +660,87 @@ def test_optional_modules_follow_ccp4_detection_and_gate_building(tmp_path,monke
         assert values['dm_enabled'] is False and values['build_model'] is False
         app.module_parrot.set(True);app._modules_changed()
         assert str(app.fields['dm_cycles']['row'].winfo_children()[1].cget('state'))=='normal'
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_a_typo_in_the_ccp4_location_falls_back_and_says_so(tmp_path,monkeypatch):
+    """A path with no CCP4 must not be left in the form as the run directory."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    from phasebuild import module_detection
+    calls=[]
+    def fake(runtime=None,environ=None,location=None):
+        calls.append((runtime,location))
+        modules={'parrot':dict(title='Parrot 密度修饰',available=True,path='/x/cparrot',reason=''),
+                 'build':dict(title='Buccaneer 建模 + REFMAC 精修',available=True,path='/x/cbuccaneer',
+                              reason='',refmac='/x/refmac5')}
+        return dict(available=True,modules=modules,summary='',ccp4_ready=True,searched=[],
+                    location=dict(value=str(location or ''),resolved='',found_at='/opt/ccp4-9',note=''))
+    monkeypatch.setattr(module_detection,'detect',fake)
+    app=desktop.App(desktop.Controller(project(tmp_path)))
+    try:
+        bundled=str(app.defaults.get('runtime') or '')
+        app.fields['runtime']['var'].set(str(tmp_path/'typo'))
+        app._detect_modules()
+        # the form no longer carries a directory that cannot run anything
+        assert app.fields['runtime']['var'].get()==bundled
+        assert '“%s”里没找到 CCP4 程序'%str(tmp_path/'typo') in app.module_hint.get()
+        assert 'CCP4：/opt/ccp4-9' in app.module_hint.get()
+        assert app.module_parrot.get() and app.module_build.get()
+        # the retry asked about the runtime the run will actually use
+        assert calls[-1]==(bundled or None,None)
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_browse_buttons_stay_visible_and_ccp4_location_feeds_detection(tmp_path,monkeypatch):
+    """An expanding entry must not push 浏览… off the row; a typed CCP4 path is used."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    from phasebuild import module_detection
+    seen={}
+    def fake(runtime=None,environ=None,location=None):
+        seen['runtime'],seen['location']=runtime,location
+        modules={'parrot':dict(title='Parrot 密度修饰',available=True,path='/x/cparrot',reason=''),
+                 'build':dict(title='Buccaneer 建模 + REFMAC 精修',available=True,path='/x/cbuccaneer',
+                              reason='',refmac='/x/refmac5')}
+        return dict(available=True,modules=modules,summary='',ccp4_ready=True,searched=[],
+                    location=dict(value=str(location or ''),resolved='/opt/ccp4-9',note=''))
+    monkeypatch.setattr(module_detection,'detect',fake)
+    app=desktop.App(desktop.Controller(project(tmp_path)))
+    try:
+        app.root.geometry('1180x1050')
+        app.root.update_idletasks();app.root.update()
+        for key in ('sad','heavy','sequence','output'):
+            row=app.fields[key]['row']
+            buttons=[child for child in row.winfo_children() if child.winfo_class()=='TButton']
+            assert len(buttons)==1,key
+            button=buttons[0]
+            assert button.cget('text')=='浏览…'
+            assert button.winfo_ismapped() and button.winfo_width()>30,key
+            # the whole button, not just its left edge, must fit inside the row
+            assert button.winfo_x()+button.winfo_width()<=row.winfo_width()+1,key
+            entry=[child for child in row.winfo_children() if child.winfo_class()=='TEntry'][0]
+            assert entry.winfo_width()>=80,key
+        # a setup script resolves to the installation root, which is then used to run
+        script=tmp_path/'ccp4.setup';script.write_text('export CCP4=/opt/ccp4-9\n')
+        app.fields['runtime']['var'].set(str(script))
+        app._detect_modules()
+        assert seen['location']==str(script)
+        assert app.fields['runtime']['var'].get()=='/opt/ccp4-9'
+        assert 'CCP4：/opt/ccp4-9' in app.module_hint.get()
+        # the same root is what the run uses, and both CCP4 modules default on
+        app.fields['wavelength']['var'].set('0.97918')
+        assert app.collect()['runtime']=='/opt/ccp4-9'
+        assert app.module_parrot.get() and app.module_build.get()
     finally:
         app.root.destroy()

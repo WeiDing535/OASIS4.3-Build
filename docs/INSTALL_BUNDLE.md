@@ -99,10 +99,11 @@ dist/OASIS4.3-portable/
 
 ### 窗口里的三个模块与 CCP4 检测
 
-`./oasis gui` 的表单把流程拆成三个模块：① P+ 定相（必做）、② Parrot 密度修饰、③ Buccaneer/REFMAC。后两个是 CCP4 程序，启动时按以下顺序找可执行文件：表单里的"运行目录"`bin/` → `CBIN`/`CCP4_BIN`/`OASIS_CCP4_BIN` → `CCP4`/`CCP4_ROOT` → `/Applications/ccp4-*/bin`、`/opt/ccp4*/bin`、`/usr/local/ccp4*/bin` → `PATH`。
+`./oasis gui` 的表单把流程拆成三个模块：① P+ 定相（必做）、② Parrot 密度修饰、③ Buccaneer/REFMAC。后两个是 CCP4 程序，启动时按以下顺序找可执行文件：表单里「CCP4 位置（可选）」填的目录或 setup 脚本 → 包内运行时 `bin/` → `CBIN`/`CCP4_BIN`/`OASIS_CCP4_BIN` → `CCP4`/`CCP4_ROOT` → `/Applications/ccp4-*/bin`、`/opt/ccp4*/bin`、`/usr/local/ccp4*/bin` → `PATH`。
 
 - 找到 `cparrot`：模块 2 默认勾选；找到 `cbuccaneer` **且** `refmac5`：模块 3 默认勾选。
 - 都没找到：两个模块默认关闭、参数组置灰，提示"未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1"。装上 CCP4 或设好 `CCP4`/`CBIN` 后点「重新检测」即可。
+- 装在别处、又没进 `PATH`（双击启动的 GUI 读不到 `.bashrc` 里的 `CCP4`）：在「CCP4 位置」里填安装根目录，或直接把 `ccp4.setup` / `.bashrc` 的路径粘进去；解析出的根目录会写回该栏，检测和运行都用它。这一栏同时是运行目录（子进程按 `<root>/bin/<exe>` 启动，且运行环境会清掉继承的 `CCP4*`），所以填了外部安装就整套改用它——CCP4 自带的 `phaser` 就是 P+ 的前端，一个完整安装能跑完整条链。3O2E 实测：精简版与包内运行时逐位一致（5763 反射、FOM 0.482），完整链的 P+/Parrot/Buccaneer 都从 `/Applications/ccp4-9/bin` 启动并跑通。
 - 模块 3 依赖模块 2（Buccaneer 从密度修饰后的图开始建）；关掉模块 2 会自动关掉并置灰模块 3。
 
 只勾模块 1 就是精简版：输出 `02_sad/experimental.mtz`（相位/FOM/PPLUS）与 `observations.mtz`，**没有模型、没有 R-free**。3O2E 实测约 2 分钟、5763 反射、mean FOM 0.482、图相关 0.123（三段链是 0.549）。命令行等价写法是 `--lite` 或 `--no-dm-enabled`，详见 `docs/LITE_MODULE_20261112.md`。

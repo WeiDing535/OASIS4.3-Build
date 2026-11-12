@@ -69,7 +69,8 @@ FIELD_SPECS=[
  ('labels','SAD 列映射（留空自动识别）','text','平均值：f=FP,sigf=SIGFP,dano=DANO,sigdano=SIGDANO。',None,None),
  ('free_value','原自由集数值','int','默认 0；须与原始 FreeR_flag 定义一致。',None,None),
  ('reference','密度修饰参考 MTZ','file','随运行资源提供的通用无关参考。',None,None),
- ('runtime','Buccaneer / REFMAC 运行目录','directory','目录内需有 bin/cbuccaneer、bin/refmac5。',None,None),
+ ('runtime','CCP4 位置（可选）','directory',
+  '留空用包内运行时。CCP4 装在别处时填它的根目录（含 bin/），或直接粘 ccp4.setup / bashrc 的路径，点“重新检测”会解析成根目录；定相与后续模块都改用这个安装。',None,None),
  ('feedback_endpoints','反馈终点组合（留空=单终点）','optional','逗号分隔的反馈轮数，例如 2,3：每个值各跑一遍同一协议，再按工作集 R 选择终点（不读 R-free）。',None,None),
  ('dm_solvents','反馈终点溶剂组合（可选）','optional','与上一项配对，逗号分隔，auto 表示按序列估算，例如 auto,0.5；留空则沿用溶剂比例。',None,None),
 ]
@@ -79,7 +80,9 @@ FIELD_SPECS=[
 ESSENTIAL_GROUPS=[('输入文件',('sad','heavy','sequence','elements','wavelength','copies','output')),
                   ('P+ 定相',('phase_cycles','trust_kl','max_per_target')),
                   ('Parrot 密度修饰',('solvent_fraction','dm_cycles','dm_mask_radius','feedback_cycles')),
-                  ('Buccaneer / REFMAC',('rounds','cycles','runtime'))]
+                  ('Buccaneer / REFMAC',('rounds','cycles'))]
+# Fields that live in the 「运行模块」 box rather than under a parameter group.
+MODULE_FIELDS=('runtime',)
 ADVANCED_GROUPS=[('输入细节',('native','observation_prior','composition_sequence','labels','free_value')),
                  ('P+ 掩膜与采样',('trust_wang_radius','seed')),
                  ('运行资源与终点组合',('reference','feedback_endpoints','dm_solvents'))]
@@ -387,7 +390,11 @@ class App:
         self.build_check=ttk.Checkbutton(row,text='模块 3 · Buccaneer 建模 + REFMAC 精修',
                                          variable=self.module_build,command=self._modules_changed)
         self.build_check.pack(side='left')
-        ttk.Button(row,text='重新检测 CCP4',command=self._detect_modules).pack(side='left',padx=(12,0))
+        self._field(modules,specs['runtime'])
+        # The button acts on the location above it, so it sits with that field
+        # rather than trailing the module checkboxes.
+        row=ttk.Frame(modules);row.pack(fill='x',pady=(4,0))
+        ttk.Button(row,text='重新检测 CCP4',command=self._detect_modules).pack(side='left')
         self.module_hint=self.tk.StringVar(value='正在检测本机 CCP4…')
         ttk.Label(modules,textvariable=self.module_hint,style='Hint.TLabel',wraplength=340,
                   justify='left').pack(fill='x',padx=(2,0),pady=(4,0))
@@ -469,17 +476,24 @@ class App:
     def _field(self,parent,spec):
         key,title,kind,hint,_,only=spec
         ttk=self.ttk
-        row=ttk.Frame(parent);row.pack(fill='x',pady=2)
-        ttk.Label(row,text=title,width=26,anchor='w').pack(side='left')
         var=self.tk.StringVar(value='')
-        if kind=='file' or kind=='directory' or kind=='output':
-            ttk.Entry(row,textvariable=var).pack(side='left',fill='x',expand=True)
-            ttk.Button(row,text='浏览…',width=6,
-                       command=lambda:self._browse(key,var,kind)).pack(side='left',padx=(4,0))
-        elif kind=='text':
-            ttk.Entry(row,textvariable=var).pack(side='left',fill='x',expand=True)
+        if kind in ('file','directory','output'):
+            # Paths get their own full-width line: the label on top, then the
+            # entry and its 浏览… button.  Sharing one line with the label left
+            # the entry a few characters wide and squeezed the button out.
+            caption=ttk.Frame(parent);caption.pack(fill='x',pady=(4,0))
+            ttk.Label(caption,text=title,anchor='w').pack(side='left')
+            row=ttk.Frame(parent);row.pack(fill='x',pady=(1,0))
+            ttk.Button(row,text='浏览…',
+                       command=lambda:self._browse(key,var,kind)).pack(side='right')
+            ttk.Entry(row,textvariable=var).pack(side='left',fill='x',expand=True,padx=(0,4))
         else:
-            ttk.Entry(row,textvariable=var,width=16).pack(side='left')
+            row=ttk.Frame(parent);row.pack(fill='x',pady=2)
+            ttk.Label(row,text=title,width=26,anchor='w').pack(side='left')
+            if kind=='text':
+                ttk.Entry(row,textvariable=var).pack(side='left',fill='x',expand=True)
+            else:
+                ttk.Entry(row,textvariable=var,width=16).pack(side='left')
         ttk.Label(parent,text=hint,style='Hint.TLabel',wraplength=340,
                   justify='left').pack(fill='x',padx=(2,0))
         self.fields[key]=dict(var=var,kind=kind,title=title,only=only,row=row)
@@ -503,12 +517,26 @@ class App:
     def _detect_modules(self,initial=False):
         """Default the optional modules from what this machine actually has."""
         from . import module_detection
-        runtime=self.defaults.get('runtime') or None
         field=getattr(self,'fields',{}).get('runtime')
-        if field is not None:
-            runtime=field['var'].get().strip() or runtime
-        self._module_report=module_detection.detect(runtime)
-        modules=self._module_report['modules']
+        typed=field['var'].get().strip() if field is not None else ''
+        fallback=self.defaults.get('runtime') or None
+        report=module_detection.detect(typed or fallback,location=typed or None)
+        resolved=(report.get('location') or {}).get('resolved')
+        self._location_warning=''
+        if typed and resolved and field is not None:
+            # A setup script (or a bin/ dir) is not a runtime: keep the root it
+            # named so the run uses the installation the detection just proved.
+            field['var'].set(resolved)
+        elif typed and not resolved:
+            # Nothing at the typed path.  Leaving it in the form would hand the
+            # run a directory with no engines, so fall back and say so.
+            if field is not None and fallback:
+                field['var'].set(fallback)
+            self._location_warning='“%s”里没找到 CCP4 程序，已改用 %s。'%(
+                typed,fallback or '默认运行时')
+            report=module_detection.detect(fallback)
+        self._module_report=report
+        modules=report['modules']
         self.module_parrot.set(modules['parrot']['available'])
         self.module_build.set(modules['build']['available'])
         self._modules_changed()
@@ -539,9 +567,9 @@ class App:
                 field=getattr(self,'fields',{}).get(key)
                 if not field:
                     continue
-                if key=='runtime':
-                    continue    # the user may point detection at a CCP4 bin dir
-                for child in field['row'].winfo_children()[1:]:
+                for child in field['row'].winfo_children():
+                    if child.winfo_class() not in ('TEntry','TButton'):
+                        continue    # the caption label of a path row stays readable
                     try:
                         child.configure(state=state)
                     except Exception:
@@ -561,14 +589,19 @@ class App:
         report=getattr(self,'_module_report',None) or {}
         modules=report.get('modules') or {}
         lines=[]
+        warning=getattr(self,'_location_warning','')
+        if warning:lines.append(warning)
+        located=(report.get('location') or {}).get('resolved') or (report.get('location') or {}).get('found_at') or ''
         if report.get('ccp4_ready'):
             lines.append('已检测到 CCP4：模块 2、3 默认勾选，可随时取消。')
+            if located:lines.append('CCP4：'+located)
         elif report.get('available'):
             missing=[item['title'] for item in modules.values() if not item['available']]
             lines.append('只检测到部分 CCP4：默认勾选可用模块；未找到 '+'、'.join(missing)+'。')
+            if located:lines.append('CCP4：'+located)
         else:
             lines.append('未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1。')
-            lines.append('模块 1 输出相位、FOM 与 MTZ；需要密度修饰或建模，请安装 CCP4 或设置 CCP4/CBIN 后点“重新检测”。')
+            lines.append('模块 1 输出相位、FOM 与 MTZ；已装 CCP4 但不在默认位置时，在上方“CCP4 位置”里填根目录或 ccp4.setup 路径，再点“重新检测”。')
         if not self.module_parrot.get():
             lines.append('模块 2 已关闭：跳过密度修饰，直接输出 P+ 相位；模块 3 需要修饰后的图，已一并关闭。')
         elif not self.module_build.get():
