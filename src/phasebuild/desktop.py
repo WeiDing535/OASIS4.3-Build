@@ -377,7 +377,7 @@ class App:
             ttk.Radiobutton(box,text=label,value=key,variable=self.method,
                             command=self._method_changed).pack(anchor='w')
         self.method_hint=self.tk.StringVar(value=METHOD_HINTS.get(self.method.get(),''))
-        ttk.Label(box,textvariable=self.method_hint,style='Hint.TLabel',wraplength=520,
+        ttk.Label(box,textvariable=self.method_hint,style='Hint.TLabel',wraplength=340,
                   justify='left').pack(fill='x',padx=(2,0),pady=(4,0))
         row=ttk.Frame(box);row.pack(fill='x',pady=(4,0))
         ttk.Label(row,text='P+ 参数方案').pack(side='left')
@@ -399,7 +399,7 @@ class App:
                      state='readonly',width=30).pack(side='left')
         ttk.Label(sample,text='Parrot 是十案例标定的配方。内部密度修饰只能由命令行/环境变量开启，'
                               '属实验性（图相关 0.56 vs Parrot 0.69），窗口里不提供。',
-                  style='Hint.TLabel',wraplength=520,justify='left').pack(fill='x',padx=(2,0))
+                  style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
 
         build=self._section('建模与精修')
         row=ttk.Frame(build);row.pack(fill='x',pady=2)
