@@ -206,13 +206,54 @@ PYTHONPATH=OASIS4.3-Build/src python3 work/noCCP4/dm_oracle_fom.py   # oracle �
 
 新增开关：`OASIS_INTERNAL_DM_COMBINE=mlhl|fwt|map|normalized`、`OASIS_INTERNAL_DM_MAP_WEIGHT`、`OASIS_INTERNAL_DM_MASK_NPY`（诊断用外部掩膜，需与工作网格同形）。
 
+### 3.4 原生 trace 原型：瓶颈不是地图质量
+
+`src/phasebuild/trace.py`（306 行，未接入流水线）已经能独立跑通：三肽种子搜索 + 刚性/柔性拟合 + 前向束生长 + 反向延伸，输出多聚丙氨酸 `backbone.cif`。问题在生长环节。
+
+同一套参数（`--rotations 256 --refine-count 48`）喂三种质量的图，用周期最近像距离与 campaign 模型比（`work/noCCP4/trace_score.py`，搜索 64 个分数平移吸收原点歧义）：
+
+| 输入图（3O2E） | 图 complex CC | 碎片数 | 残基数 | 片段长度 | CA 落在真值 1 Å 内 | 中位偏差 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 内部 DM | 0.44 | 13 | 44 | 3–5 | 32 %（14/44） | 1.68 Å |
+| Parrot | 0.69 | 10–11 | 41–53 | 3–8 | 39–44 % | 1.30–1.45 Å |
+| SHELXE | 0.70 | 12 | 39 | 3–5 | 33 %（13/39） | 1.60 Å |
+| — SHELXE 自己的 trace | — | — | 67 | 长链 | — | — |
+
+三条读数：
+
+1. **换成最好的图也救不回来**。SHELXE 图的 complex CC 是 0.70（十案例最高档），原生 trace 在上面仍然只有 39 个残基、12 个 3–5 残基碎片。**所以 trace 的瓶颈不是 DM 图的质量**，不能指望"等 DM 修好再接线"。
+2. **已经对的部分是种子搜索**。最好的种子三肽拟合得分 2.79（归一化密度单位），44 个 CA 里 14 个落在真值 1 Å 内、中位偏差 1.68 Å——说明刚性三肽搜索与拟合基本工作，能落在蛋白上（95 % 的 CA 在 3 Å 原子掩膜内）。
+3. **生长在第三个残基就死**。`work/noCCP4/grow_diagnose.py` 复现贪心扩展并统计每个接受条件：第 3 步时 29 个候选构象全部被"平均密度 < 阈值"拒绝（把阈值从 0.9σ 降到 0.3σ 也一样，只是拒绝原因从 `quality` 转到 `atom`）。`grow` 的束搜索只在 4 条支路上展开、每步都要求单个残基的平均密度达标，没有全局一致性回退，所以链长上限被单点密度卡死在 3–8。
+
+结论：原生 trace 需要的是**重写生长与组装**，不是调参——SHELXE 的做法是"低阈值生长 + 片段连接 + 密度修饰反馈 + 全局一致性打分"的闭环，其中片段连接要求对同一段密度有重叠覆盖（`fragment_join.py` 的 `assemble_fragments` 正是按 ≥2 残基重叠设计的），而单遍生长产生的碎片互不重叠，接不上。这一项按当前证据**不能靠现有 306 行原型补完**，需要按上述闭环重做生长器。
+
+复现（三种图各约 1 分钟，打分 1 分钟）：
+
+```bash
+cd OASIS4.3-Build
+PYTHONPATH=src .conda-unified/bin/python -m phasebuild trace \
+  /Volumes/Fast_4T/Deepseek-Oasis/cases/3_3o2e_9I_1K_P42212/shelxe_shared.mtz \
+  --amplitude FP --phase SHELXE_PHI \
+  --output /Volumes/Fast_4T/Deepseek-Oasis/work/noCCP4/trace_3o2e_shelxe \
+  --rotations 256 --refine-count 48 --max-residues 200
+PYTHONPATH=src python3 /Volumes/Fast_4T/Deepseek-Oasis/work/noCCP4/trace_score.py 3O2E \
+  /Volumes/Fast_4T/Deepseek-Oasis/work/noCCP4/trace_3o2e_shelxe/backbone.cif \
+  /Volumes/Fast_4T/Deepseek-Oasis/work/exp/tencase_gui_20261110/3O2E/00_sad_to_model/endpoint_fb3/primary_model.cif
+PYTHONPATH=src .conda-unified/bin/python /Volumes/Fast_4T/Deepseek-Oasis/work/noCCP4/grow_diagnose.py \
+  /Volumes/Fast_4T/Deepseek-Oasis/work/exp/tencase_gui_20261110/3O2E/00_sad_to_model/endpoint_fb3/03_dm/map_phases.mtz 0.3 20
+```
+
+把 `--amplitude/--phase` 换成 `FWT/PHWT` 即 Parrot 图；换 `03_dm/map_phases.mtz` 路径到内部 DM 运行目录即内部图。
+
+因此 `docs/NO_CCP4_REPLACEMENT.md` §6 的第 3 档从"紧随其后"改为"未达成，需重写生长器"；第 2 档（DM 追平 Parrot）仍是唯一有明确工程定义的近期项。
+
 ## 4. 达到 SHELXE 水平还差什么
 
 | 能力 | SHELXE | 我们现在 | 差什么 |
 | --- | --- | --- | --- |
 | SAD 定相 | SHELXD | `internal_pplus.phase`（NumPy SAD 似然 + P+ 信任域） | 无 |
 | 密度修饰 | 球影响范围 DM | `internal_pplus.seeded_dm`（NumPy MLHL） | **增益 0.279 vs Parrot 的 0.416**，终点 complex CC 低 0.125；§3.2 七项旋钮都不涨，§3.3 定位到两个具体缺陷（逐壳层 FOM 传递、冻结先验锚定），oracle 上限 0.61–0.63 |
-| 多聚丙氨酸 trace | 内建 autotracing | `trace.py` 等原型约 2400 行，**未接入** | 接入 + 十案例验收 |
+| 多聚丙氨酸 trace | 内建 autotracing | `trace.py` 等原型约 2400 行，**未接入** | **不是接入问题，是重写生长器**：SHELXE 图上也只有 3–8 残基碎片、33 % CA 命中（§3.4） |
 | 质量指标 | pseudo-free CC / FOM / mapCC | 有 R/R-free；地图验收脚本已就位（`work/noCCP4/compare_map_phases.py`） | 把地图相关系数接进流水线报告 |
 | 约束精修 | 无 | 内部精修器（原型） | **不需要**（SHELXE 不做） |
 | 建链 + 序列 + 侧链 | 无 | Buccaneer | **不需要**（超出目标） |
@@ -222,8 +263,10 @@ PYTHONPATH=OASIS4.3-Build/src python3 work/noCCP4/dm_oracle_fom.py   # oracle �
 但按第 3 节的量化结果，**这条链现在还没到 SHELXE 水平**：密度修饰差 0.125，这是必须先补的一项。补齐顺序建议是：
 
 1. 内部 DM 追平 Parrot（目标 complex CC ≥ 0.68，十案例逐例不低于 SHELXE − 0.03）。**不要再去调参**：§3.2 已把掩膜半径、掩膜构造（variance → 校准 Wang）、压平/直方图、相位组合方式、扰动校正、分辨率阶梯、轮数（40 → 100）逐个试过，单项最好 +0.05，十案例均值不涨；§3.3 又排除了掩膜（真值掩膜只值 +0.05）。要补的是 §3.3 末尾那三件有名字的事：逐反射 FOM 估计器、随轮累积的双通道似然、逐轮重建的掩膜/直方图算子。oracle 实验给出的上限是 0.61–0.63，所以这三件都做完才可能到 0.68。
-2. 再把 `trace.py` 接入流水线，输出 SHELXE 式的多聚丙氨酸 `trial.pdb`。
+2. 重写 trace 的生长与组装（低阈值生长 + 片段连接 + 密度修饰反馈 + 全局一致性打分），再做十案例验收。§3.4 已证明这一步不是"把 `trace.py` 接进流水线"就能完成的：它在 SHELXE 图上同样只产出 3–8 残基碎片。
 3. 两项都到位后，才谈"纯自研可发布"。
+
+按当前证据，第 2 项的工作量大于第 1 项（第 1 项已经收敛成三件有名字的事，第 2 项要重做算法闭环）。所以**"纯自研达到 SHELXE 水平"不是一个近期交付**；近期能交付的是第 6 节第 1 档（CCP4 授权的完整链）。
 
 ## 5. 工程收尾（本轮完成）
 
