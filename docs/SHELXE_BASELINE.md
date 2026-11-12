@@ -112,7 +112,7 @@ python3 work/noCCP4/compare_map_phases.py   # 写出 work/noCCP4/map_phase_compa
 | --- | --- | --- | --- |
 | 基线：`mlhl` + 掩膜平滑 4.0 Å | 0.432 | 0.487 | 现发布路径 |
 | 掩膜平滑 3.0 Å | 0.443 | 0.495 | 边际改善 |
-| `combine=map`（照搬 Parrot 的纯图迭代，不做相位组合） | **0.076** | **0.060** | 崩溃 |
+| `combine=map`（旧实现：把差图 `modified−γρ` 当系数） | **0.076** | **0.060** | 实现错误，见 §3.3 |
 | 多分辨率阶梯 `auto` + 3.0 Å，40 轮 | 0.412 | 0.499 | 3O2E 变差 |
 | 多分辨率阶梯 `auto` + 3.0 Å，100 轮 | 0.418 | 0.499 | 加轮次不救 |
 | `gamma=0`（去掉扰动校正） | 0.375 | 0.446 | 变差 |
@@ -121,13 +121,13 @@ python3 work/noCCP4/compare_map_phases.py   # 写出 work/noCCP4/map_phase_compa
 四个直接结论：
 
 1. **加轮次无效**：complex CC 在第 8–10 轮就饱和，之后 30 轮不动（40 轮与 100 轮差 <0.01）。所以不是"迭代不足"，是**迭代不动点太低**。
-2. **照搬 Parrot 的纯图迭代会崩**：去掉 MLHL 相位组合、只用修饰后的图当下一轮系数，弱 SAD 先验下 CC 掉到 0.06–0.08。MLHL 锚定是必需的，这条捷径不通。
+2. **`combine=map` 的 0.06 是测量错误，不是结论**：旧实现把 `modified−γρ`（差图）的 Fourier 变换当作下一轮系数，而差图本身接近零，所以输出必然塌到 0。真正的纯图迭代（用修饰图自身的 FT）在弱种子下是 0.301（3O2E）/0.289（7TBS），在模型种子下是 0.732/0.561（20 轮）——它**不崩，但也不涨**。§3.3 用修正后的实现重做了这条对照。
 3. **多分辨率阶梯不涨**：100 轮 `auto` 阶梯对 3O2E 反而低于单分辨率（0.418 vs 0.443），对 7TBS 只 +0.004。Parrot 的低分辨率起步要靠它自己的掩膜/加权配合，单独搬过来无效。
-4. **掩膜确实有毛病，但不是主因**：把内部掩膜与"由 campaign 模型原子膨胀 2.2 Å + 空间群展开"的真值掩膜比，`variance` 掩膜平均占据 0.735（真值 0.507，即过度包含约 45 %），掩膜 CC 只有 0.505；换成按溶剂比校准半径的 Wang 掩膜后占据 0.647、CC 0.561。**掩膜质量确实提高了，十案例均值却是 0.558 → 0.546（−0.012，单例 −0.075…+0.059）**——掩膜不是那 0.125 的来源。
+4. **掩膜确实有毛病，但不是主因**：把内部掩膜与"由 campaign 模型原子膨胀 2.2 Å + 空间群展开"的真值掩膜比，`variance` 掩膜平均占据 0.735（真值 0.507，即过度包含约 45 %），掩膜 CC 只有 0.505；换成按溶剂比校准半径的 Wang 掩膜后占据 0.647、CC 0.561。**掩膜质量确实提高了，十案例均值却是 0.558 → 0.546（−0.012，单例 −0.075…+0.059）**——掩膜不是那 0.125 的来源。§3.3 把这条检验做到极致：直接换成"由 campaign 模型原子膨胀 2.2 Å"的**真值掩膜**（占据 0.493/0.474，与蛋白真实体积一致），20 轮后 3O2E 只从 0.349 涨到 0.414、7TBS 从 0.446 涨到 0.453，而 `mlhl` 路径用了真值掩膜反而变差（0.465→0.412、0.488→0.461）。**完美掩膜只值 +0.05，掩膜被彻底排除。**
 
 十案例 Wang 掩膜逐例（对照 §3 的基线列）：3O2E 0.491、5D9D 0.491、5HHK 0.692、6HF7 0.599、6ZPP 0.561、7E1D 0.470、7ENM 0.679、7TBS 0.495、7TFQ 0.450、7TJ1 0.529，均值 0.546。
 
-由此得到本轮最重要的判断：**内部 DM 与 Parrot 的差距不在某个可调参数，而在算法的整体结构**——Parrot/DM 是"多分辨率 + 逐轮重建掩膜 + 按壳层 σ_A 加权的相位组合 + NCS/溶剂平均"一整套联动，任何单项照搬都不涨。要让 complex CC 从 0.558 走到 0.68，需要的是 DMMULTI 级别的重写（约 1500–2000 行 + 逐案例标定），不是调参。
+由此得到本节最重要的判断：**内部 DM 与 Parrot 的差距不在某个可调参数，而在算法的整体结构**。§3.3 进一步把"整体结构"拆成了两个可命名的具体缺陷，并量出了各自的头寸。
 
 复现（十案例 DM-only，4 进程，约 25 分钟）：
 
@@ -145,14 +145,73 @@ DM_TRACE_DIR=$PWD/work/noCCP4/dm_trace DM_TRACE_OUT=$PWD/work/noCCP4/dm_trace_ru
   python3 work/noCCP4/run_dm_trace.py 3_3o2e_9I_1K_P42212 19_7tbs_3SE_I222
 ```
 
-消融开关全部是环境变量，默认值复现发布路径：`OASIS_INTERNAL_DM_MASK`（`variance`/`wang`）、`OASIS_INTERNAL_DM_WANG_RADIUS`、`OASIS_INTERNAL_DM_WANG_EDGE`、`OASIS_INTERNAL_DM_MASK_RADIUS`、`OASIS_INTERNAL_DM_COMBINE`（`mlhl`/`map`）、`OASIS_INTERNAL_DM_GAMMA`、`OASIS_INTERNAL_DM_LADDER`、`OASIS_INTERNAL_DM_TRACE`。
+消融开关全部是环境变量，默认值复现发布路径：`OASIS_INTERNAL_DM_MASK`（`variance`/`wang`）、`OASIS_INTERNAL_DM_WANG_RADIUS`、`OASIS_INTERNAL_DM_WANG_EDGE`、`OASIS_INTERNAL_DM_MASK_RADIUS`、`OASIS_INTERNAL_DM_COMBINE`（`mlhl`/`fwt`/`map`/`normalized`）、`OASIS_INTERNAL_DM_MAP_WEIGHT`、`OASIS_INTERNAL_DM_GAMMA`、`OASIS_INTERNAL_DM_LADDER`、`OASIS_INTERNAL_DM_TRACE`。
+
+### 3.3 差距的两个结构性成因：逐壳层 FOM 传递 + 冻结先验锚定
+
+§3.2 把所有旋钮试遍都不涨，说明问题不在参数。这一节换一种问法：**给引擎喂不同质量的种子，看输出由什么决定**。如果输出与种子无关，那引擎就是个不动点机器，天花板的来源就找到了。
+
+协议（`work/noCCP4/dm_seed_sweep.py`）：3O2E、7TBS，溶剂 0.5，参考图 `reference-1tqw.mtz`，20 轮（40 轮同值，见下），两种种子——campaign 模型相位配 FOM=1（输入图 CC 0.843 / 0.751，即"几乎完美的图"）与 campaign P+（0.325 / 0.286，即实际输入）。输出仍用平移不变 complex CC 与 campaign 模型比。
+
+| 案例 | 种子 | 输入图 CC | `mlhl`（发布路径） | `fwt`（图当模型） | `map`（纯图迭代） | `normalized`（按 |Fobs| 归一） |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3O2E | 模型相位 | 0.843 | **0.477** | 0.593 | 0.732 | 0.712 |
+| 3O2E | campaign P+ | 0.325 | **0.465** | 0.349 | 0.301 | 0.306 |
+| 7TBS | 模型相位 | 0.751 | **0.516** | 0.595 | 0.561 | 0.546 |
+| 7TBS | campaign P+ | 0.286 | **0.488** | 0.446 | 0.289 | 0.294 |
+
+三条读数：
+
+1. **发布路径的 `mlhl` 是不动点机器，不是放大器**。输入 0.843 → 输出 0.477，输入 0.325 → 输出 0.465：两个极端种子收敛到同一个 0.47–0.52。40 轮与 20 轮数值相同（0.477/0.471、0.515/0.488），与 §3.2 的"8–10 轮饱和"互相印证。**0.558 这个十案例均值的来源不是信息不足，而是引擎每轮把上一轮图的信息丢掉，只保留"冻结的 SAD HL + 一个逐壳层复标量场"。**
+2. **纯图迭代是信息中性的**：`map`/`normalized` 能保住好种子（0.843 → 0.732/0.712），但从弱种子几乎不涨（0.325 → 0.301/0.306）。所以"照搬 Parrot 的纯图迭代"既不崩（§3.2 那个 0.06 是差图实现的测量错误）也不涨——它缺的是"把弱先验变成信息"的机制。
+3. **`fwt` 介于两者之间**：好种子 0.593/0.595，弱种子 0.349/0.446。
+
+机制可以直接在代码里核对，是两个具体缺陷：
+
+- **逐壳层 FOM 传递**。每轮系数是 `2F·m·e^{iφ} − D·Fc`，`(φ,m)` 来自 `HL = HL_prior + fit_shells(Fc)`；`fit_shells` 把反射分成 12 个分辨率壳层，每层只拟合一个 σ_A（`D`）和一个方差。**同一壳层内所有反射共用同一个 D**——图对某条反射的相位判断得对还是错，在权重上完全不可区分，所以迭代无法自我锐化。
+- **冻结先验锚定**。`seeded_dm` 每轮 `hl=prior.copy()`，`dual_channel_dm.py` 更是明写 `map_initial.hl is deliberately ignored`、`prior_repeatedly_accumulated=False`。原始 SAD 似然永不更新，图的贡献永远只是加在它上面的一个小扰动。
+
+用 oracle 上限实验量这两个缺陷各值多少（只做诊断，不是可部署结果）：
+
+| 变体（弱种子，20 轮） | 3O2E | 7TBS |
+| --- | --- | --- |
+| `fwt`，无 oracle | 0.349 | 0.446 |
+| + oracle 逐反射权重 `cos(φ_map−φ_true)`，α=1.0 | 0.556 | 0.555 |
+| + 同上，α=0.6 | 0.586 | 0.568 |
+| + 同上并放开冻结先验（`prior_weight=0`） | **0.627** | **0.609** |
+| 弱种子，放开先验但无 oracle | 0.344 | 0.396 |
+
+- 逐反射判别力值 **+0.11…+0.21**；再放开先验锚定再值 **+0.04…+0.06**。
+- 两者都到位是 0.61–0.63，**逼近 Parrot 的 0.688 但仍未到**：剩下的约 0.06 只能来自掩膜/直方图算子本身（真值掩膜只值 +0.05，说明这部分也不是掩膜准不准的问题，而是"一次性掩膜 + 直方图匹配"这个算子的平滑强度不够）。
+- 放开先验而**没有** oracle 会变差（0.344/0.396）：弱相位下先验锚定仍是必需的，不能用"直接去掉"来简化。
+
+最后一个可部署性问题：oracle 权重能不能从图上估出来？在最后一轮图上算 `|Fc_map|/F` 与真实相位一致度 `cosΔφ` 的相关系数，只有 **0.047 / 0.129**（α=0.6 时 0.107/0.183，放开先验后 0.237/0.328）。**振幅比几乎不携带"这条反射相位对不对"的信息**，所以逐反射 FOM 必须从密度本身估（局部图相关、密度一致性），不能用 `|Fc|/F` 近似。这正是 Parrot/DM 里最不可省、也最难抄的一块。
+
+由此，"补齐密度修饰"的工程定义从"重写 1500–2000 行"收敛成三件有名字的事：
+
+1. 逐反射 FOM 估计器：从修饰图的局部密度一致性给出每条反射的相位可信度（不是振幅比）；
+2. 把冻结的 SAD HL 改成随轮累积的双通道似然：原始 SAD 与当前图各算一项，图的权重随图质量上升；
+3. 掩膜/直方图算子逐轮重建（DMMULTI 的 mask refinement），残余约 0.06 在这一项。
+
+**本轮不改发布路径**：`combine='mlhl'` 仍是默认值，新增的 `fwt`/`map`/`normalized` 与 `oracle`/`prior_weight` 全部是诊断开关，默认参数逐位复现原行为（`tests/test_internal_pplus.py` 8 passed 覆盖）。
+
+复现：
+
+```bash
+cd /Volumes/Fast_4T/Deepseek-Oasis
+PYTHONPATH=OASIS4.3-Build/src python3 work/noCCP4/dm_seed_sweep.py   # 种子保留 + 四种组合方式
+PYTHONPATH=OASIS4.3-Build/src python3 work/noCCP4/dm_truth_mask.py   # 真值掩膜上限
+PYTHONPATH=OASIS4.3-Build/src python3 work/noCCP4/dm_oracle_fom.py   # oracle 逐反射 FOM 上限
+```
+
+新增开关：`OASIS_INTERNAL_DM_COMBINE=mlhl|fwt|map|normalized`、`OASIS_INTERNAL_DM_MAP_WEIGHT`、`OASIS_INTERNAL_DM_MASK_NPY`（诊断用外部掩膜，需与工作网格同形）。
 
 ## 4. 达到 SHELXE 水平还差什么
 
 | 能力 | SHELXE | 我们现在 | 差什么 |
 | --- | --- | --- | --- |
 | SAD 定相 | SHELXD | `internal_pplus.phase`（NumPy SAD 似然 + P+ 信任域） | 无 |
-| 密度修饰 | 球影响范围 DM | `internal_pplus.seeded_dm`（NumPy MLHL） | **增益 0.279 vs Parrot 的 0.416**，终点 complex CC 低 0.125；§3.2 的七项单旋钮消融都不涨，需 DMMULTI 级重写 |
+| 密度修饰 | 球影响范围 DM | `internal_pplus.seeded_dm`（NumPy MLHL） | **增益 0.279 vs Parrot 的 0.416**，终点 complex CC 低 0.125；§3.2 七项旋钮都不涨，§3.3 定位到两个具体缺陷（逐壳层 FOM 传递、冻结先验锚定），oracle 上限 0.61–0.63 |
 | 多聚丙氨酸 trace | 内建 autotracing | `trace.py` 等原型约 2400 行，**未接入** | 接入 + 十案例验收 |
 | 质量指标 | pseudo-free CC / FOM / mapCC | 有 R/R-free；地图验收脚本已就位（`work/noCCP4/compare_map_phases.py`） | 把地图相关系数接进流水线报告 |
 | 约束精修 | 无 | 内部精修器（原型） | **不需要**（SHELXE 不做） |
@@ -162,7 +221,7 @@ DM_TRACE_DIR=$PWD/work/noCCP4/dm_trace DM_TRACE_OUT=$PWD/work/noCCP4/dm_trace_ru
 
 但按第 3 节的量化结果，**这条链现在还没到 SHELXE 水平**：密度修饰差 0.125，这是必须先补的一项。补齐顺序建议是：
 
-1. 内部 DM 追平 Parrot（目标 complex CC ≥ 0.68，十案例逐例不低于 SHELXE − 0.03）。**不要再去调参**：§3.2 已经把掩膜半径、掩膜构造（variance → 校准 Wang）、压平/直方图、相位组合方式（MLHL vs 纯图迭代）、扰动校正、分辨率阶梯、轮数（40 → 100）逐个试过，单项最好也只有 +0.05，十案例均值不涨。要补的是结构：逐轮由当前图重建掩膜、按壳层 σ_A 与 FOM 加权的相位组合、多分辨率阶梯与掩膜联动、NCS/溶剂平均，四者一起才构成 DMMULTI 的行为。
+1. 内部 DM 追平 Parrot（目标 complex CC ≥ 0.68，十案例逐例不低于 SHELXE − 0.03）。**不要再去调参**：§3.2 已把掩膜半径、掩膜构造（variance → 校准 Wang）、压平/直方图、相位组合方式、扰动校正、分辨率阶梯、轮数（40 → 100）逐个试过，单项最好 +0.05，十案例均值不涨；§3.3 又排除了掩膜（真值掩膜只值 +0.05）。要补的是 §3.3 末尾那三件有名字的事：逐反射 FOM 估计器、随轮累积的双通道似然、逐轮重建的掩膜/直方图算子。oracle 实验给出的上限是 0.61–0.63，所以这三件都做完才可能到 0.68。
 2. 再把 `trace.py` 接入流水线，输出 SHELXE 式的多聚丙氨酸 `trial.pdb`。
 3. 两项都到位后，才谈"纯自研可发布"。
 

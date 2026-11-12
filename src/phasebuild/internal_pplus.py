@@ -63,14 +63,14 @@ def phase(cfg,output):
 
 def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,random_seed,trace_dir=None,
               combine='mlhl',mask_radius=4.0,ladder=None,gamma_scale=1.0,mask_kind='variance',
-              wang_radius=None,wang_edge=1.0):
+              wang_radius=None,wang_edge=1.0,map_weight=1.0,oracle=None,prior_weight=1.0):
     """Frozen original HL + separate initial P+ map, never posterior-as-data."""
     from oasis_py.density_mlhl import fit_shells
     from oasis_py.native_density import (working_grid_size,metric_filter,reference_histogram,
         protein_mask,wang_mask,histogram_transform,apply_transform)
     from oasis_py.sad import posterior_moments
     from oasis_py.phasing import PhaseResult
-    if combine not in ('mlhl','map'):raise ValueError('Invalid DM combination '+repr(combine))
+    if combine not in ('mlhl','map','normalized','fwt'):raise ValueError('Invalid DM combination '+repr(combine))
     if mask_kind not in ('variance','wang'):raise ValueError('Invalid DM mask kind '+repr(mask_kind))
     if ladder is not None and (not ladder or any(c is not None and float(c)<=0 for c in ladder)):
         raise ValueError('Invalid DM resolution ladder')
@@ -82,6 +82,11 @@ def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,ra
     coefficients=data.f*fom*np.exp(1j*phase)
     def asu(values):return gemmi.ComplexAsuData(data.cell,data.spacegroup,np.ascontiguousarray(data.hkl),np.ascontiguousarray(values,dtype=np.complex64))
     shape,rate=working_grid_size(asu(coefficients),8_000_000);kernel=metric_filter(data.cell,shape,mask_radius)
+    mask_override=(None if not os.environ.get('OASIS_INTERNAL_DM_MASK_NPY')
+                   else np.load(os.environ['OASIS_INTERNAL_DM_MASK_NPY']).astype(float))
+    if mask_override is not None and mask_override.shape!=tuple(shape):
+        raise ValueError('External DM mask shape %s does not match the working grid %s'
+                         %(mask_override.shape,tuple(shape)))
     target=reference_histogram(data,fom,reference);rng=np.random.default_rng(random_seed);history=[];hl=prior.copy()
     spacing=1.0/np.sqrt((data.hkl**2/np.array([data.cell.a,data.cell.b,data.cell.c])**2).sum(axis=1))
     steps=[None] if not ladder else list(ladder)
@@ -95,20 +100,43 @@ def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,ra
         if not active.any():continue
         current=np.where(active,coefficients,0).astype(complex)
         grid=asu(current).transform_f_phi_to_map(exact_size=shape);rho=np.array(grid.array,dtype=float)
-        mask=(wang_mask(grid,solvent,kernel,data.cell,radius=wang_radius,edge=wang_edge)
-              if mask_kind=='wang' else protein_mask(grid,solvent,kernel))
+        if mask_override is None:
+            mask=(wang_mask(grid,solvent,kernel,data.cell,radius=wang_radius,edge=wang_edge)
+                  if mask_kind=='wang' else protein_mask(grid,solvent,kernel))
+        else:
+            mask=mask_override.copy()
         modified,mapping=histogram_transform(rho,mask,target)
         noise=rng.normal(size=shape);grid.array[:]=noise;grid.symmetrize_avg();noise=np.array(grid.array,dtype=float);noise-=noise.mean()
         noise*=max(rho.std(),1e-12)*.01/max(noise.std(),1e-12)
         perturbed=apply_transform(rho+noise,mask,mapping)
         gamma=float(np.clip(np.sum(noise*(perturbed-modified))/max(np.sum(noise*noise),1e-30),0,.95))
         gamma=min(gamma*gamma_scale,.95)
+        grid.array[:]=modified;grid.symmetrize_avg()
+        fc_map=gemmi.transform_map_to_f_phi(grid).get_value_by_hkl(data.hkl).astype(complex)
         grid.array[:]=modified-gamma*rho;grid.symmetrize_avg()
         fc=gemmi.transform_map_to_f_phi(grid).get_value_by_hkl(data.hkl).astype(complex)
-        if combine=='map':
-            # Parrot-style map iteration: no phase combination with the weak
-            # SAD prior, the modified map is its own coefficient set.
-            updated=fc.astype(complex);fit={}
+        if combine in ('map','normalized'):
+            # Map iteration: the modified map itself carries the information
+            # forward. 'normalized' additionally rescales each reflection to
+            # the observed amplitude, which keeps |coefficients| a valid FOM.
+            updated=fc_map.astype(complex) if combine=='map' else \
+                data.f*np.clip(np.abs(fc_map)/np.maximum(data.f,1e-12),0,1)*np.exp(1j*np.angle(fc_map))
+            fit={}
+        elif combine=='fwt':
+            # Standard FWT recurrence: the *modified map* is the partial model.
+            # The experimental HL stays fixed, the map contributes its own
+            # per-reflection likelihood (sigma_A weighted), and the model term
+            # is subtracted from the 2mFo-DFc coefficients.
+            field,d,fit=fit_shells(data,fc_map,prior,samples=72)
+            weight=np.full(len(data.f),float(map_weight))
+            if oracle is not None:
+                # Diagnostic only: replace the missing per-reflection FOM with
+                # the true map-phase agreement to measure what per-reflection
+                # discrimination would buy.
+                weight=weight*np.clip(np.cos(np.angle(fc_map)-oracle),0,1)
+            hl=prior_weight*prior.copy();hl[:,0]+=weight*field.real;hl[:,1]+=weight*field.imag
+            phase,fom=posterior_moments(data,hl)
+            updated=2*data.f*fom*np.exp(1j*phase)-weight*d*fc_map
         else:
             field,d,fit=fit_shells(data,fc,prior,samples=72)
             hl=prior.copy();hl[:,0]+=field.real;hl[:,1]+=field.imag
@@ -117,6 +145,7 @@ def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,ra
         coefficients=np.where(active,updated,coefficients).astype(complex)
         if trace_dir is not None:
             _write_map_coefficients(Path(trace_dir)/f'cycle_{cycle+1:02d}.mtz',data,coefficients)
+            if combine=='fwt':_write_map_coefficients(Path(trace_dir)/f'cycle_{cycle+1:02d}_map.mtz',data,fc_map)
             if cycle==len(schedule)-1:
                 Path(trace_dir).mkdir(parents=True,exist_ok=True)
                 np.save(Path(trace_dir)/'mask_last.npy',mask.astype(np.float32))
@@ -125,10 +154,11 @@ def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,ra
         row={'cycle':cycle+1,'mean_fom':float(fom.mean()),'map_fom':map_fom,'gamma':gamma,'shell_fit':fit,
              'resolution_cutoff':None if cutoff is None else float(cutoff)};history.append(row)
         print(json.dumps({'internal_DM_cycle':cycle+1,'mean_fom':row['mean_fom']}),flush=True)
-    if combine=='map':
+    if combine!='mlhl':
         fom=np.clip(np.abs(coefficients)/np.maximum(data.f,1e-12),0,1);phase=np.angle(coefficients)
     return PhaseResult(phase,fom,None,hl,{'method':'internal_fixed_observation_MLHL_seeded_DM','backend':'NumPy/SciPy/Gemmi only; no external executable',
         'cycles':history,'grid_shape':shape,'grid_sample_rate':rate,'seed_map':'P+ first moment once','fixed_HL':'Original internal observation likelihood, never accumulated',
+        'combination':combine,'map_weight':float(map_weight),'prior_weight':float(prior_weight),'external_mask':mask_override is not None,'oracle_weights':oracle is not None,
         'limitations':['Approximate mask, reference histogram, shell scale and field cap inherited from internal MLHL DM','No automatic NCS; not RESOLVE/Parrot/Phenix equivalent']}),coefficients
 
 
@@ -152,7 +182,8 @@ def _dm_options():
         'mask_kind':os.environ.get('OASIS_INTERNAL_DM_MASK','variance'),
         'wang_radius':(None if not os.environ.get('OASIS_INTERNAL_DM_WANG_RADIUS') else float(os.environ['OASIS_INTERNAL_DM_WANG_RADIUS'])),
         'wang_edge':float(os.environ.get('OASIS_INTERNAL_DM_WANG_EDGE','1.0')),
-        'mask_radius':float(os.environ.get('OASIS_INTERNAL_DM_MASK_RADIUS','4.0'))}
+        'mask_radius':float(os.environ.get('OASIS_INTERNAL_DM_MASK_RADIUS','4.0')),
+        'map_weight':float(os.environ.get('OASIS_INTERNAL_DM_MAP_WEIGHT','1.0'))}
 
 
 def _write_map_coefficients(path,data,coefficients):

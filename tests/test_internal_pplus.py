@@ -79,10 +79,10 @@ def _seed(own, tmp_path):
 def test_dm_ablation_switches_default_to_shipping_behaviour(monkeypatch):
     for name in ['OASIS_INTERNAL_DM_COMBINE','OASIS_INTERNAL_DM_GAMMA','OASIS_INTERNAL_DM_MASK',
                  'OASIS_INTERNAL_DM_WANG_RADIUS','OASIS_INTERNAL_DM_WANG_EDGE','OASIS_INTERNAL_DM_MASK_RADIUS',
-                 'OASIS_INTERNAL_DM_LADDER']:
+                 'OASIS_INTERNAL_DM_LADDER','OASIS_INTERNAL_DM_MAP_WEIGHT','OASIS_INTERNAL_DM_MASK_NPY']:
         monkeypatch.delenv(name,raising=False)
     assert internal._dm_options()=={'combine':'mlhl','gamma_scale':1.0,'mask_kind':'variance',
-        'wang_radius':None,'wang_edge':1.0,'mask_radius':4.0}
+        'wang_radius':None,'wang_edge':1.0,'mask_radius':4.0,'map_weight':1.0}
 
 
 def test_dm_ladder_and_wang_mask_are_reproducible_and_keep_observation_prior(own,tmp_path,monkeypatch):
