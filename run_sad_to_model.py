@@ -27,12 +27,10 @@ def build_parser():
     p.add_argument('--elements',default='',help='Heavy-atom element symbols, e.g. Se or Se,S; computes theoretical factors offline from explicit wavelength')
     p.add_argument('--auto-fpp',action=argparse.BooleanOptionalAction,default=False)
     p.add_argument('--reference',default='');p.add_argument('--runtime');p.add_argument('--labels',default='')
-    p.add_argument('--density-runtime',default='',
-                   help='Directory holding the package density/ tree (P+ likelihood engine); may differ from --runtime, which only supplies Phaser/Parrot/Buccaneer/REFMAC')
     p.add_argument('--build-model',action=argparse.BooleanOptionalAction,default=True,
                    help='Enable Buccaneer/REFMAC (default); --no-build-model stops after DM without external engines')
     p.add_argument('--dm-enabled',action=argparse.BooleanOptionalAction,default=True,
-                   help='Enable density modification (Parrot/RESOLVE); --no-dm-enabled stops after P+ phasing and implies --no-build-model')
+                   help='Enable density modification (CCP4 Parrot or the internal MLHL engine); --no-dm-enabled stops after P+ phasing and implies --no-build-model')
     p.add_argument('--lite',action='store_true',
                    help='精简版：只做 P+ 定相（等价 --no-dm-enabled --no-build-model），输出相位/FOM/MTZ')
     p.add_argument('--method',choices=['likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'],default=None,help='New-run default: bundled P+ Wang8 with work-weight search; explicit historical methods retained for reproducibility')
@@ -53,7 +51,7 @@ def build_parser():
     p.add_argument('--trust-wang-radius',type=float,default=None,help='New default profile uses8 Angstrom; explicit historical routes retain14')
     p.add_argument('--trust-stability',action=argparse.BooleanOptionalAction,default=False,help='Opt-in disjoint-relation stability shrinkage of genuine P+ updates')
     p.add_argument('--trust-partial-cleanup',action=argparse.BooleanOptionalAction,default=None,help='Work-map/sequence-anchored cleanup; enabled for new default runs')
-    p.add_argument('--dm-engine',choices=['resolve','parrot'],default=None,help='Density-modification engine; parrot adds anisotropic scaling correction and mask smoothing')
+    p.add_argument('--dm-engine',choices=['internal','parrot'],default=None,help='Density-modification engine: parrot (CCP4) or internal MLHL; the bundled RESOLVE tree is gone')
     p.add_argument('--dm-solvent',type=float,default=None,help='Override the sequence-estimated solvent content for density modification')
     p.add_argument('--dm-mask-radius',type=float,default=3.0,help='Solvent-mask filter radius in Angstrom')
     p.add_argument('--dm-anisotropy',action=argparse.BooleanOptionalAction,default=True,help='Anisotropic scaling correction during density modification')
@@ -101,7 +99,10 @@ def main(argv=None):
     if args['auto_hand'] is None:args['auto_hand']=profile and args['build_model']
     if args['refinement_prior'] is None:args['refinement_prior']='dm_phifom' if profile else 'original_sad'
     if args['building_recipe'] is None:args['building_recipe']='pipeline' if profile else 'legacy'
-    if args['dm_engine'] is None:args['dm_engine']='parrot' if profile else 'resolve'
+    # The two P+ routes always density-modify with CCP4 Parrot; only the
+    # in-tree MLHL methods may default to the internal engine.
+    if args['dm_engine'] is None:
+        args['dm_engine']='parrot' if profile or args['method'] in ('pplus_trust','pplus_bundled') else 'internal'
     if profile and not args['fpp']:args['auto_fpp']=True
     for flag in ['trust_work_weight','trust_partial_cleanup']:
         if args[flag] is None:args[flag]=profile and args['build_model']

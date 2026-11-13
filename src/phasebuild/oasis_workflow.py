@@ -43,13 +43,13 @@ def runtime_candidates(project):
 
 
 def bundled_runtime(project):
-    """The runtime carrying the package's density engine, else None.
+    """The runtime carrying Phaser and cbuccaneer, else None.
 
-    Only this one can run the bundled P+ route end to end; a bare external CCP4
-    has bin/ but no density/, so pointing the form at it fails before Phasing.
+    The bundled P+ route runs on Phaser + Parrot + Buccaneer + REFMAC, all of
+    which a CCP4 installation provides, so any CCP4 with these programs works.
     """
     for path in runtime_candidates(project):
-        if (path/'density/bin/oasis-density-python').is_file() and (path/'bin/cbuccaneer').is_file():
+        if (path/'bin/phaser').is_file() and (path/'bin/cbuccaneer').is_file():
             return path
     return None
 
@@ -57,22 +57,18 @@ def bundled_runtime(project):
 def defaults(project):
     project=Path(project)
     usable=[p for p in runtime_candidates(project) if (p/'bin/cbuccaneer').is_file() and (p/'bin/refmac5').is_file()]
-    # A runtime that also carries the package's RESOLVE/CCTBX tree is the only
-    # one that can run the bundled P+ route end to end; prefer it over a bare
-    # external CCP4 installation.
+    # Prefer a runtime that carries the whole chain (Phaser, Parrot, Buccaneer,
+    # REFMAC); a bare CCP4 without cbuccaneer cannot finish the run.
     runtime=bundled_runtime(project) or (usable[0] if usable else None)
     runtime=str(runtime) if runtime else (default_runtime() or '')
     cfg=dict(DEFAULTS)
     cfg['phenix_bin']=''
     cfg['method']='pplus_bundled'
-    # 标定配方：Parrot 密度修饰 + 2 轮反馈 + 40 轮修饰；非 P+ 方法会被降级为 RESOLVE。
+    # 标定配方：Parrot 密度修饰 + 2 轮反馈 + 40 轮修饰；非 P+ 方法会被降级为内置 MLHL。
     cfg.update(dm_engine='parrot',dm_cycles=40,feedback_cycles=2,max_per_target=48,dm_solvent=0.5)
     # 终点组合默认留空：等价于单终点，由 --feedback-cycles 决定；填写后按工作集 R 选终点。
     cfg.update(feedback_endpoints='',dm_solvents='')
     cfg.update(sad='',native='',sequence='',heavy='',fpp='',runtime=runtime,
-               # 包内 P+ 引擎（density/）可以来自另一个目录：外部 CCP4 只提供
-               # Phaser/Parrot/Buccaneer/REFMAC，P+ 似然精修始终由 density/ 驱动。
-               density_runtime='',
                reference=str(Path(runtime)/'lib/data/reference_structures/reference-1tqw.mtz') if runtime else '',
                output=str(project/'runs/oasis_run'),mode='sad_to_model',
                explore=False,explore_workers=2,protocol='pplus_w8_weight',elements='',auto_fpp=True,input_columns=True,native_labels='',auto_hand=True,building_recipe='pipeline',refinement_prior='dm_phifom',
@@ -83,9 +79,12 @@ def defaults(project):
 def make_plan(config, project, python=None, inspect=True):
     if not isinstance(config,dict):raise ValueError('配置必须是 JSON 对象')
     cfg=defaults(project)
-    unknown=set(config)-set(cfg)
+    # density_runtime named the copied RESOLVE/CCTBX tree; saved configs may still
+    # carry it, so accept and ignore it instead of refusing to load the session.
+    legacy={'density_runtime'}
+    unknown=set(config)-set(cfg)-legacy
     if unknown:raise ValueError('此版本不支持配置项：'+', '.join(sorted(unknown)))
-    cfg.update(config)
+    cfg.update({k:v for k,v in config.items() if k not in legacy})
     from .portfolio import PROTOCOLS
     protocol=cfg.pop('protocol') if 'protocol' in config else None
     if protocol is None:cfg.pop('protocol',None)
@@ -106,9 +105,13 @@ def make_plan(config, project, python=None, inspect=True):
     if cfg.get('dm_engine')=='parrot' and cfg.get('method') not in ('likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'):
         # Every phasing method writes the same FP/PHIB/FOM + HL quartet, so
         # Parrot is meaningful on the continuous-SAD and legacy P+ routes too.
-        cfg['dm_engine']='resolve'
+        cfg['dm_engine']='internal'
         cfg['feedback_cycles']=0
         cfg['dm_engine_fallback']='parrot requires a phasing method that writes an observation likelihood'
+    if cfg.get('dm_engine')=='internal':
+        # Trace feedback is a Parrot feature; the defaults() recipe asks for two
+        # rounds, which an explicitly chosen internal engine cannot honour.
+        cfg['feedback_cycles']=0
     if 'explore' not in config:cfg['explore']=False # never silently migrate saved single-run configs
     explore=cfg.pop('explore');workers=cfg.pop('explore_workers')
     if not isinstance(explore,bool):raise ValueError('多流程探索选项必须为布尔值')
@@ -161,7 +164,7 @@ def planned_config(cfg):
     """The options the stages will really run with, engine fallback included."""
     values={**DEFAULTS,**cfg,'output':str(Path(cfg['output'])/'00_sad_to_model')}
     fallback=engine_fallback(cfg)
-    if fallback:values.update(dm_engine='resolve',feedback_cycles=0,dm_engine_fallback=fallback)
+    if fallback:values.update(dm_engine='internal',feedback_cycles=0,dm_engine_fallback=fallback)
     return values
 
 

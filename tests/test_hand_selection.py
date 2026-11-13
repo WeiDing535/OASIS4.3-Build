@@ -150,13 +150,13 @@ def test_resolver_promotes_opposite_hand_and_checks_cache(bundled,tmp_path,monke
  def fake_phase(local,folder):
   for name in ('experimental.mtz','observations.mtz'):shutil.copy2(local['observation_prior'],folder/name)
   for name in ('experimental.json','observations.json'):(folder/name).write_text('{}')
- def fake_dm(local,folder):
+ def fake_dm(local,phase,folder,native,solvent):
   (folder/'map_phases.mtz').write_bytes(b'mock density artifact');(folder/'map_phases.json').write_text('{}')
  def fake_bridge(local,folder):(folder/'building.mtz').write_bytes(b'mock map')
  def fake_pilot(local,root):
   count=12 if root.name=='opposite_hand' else 2
   return dict(status='completed',unique=count,sequenced=count,built=count,longest=count)
- monkeypatch.setattr(trust,'phase',fake_phase);monkeypatch.setattr(trust,'dm',fake_dm);monkeypatch.setattr(trust,'bridge',fake_bridge);monkeypatch.setattr(hs,'pilot',fake_pilot)
+ monkeypatch.setattr(trust,'phase',fake_phase);monkeypatch.setattr(hs,'density_modify',fake_dm);monkeypatch.setattr(trust,'bridge',fake_bridge);monkeypatch.setattr(hs,'pilot',fake_pilot)
  report=hs.resolve(cfg,out,front,{'work_rows':len(data.hkl)})
  assert report['selected_hand']=='opposite_hand' and not report['pilots_reused_for_final_model']
  assert fingerprint(prepared)==before

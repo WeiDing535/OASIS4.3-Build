@@ -2,18 +2,32 @@
 
 ## Unreleased
 
-- P+ no longer requires `density/`. Only the two-hand Wang8 pilot and the old
-  RESOLVE/CCTBX density-modification backend lived there; with `--dm-engine
-  parrot --no-auto-hand` the P+ chain runs on `phaser` + `cparrot` +
-  `cbuccaneer` + `refmac5` alone. On insulin 2.1 Å this gives Rwork 0.3166 /
-  Rfree 0.3779 with 48 residues in 17 min, byte-identical (`experimental.mtz`
-  and `map_phases.mtz` sha256) to the portable-package P+ run that does use
-  `density/`. The GUI keeps the P+ method on a bare CCP4 when `phaser` and
-  `cparrot` are present, and states in the red notice that the hand now comes
-  from the input heavy-atom file and was not verified.
-- `require_density()` is only called when the run really needs the tree, and a
-  `density/` borrowed from a neighbouring portable tree is now printed instead
-  of being used silently.
+- Deletes `density/` (2.4 GB of Phenix-derived RESOLVE/CCTBX). It only backed
+  the two-hand Wang8 pilot and the old RESOLVE density-modification backend;
+  both now run on CCP4 `cparrot`. P+ needs `phaser` + `cparrot` + `cbuccaneer` +
+  `refmac5` and nothing else. On insulin 2.1 Å this gives Rwork 0.3166 / Rfree
+  0.3779 with 48 residues in 17 min, byte-identical (`02_sad/experimental.mtz`
+  and `03_dm/map_phases.mtz` sha256) to the portable-package P+ run that used
+  the tree.
+- Adds a 「双手性判别」 checkbox, enabled only for 「P+ 自带引擎」: unchecked, the
+  run takes the hand from the input heavy-atom file; checked, both
+  enantiomorphs are phased and density-modified with `cparrot`, and the hand is
+  chosen from work-set sequence evidence. Ambiguous evidence still fails loudly;
+  `--allow-unverified-hand` stays an explicit opt-in that records
+  `hand_verified=false`.
+- `--dm-engine` is now `internal|parrot`. `resolve` is gone and raises
+  「已移除」, P+ routes pin `parrot` (the GUI greys the box out), and `internal`
+  is accepted only for `连续 SAD`, `旧版直接法 P+` and `内部 P+`. A missing
+  `cparrot` falls back to `internal` on those three and fails loudly on P+.
+- Removes `density_root()`, `require_density()`, `bundled_pplus.DENSITY_ENGINE`,
+  `trust_workflow.dm()`, `--density-runtime` and the 「包内密度引擎」 form field;
+  `run_pplus_trust_stage.py dm` now refuses with a pointer to `--dm-engine
+  parrot`.
+- Packaging drops the tree too: `build_bundled_pplus.py` no longer takes
+  `--density-source`, `prune_bundle.py` no longer prunes `runtime/density/`,
+  `package_standalone.py` no longer checks RESOLVE segment files, and bundle
+  metadata reports `Phenix_derived_components_bundled: false` with engines
+  `Phaser/Parrot/Buccaneer/REFMAC`.
 - Adds `packaging/make_macos_app.py`, which wraps a tree's `OASIS4.3.command` in
   a double-clickable `OASIS4.3.app` (generated icon, no Terminal window).
 - Shows every pipeline stage's own log in the 运行日志 pane and clears the
@@ -31,10 +45,8 @@
   `旧版直接法 P+（只需 CCP4）` run the whole chain with `cparrot`/`cbuccaneer`/
   `refmac5` only; measured on insulin 2.1 Å at Rwork 0.2796 / Rfree 0.3331 with
   50 residues in 12 min, better than the bundled P+ route (0.3166 / 0.3779).
-- The form gains 「包内密度引擎（density/）」 and `run_sad_to_model.py` gains
-  `--density-runtime`, but a bare CCP4 is no longer swapped for the package
-  runtime and no longer refused: it switches to the CCP4-only method and says so
-  in the red notice. `--density-runtime` now only names an explicit `density/`.
+- A bare CCP4 is no longer swapped for the package runtime and no longer
+  refused: it switches to the CCP4-only method and says so in the red notice.
 - Detection runs after the form exists and resolves the runtime even when the
   field is blank, so typing `/Applications/ccp4-9` raises the red notice *before*
   the first run (it used to appear only after 开始). On insulin, `连续 SAD` with

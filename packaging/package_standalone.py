@@ -168,14 +168,6 @@ def verify_bundle(output):
     banner=(parrot.stdout+parrot.stderr).lower()
     report['parrot_startup']='cparrot' in banner and 'ccp4' in banner
     if not report['parrot_startup']:raise RuntimeError('Bundled Parrot did not initialise')
-    # RESOLVE loads its reference densities lazily, so a pruned segment library
-    # only shows up as a dead hand-discrimination run much later. Check the files
-    # it opens up front.
-    segments=runtime/'density'/'modules'/'solve_resolve'/'ext_ref_files'/'segments'
-    required=('rho.list','Richardson_rho.dat','side_chains_rho.dat','gap_library.dat')
-    missing=[name for name in required if not (segments/name).is_file() or (segments/name).stat().st_size<1024]
-    if missing:raise RuntimeError('RESOLVE reference data missing from the bundle: '+', '.join(missing))
-    report['resolve_data']={name:(segments/name).stat().st_size for name in required}
     # End-to-end preflight of the pipeline with the bundled engines only.
     check=subprocess.run([str(python),'-u',str(output/'app'/'run_sad_to_model.py'),'--help'],
         env=env,capture_output=True,text=True,timeout=180)

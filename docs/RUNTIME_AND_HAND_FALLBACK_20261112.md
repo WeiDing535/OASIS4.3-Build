@@ -1,5 +1,12 @@
 # 运行时两件套、单手续算与 insulin 2.0 Å 实测 — 2026-11-12
 
+> **历史记录，部分内容已被取代（2026-11-13）。** 本文提到的
+> `bundled_pplus.density_root()/require_density()`、`PHASEBUILD_DENSITY`、
+> `desktop._density_runtime_fix()/_apply_density_fix()` 与「包内密度引擎」
+> 表单字段都随 `density/` 一起删除；密度修饰现在统一由 CCP4 `cparrot`
+> 完成，双手性也改用两轮 Parrot。见 `CHANGELOG.md` 的 Unreleased 与
+> `docs/INSTALL_BUNDLE.md`。下文保留当时的失败分析与实测数字。
+
 本轮起因：GUI 提交的作业（`runs/oasis_run`，job `7c8b11d7c0d9ee23`）报
 “定相 → 密度修饰 → Buccaneer → REFMAC 失败（退出码 1）”，用户读到的
 一手失败提示与实际原因不一致。

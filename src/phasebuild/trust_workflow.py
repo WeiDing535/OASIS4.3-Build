@@ -19,14 +19,6 @@ def dump(path, value):
     Path(path).write_text(json.dumps(value, indent=2, allow_nan=False)+'\n')
 
 
-def phenix_directory(value):
-    path=Path(value).expanduser().resolve()
-    for name in ('phenix.python','mmtbx.density_modification'):
-        if not (path/name).is_file() or not os.access(path/name,os.X_OK):
-            raise ValueError('P+ 优化需要 Phenix bin 目录，缺少 '+name)
-    return str(path)
-
-
 def sample_info(cfg, data):
     from oasis_py.sequence import sequence_asu
     from .oasis_options import read_sequences
@@ -138,62 +130,6 @@ def launch(command, out, name, stdin=None, environment=None, timeout=1800):
                 os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=5)
             raise
     if process.returncode:raise RuntimeError(name+' failed; see '+str(out/(name+'.log')))
-
-
-def dm(cfg, output):
-    from .sad_input import read_phase_prior
-    from .sad_input import read_sad_pairs
-    out=Path(output);parent=out.parent
-    original=parent/'02_sad/observations.mtz';seedpath=parent/'02_sad/experimental.mtz'
-    data,_,_=read_sad_pairs(cfg['prepared_sad'],free_label=FLAG,free_value=cfg['free_value'])
-    prior=read_phase_prior(original,data)
-    src=gemmi.read_mtz_file(str(original));src.ensure_asu();seed=gemmi.read_mtz_file(str(seedpath));seed.ensure_asu()
-    lk={k:i for i,k in enumerate(keys(seed))};h=src.make_miller_array();idx=[lk[tuple(k)] for k in h]
-    ph=np.asarray(seed.column_with_label('PHIB'))[idx];fom=np.asarray(seed.column_with_label('FOM'))[idx]
-    seed_precision={'enabled':False}
-    if cfg.get('canonical_dm_seed'):
-        from .dm_seed import canonicalize
-        ph,fom,seed_precision=canonicalize(ph,fom)
-    seedmap=gemmi.Mtz(with_base=True);seedmap.spacegroup=src.spacegroup;seedmap.set_cell_for_all(src.cell);seedmap.add_dataset('map_only')
-    seedmap.add_column('FWT','F');seedmap.add_column('PHWT','P')
-    seedmap.set_data(np.column_stack([h,np.asarray(src.column_with_label('FP'))*fom,ph]).astype(np.float32));seedmap.write_to_file(str(out/'seedmap.mtz'))
-    if seedmap.column_labels()!=['H','K','L','FWT','PHWT']:raise RuntimeError('Map-only RESOLVE seed contract failed')
-    shutil.copyfile(original,out/'probability.mtz');shutil.copyfile(cfg['heavy'],out/'heavy.pdb') if Path(cfg['heavy']).suffix.lower() in ('.pdb','.ent') else gemmi.read_structure(cfg['heavy']).write_pdb(str(out/'heavy.pdb'));shutil.copyfile(cfg['sequence'],out/'sequence.fasta')
-    seq=sample_info(cfg,data);solvent=cfg['solvent_fraction'] if cfg['solvent_fraction'] is not None else seq['solvent_fraction']
-    dmin=src.resolution_high()
-    lines=['workdir .','outputdir .','freer_if_present','hklin probability.mtz','labin FP=FP SIGFP=SIGFP PHIB=PHIB FOM=FOM HLA=HLA HLB=HLB',
-        'LABIN HLC=HLC HLD=HLD','hklout wang14.mtz','solvent_content %.6f'%solvent,'no_build','mask_cycles 1','minor_cycles 4',
-        'RESOLUTION 1000.0 %.4f'%dmin,'ha_file None','seq_file sequence.fasta','hklstart seedmap.mtz','labstart FP=FWT PHIB=PHWT',
-        'keep_f_mag','phases_from_solve','fom_start %.10g'%fom.mean(),'modify','rad_mask %.2f'%dmin,'model heavy.pdb','wang_radius 8.00',
-        'wang_radius %.2f'%cfg.get('trust_wang_radius',14.),'use_wang','no_ha','database 5','no_optimize_ncs','nohl','spg_name_use '+src.spacegroup.hm,
-        'min_z_value_rho -3.0','rho_overlap_min 0.300','no_create_free','use_all_for_test','group_ca_length 4','group_length 2']
-    recipe='\n'.join(lines)+'\n';(out/'resolve.inp').write_text(recipe)
-    density=Path(cfg['density_runtime']) if cfg.get('density_runtime') else None
-    bins=Path(cfg['phenix_bin']) if density is None else None
-    python=density/'bin/oasis-density-python' if density else bins/'phenix.python'
-    density_env=None
-    if density:
-        from .runtime import runtime_environment
-        density_env=runtime_environment(cfg['runtime'],scratch=out/'scratch')
-    launch([str(python),str(Path(__file__).with_name('resolve_driver.py'))],out,'resolve',recipe,density_env)
-    text=(out/'resolve.log').read_text();parts=text.split('Column assignments:')
-    if len(parts)<3:raise RuntimeError('Missing RESOLVE second-dataset column audit')
-    second=parts[2].split('Closed mtz file')[0]
-    if 'FOM taken from column' in second or 'Using HLA HLB HLC HLD coefficients' in second or 'PHIB taken from column' not in second:
-        raise RuntimeError('RESOLVE seed reader consumed unexpected probability fields')
-    if not (out/'wang14.mtz').is_file():raise RuntimeError('RESOLVE output missing')
-    prefix=[str(python),'-m','mmtbx.command_line.density_modification'] if density else [str(bins/'mmtbx.density_modification')]
-    command=prefix+['reflection_data.file_name=probability.mtz','reflection_data.labels=FP,SIGFP',
-        'experimental_phases.file_name=probability.mtz','experimental_phases.labels=HLA,HLB,HLC,HLD',
-        'map_coefficients.file_name=wang14.mtz','map_coefficients.labels=FWT,PHWT','output.mtz.file_name=map_phases.mtz',
-        'output_hendrickson_lattman_coefficients=True','skip_output_if_worse=False','solvent_fraction=%.6f'%solvent,
-        'ncs_averaging=False','density_truncation.fraction_min=0.25','scale_flip=False','initial_steps=10','shrink_steps=20','final_steps=10']
-    launch(command,out,'classic',environment=density_env)
-    final=gemmi.read_mtz_file(str(out/'map_phases.mtz'));final.ensure_asu();final.write_to_file(str(out/'map_phases.mtz'))
-    dump(out/'map_phases.json',{'phase_method':'pplus_trust','dm_engine':'resolve-wang%g+classic40'%cfg.get('trust_wang_radius',14.),'role':'Post-DM map; never the original observation prior',
-        'solvent_fraction_used':solvent,'solvent_source':'user' if cfg['solvent_fraction'] is not None else 'sequence_estimate',
-        'seed':fingerprint(seedpath),'seed_canonicalization':seed_precision,'original_prior':fingerprint(original),'seed_map_only':True,'seed_probability_auto_consumed':False,
-        'density_modification':{'cycles':[],'classic_steps':[10,20,10],'wang_radius':cfg.get('trust_wang_radius',14.)}})
 
 
 def bridge(cfg, output):

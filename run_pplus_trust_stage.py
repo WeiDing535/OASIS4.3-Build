@@ -29,6 +29,11 @@ def main():
     if cfg['method']=='pplus_bundled' and a.stage in ('phase','dm'):
         from phasebuild import bundled_pplus
         module=bundled_pplus
+    if a.stage=='dm' and module is trust_workflow:
+        # The RESOLVE/CCTBX tree is gone: P+ density-modifies with CCP4 Parrot,
+        # which sad_pipeline runs through run_trace_feedback.py instead.
+        raise ValueError('P+ 两条流程的密度修饰由 CCP4 Parrot 完成（--dm-engine parrot），'
+                         '没有可单独调用的内置 dm 阶段')
     getattr(module,a.stage)(cfg,out)
 
 if __name__=='__main__':main()

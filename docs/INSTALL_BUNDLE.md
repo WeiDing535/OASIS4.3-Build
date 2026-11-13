@@ -17,7 +17,7 @@
 | 连续 SAD + 内部 MLHL-best 密度修饰 | 只要 CCP4（`cbuccaneer`/`refmac5`） | **0.2796 / 0.3331** | 50 | 12 min |
 | 连续 SAD + Parrot 密度修饰 | 只要 CCP4（多一个 `cparrot`） | 0.3150 / 0.3583 | 51 | 6.5 min |
 | P+ 自带引擎 + `cparrot` 密度修饰（无 `density/`） | 只要 CCP4（多一个 `phaser`） | **0.3166 / 0.3779** | 48 | 17 min |
-| P+ 自带引擎（完整便携包） | CCP4 + 一份 `density/` | 0.3166 / 0.3779 | 48 | 18.1 min |
+| P+ 自带引擎（完整便携包，旧版） | CCP4 + 一份 `density/` | 0.3166 / 0.3779 | 48 | 18.1 min |
 
 三条路线都是同一份 CCP4（`/Applications/ccp4-9`，`cparrot`/`cbuccaneer`/`refmac5`）跑出来的，命令与日志都在 `runs/oasis_ccp4_only_*/` 里，可复算。
 
@@ -28,22 +28,22 @@
 
 所以默认推荐仍是内部 MLHL-best；Parrot 留在高级参数里，作为“想更快、或想让 CCP4 的 Parrot 参与密度修饰”的选项。P+ 的价值在十案例那一组配方，不在这一个例子——这一例里它 0.3166 / 0.3779，反而最高。
 
-**P+ 也不再需要 `density/`。** P+ 的定相与似然精修本来就是树内 Python（`oasis_py`），`density/` 只承担两件事：双手判别用的 Wang8 试点，和旧的 RESOLVE/CCTBX 密度修饰后端。把密度修饰交给 CCP4 的 `cparrot`、手性按输入重原子文件定（不做双手判别），这条 P+ 链就只要 `phaser` + `cparrot` + `cbuccaneer` + `refmac5`。上表第四行是实测：与完整便携包（第五行）的 `experimental.mtz`、`map_phases.mtz` 逐字节相同（sha256 一致），末轮 R 也一样——也就是说这一例里去掉 `density/` 没有任何损失。GUI 在“只有 CCP4”的机器上点「开始」会自己这么走，并在红条里写明“保留 P+ 定相、改用 cparrot 做密度修饰、手性按输入重原子文件（本次不做双手判别）”。
+**`density/` 已删除。** P+ 的定相与似然精修本来就是树内 Python（`oasis_py`），那份树只承担两件事：双手判别用的 Wang8 试点，和旧的 RESOLVE/CCTBX 密度修饰后端。现在两件事都交给 CCP4：密度修饰用 `cparrot`，双手判别用 `cparrot` 对两个手性各跑一遍、再用工作集测序证据比较（`hand_selection.density_modify`）。于是 P+ 链只要 `phaser` + `cparrot` + `cbuccaneer` + `refmac5`。上表第四行是实测：与旧版完整便携包（第五行）的 `experimental.mtz`、`map_phases.mtz` 逐字节相同（sha256 一致），末轮 R 也一样——这一例里去掉 `density/` 没有任何损失。
 
-只有想保留**双手判别**（`auto_hand`，用 CCTBX 试两只手哪只对）或旧的 RESOLVE 后端时，才需要那份 `density/`；它不能随包公开分发。没有它时，两条 CCP4 路线照样出结构。
+GUI 里对应的是一个「双手性判别」复选框（只在「P+ 自带引擎」下可勾）：不勾就按输入重原子文件的手性算；勾上就两个手性各算一遍再按工作集证据选。判不准时默认报错停下，只有显式允许“未验证手性”才继续，并在报告里记 `hand_verified=false`。
 
 ## 以前为什么“填了 CCP4 也跑不了”
 
 旧版把默认方法设成 `pplus_bundled`，而那条路第一步就要 `density/bin/oasis-density-python`；`/Applications/ccp4-9` 自然没有，于是「CCP4 位置」填得再对也起不来，程序还会把运行时悄悄换成便携包——用户看到的结论就是“填这个没意义”。这是设计错误，已修正：现在检测到“只有 CCP4”时，有 `phaser` 就保留 P+ 并把密度修饰换成 `cparrot`，没有 `phaser` 才改走连续 SAD；两种都在红条里写明，不偷换运行时，也不再拒绝运行。
 
-还有一处旧行为要说明：如果便携包就放在程序旁边，`density_root()` 会把它找出来借用（这是为了让便携包用户不填路径也能跑）。现在借用时会在日志里打印“density/ 取自 …（不在所选运行时内）”，不再让它看起来只用了一台机器的运行时。
+还有一处旧行为要说明：如果便携包就放在程序旁边，旧版的 `density_root()` 会把它找出来借用。该函数已随 `density/` 一起删除，不再有“借来的密度树”这种隐性依赖。
 
 ## 为什么完整包不能上传 GitHub
 
 这是许可问题，不是技术问题，代码里绕不过去：
 
 - `runtime/` 里是 **CCP4 的二进制**（`phaser`、`cparrot`、`cbuccaneer`、`refmac5`）加上 CCP4 的 `lib/data`（monomer library、`reference-1tqw.mtz` 等）。CCP4 对学术用户免费，但**再分发要单独授权**；`runtime/runtime_manifest.json` 与包内 `bundle.json` 都记着 `"public_redistribution_ready": false`，所以它不能进公开仓库、也不能挂公开 Release。
-- `runtime/density/` 是 **Phenix 派生**的 RESOLVE/CCTBX 树（`oasis-density-python`、`conda_base`、`libtbx_env`、`ext_ref_files`）。Phenix 本身不允许再分发，学术版也要按机构申请，所以这份树同样不能公开。
+- 旧版的 `runtime/density/` 是 **Phenix 派生**的 RESOLVE/CCTBX 树（2.4 GB）。Phenix 本身不允许再分发，学术版也要按机构申请，所以这份树不能公开——现在它已从源码、组装脚本和运行路径中全部删除。
 - 公开仓库能放的是**源码和组装脚本**（约 5 MB）：`packaging/build_local_runtime.py`、`build_installation_free.py`、`build_bundled_pplus.py`。谁有授权，谁在本机跑一遍就能得到同样的包。
 
 所以用户按“手上有什么”选：
@@ -51,7 +51,7 @@
 | 手上有什么 | 怎么做 | 能跑到哪一步 |
 | --- | --- | --- |
 | 只有一份 CCP4 | 「CCP4 位置」填它，方法选「连续 SAD（只需 CCP4）」 | 完整链（SAD → 密度修饰 → Buccaneer → REFMAC），实测 0.2796 / 0.3331 |
-| CCP4 + 一份 `density/` | 方法选「P+ 自带引擎」，在「包内密度引擎」填那份 `density/` | 完整链，外加 P+ 标定配方 |
+| CCP4（含 `phaser`） | 方法选「P+ 自带引擎」，勾不勾「双手性判别」都行 | 完整链，外加 P+ 标定配方 |
 | 源码 | 克隆仓库，`./oasis gui` | 同上，取决于本机有没有 CCP4 |
 
 换句话说：**runtime 不上 GitHub，但“怎么造出 runtime”全部在 GitHub 上；而只装 CCP4 的用户已经不需要 runtime 了。**
@@ -124,14 +124,7 @@ python3 packaging/make_macos_app.py --tree dist/OASIS4.3-portable   # 给便携�
 
 ## 方式 A 之后：跑通十案例那套 P+ 协议
 
-组装出来的包只带四个引擎，**没有** `runtime/density/`（RESOLVE/CCTBX，Phenix 派生）。**因此它单独跑不了 `--method pplus_bundled`**：P+ 的似然精修由 `density/bin/oasis-density-python` 驱动，`bundled_pplus.phase()` 一开始就检查这份树，缺了就报 `No such file or directory` 并停在 Phaser 之前。`dm_engine=parrot` 只说明密度修饰用 Parrot 而不是 RESOLVE，它省不掉 P+ 那份树。
-
-想用这个包跑 P+ 协议，先补一份 `density/`，两种办法：
-
-- 本机另有一份带 `density/` 的完整包（dev17 那类）：在「CCP4 位置」填这个只带四引擎的包、在「包内密度引擎」填那份 `density/` 的路径，或用命令行 `--runtime <四引擎包>/runtime --density-runtime <完整包>/runtime/density`；
-- 手头有 Phenix：用 `packaging/build_bundled_pplus.py --density-source <Phenix 安装> …` 从你自己的 Phenix 生成一份 `density/`（受 Phenix 许可约束，只在你的授权范围内使用）。
-
-下面的 7ENM 实测是在**同时有 `density/` 的机器上**做的（`density_root()` 会从应用目录旁找到它）；只有四个引擎的包不补 `density/` 时，同一条命令会在启动阶段就停下。
+组装出来的包只带四个引擎（`phaser`、`cparrot`、`cbuccaneer`、`refmac5`），包内不再有 `runtime/density/`（RESOLVE/CCTBX，Phenix 派生）。P+ 全链现在只靠这四个程序：Phaser 定相 → P+ 信任域更新 → cparrot 密度修饰（含 trace/Fcalc 反馈）→ Buccaneer/REFMAC 建模。双手判别也改用 cparrot：两个手性各跑一次密度修饰，再用工作集测序证据比较，不再需要 RESOLVE。因此四引擎包可以直接跑 `--method pplus_bundled`，不需要再补 `density/`。
 
 以 7ENM 为例（输入取自 `cases/7_7enm_3se_P212121`）：
 
@@ -150,12 +143,11 @@ python3 packaging/make_macos_app.py --tree dist/OASIS4.3-portable   # 给便携�
 
 实测（同一台机器，干净环境 `env -i`，只用包内引擎）：5 分 15 秒跑完，`primary_metric` 为 **Rwork 28.34 / Rfree 31.47**，与十案例基准的 7ENM（28.34 / 31.47）完全一致。终点仍按工作集 R 选择，全程不读 R-free。
 
-两个容易踩的坑：
+一个容易踩的坑：
 
-- **不要加 `--auto-hand`。** 双手判别阶段（`hand_selection`）仍然调用 RESOLVE 密度修饰，需要 `runtime/density/bin/oasis-density-python`；CCP4-only 包里没有这个文件，会报 `No such file or directory` 并终止。十案例基准本身用的就是 `--no-auto-hand`（手性由已精修的重原子子结构确定）。
 - **要加 `--input-columns`。** 基准用了它，会在 `01_inputs/` 里写出 `columns.json` 和 `native.mtz`；不加的话 `native.mtz` 不进 `01_inputs`，trace/Fcalc 反馈阶段会报 `Missing stage input .../01_inputs/native.mtz`。
 
-需要 `--dm-engine resolve`（内置 RESOLVE/MLHL 密度修饰）或 `--auto-hand` 时，才需要带 `runtime/density/` 的完整 dev17 包；那份密度树由 `packaging/build_bundled_pplus.py --density-source` 组装。
+`--dm-engine resolve` 已删除（传入会报「已移除」）；P+ 两条流程固定用 `cparrot`，`--dm-engine internal` 只对 `连续 SAD`、`旧版直接法 P+` 和 `内部 P+` 有效，它走树内 MLHL，不调用任何外部程序。
 
 注意事项：
 
@@ -170,42 +162,35 @@ python3 packaging/make_macos_app.py --tree dist/OASIS4.3-portable   # 给便携�
 - 找到 `cparrot`：模块 2 默认勾选；找到 `cbuccaneer` **且** `refmac5`：模块 3 默认勾选。
 - 都没找到：两个模块默认关闭、参数组置灰，提示"未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1"。装上 CCP4 或设好 `CCP4`/`CBIN` 后点「重新检测」即可。
 - 装在别处、又没进 `PATH`（双击启动的 GUI 读不到 `.bashrc` 里的 `CCP4`）：在「CCP4 位置」里填安装根目录，或直接把 `ccp4.setup` / `.bashrc` 的路径粘进去；解析出的根目录会写回该栏，检测和运行都用它。这一栏同时是运行目录（子进程按 `<root>/bin/<exe>` 启动，且运行环境会清掉继承的 `CCP4*`）。
-- **但只装 CCP4 跑不了 P+。** CCP4 提供的是 Phaser 前端、Parrot、Buccaneer、REFMAC；P+ 的似然精修在包内的 `density/bin/oasis-density-python` 里（RESOLVE/CCTBX 派生，见下一节），CCP4 里没有这个程序。表单因此把「CCP4 位置」和「包内密度引擎（density/）」分开：
-  - 选的是便携包 runtime（自带 `density/`）：两栏都指向它，直接跑；
-  - 选的是外部 CCP4：P+ 仍要用一份 `density/`。表单会先找运行时自己的 `density/`，找不到就自动改用便携包 runtime 并在提示里写明原因；你也可以在「显示高级参数 → 运行资源 → 包内密度引擎」里填一份 `density/`，这样 CCP4 继续用你自己的，只有 P+ 借用那份树；
-  - 两边都没有：点「开始」会直接报错，说明缺哪个文件、以及三条解决途径，而不是让任务死在 Phaser 之前。
+- **只装 CCP4 也能跑 P+，前提是有 `phaser`。** P+ 的定相与似然精修是树内 Python（`oasis_py`），密度修饰交给 CCP4 的 `cparrot`，所以「P+ 自带引擎」只需要 `phaser` + `cparrot` + `cbuccaneer` + `refmac5`。缺 `phaser` 时表单会在红条里说明并改走「连续 SAD」，不偷换运行时；缺 `cparrot`/`cbuccaneer`/`refmac5` 则直接报出缺哪个程序。旧的「包内密度引擎（density/）」栏已随那份树一起删除，`--density-runtime` 也一并移除。
 - 模块 3 依赖模块 2（Buccaneer 从密度修饰后的图开始建）；关掉模块 2 会自动关掉并置灰模块 3。
 
 只勾模块 1 就是精简版：输出 `02_sad/experimental.mtz`（相位/FOM/PPLUS）与 `observations.mtz`，**没有模型、没有 R-free**。3O2E 实测约 2 分钟、5763 反射、mean FOM 0.482、图相关 0.123（三段链是 0.549）。命令行等价写法是 `--lite` 或 `--no-dm-enabled`，详见 `docs/LITE_MODULE_20261112.md`。
 
 注意：免安装包自带的运行时里已经含 Phaser 前端与 Parrot/Buccaneer/REFMAC，所以只要包完整，检测就会通过，不需要目标机器另装 CCP4；`docs/INSTALL_BUNDLE.md` 方式 C（纯源码）才需要本机 CCP4。
 
-## 实测：本机 CCP4 的引擎 + 包内 `density/`（2026-11-13，胰岛素 2.1 Å）
+## 实测：四引擎 P+ 与旧便携包逐字节相同（2026-11-13，胰岛素 2.1 Å）
 
-同一条胰岛素任务（`ins_wave2.0_reso2.1A_sad.mtz` + `sg.pdb` + `3INS.pir`，S 边，λ=2.0 Å，`pplus_w8_weight`，Parrot，双手自动判别）跑了三遍：
+同一条胰岛素任务（`ins_wave2.0_reso2.1A_sad.mtz` + `sg.pdb` + `3INS.pir`，S 边，λ=2.0 Å，`pplus_w8_weight`，Parrot，`--no-auto-hand`）用两条路各跑一遍：
 
-| 跑法 | 引擎来自 | P+ 来自 | 用时 | 5 轮后 Rwork / Rfree |
+| 跑法 | 引擎来自 | 用时 | 5 轮后 Rwork / Rfree | 残基 |
 | --- | --- | --- | --- | --- |
-| 全便携包 | 便携包 `runtime` | 便携包 `runtime/density` | 18.1 min | 31.66 / 37.79 |
-| 命令行混搭 | `/Applications/ccp4-9` | dev17 便携包的 `density/` | 11.1 min | 31.66 / 37.79 |
-| 窗口（填 CCP4、密度引擎留空） | 便携包 `runtime`（自动切换） | 便携包 `runtime/density` | 11.9 min | 31.66 / 37.79 |
+| 四引擎 + `cparrot`（无 `density/`） | `/Applications/ccp4-9` | 17 min | 31.66 / 37.79 | 48 |
+| 旧便携包（含 `density/`） | 便携包 `runtime` | 18.1 min | 31.66 / 37.79 | 48 |
 
-三次的判手都是 `input_hand` / `I 21 3`，指标逐位相同，因为 `cparrot`、`cbuccaneer`、`refmac5`、`phaser` 四个文件与便携包 `runtime/bin/` 里的 sha256 完全一致——那个便携包就是用这台机器的 CCP4 组装的。换成版本不同的 CCP4，R 会变，但链路照走。
-
-命令行混搭的完整命令（`--density-runtime` 与 `--runtime` 分开给）：
+两次的 `02_sad/experimental.mtz`（sha256 `d6833091…`）与 `03_dm/map_phases.mtz`（sha256 `fa28d9b3…`）逐字节相同，末轮 R 也相同——也就是说这一例里 `density/` 没有贡献任何数值差异。四引擎那条的命令：
 
 ```bash
 ./oasis sad-to-model --method pplus_bundled --dm-engine parrot --dm-cycles 40 \
-  --feedback-cycles 2 --trust-wang-radius 8 --dm-solvent 0.5 --auto-hand \
+  --feedback-cycles 2 --trust-wang-radius 8 --dm-solvent 0.5 --no-auto-hand \
   --input-columns --elements S --wavelength 2.0 --copies 1 \
   --sad <insulin sad>.mtz --heavy sg.pdb --sequence 3INS.pir \
   --runtime /Applications/ccp4-9 \
-  --density-runtime "<便携包>/runtime/density" \
   --reference /Applications/ccp4-9/lib/data/reference_structures/reference-1tqw.mtz \
-  --output runs/mixed
+  --output runs/p_plus_parrot_stock
 ```
 
-窗口里的行为（2026-11-13 起）：只填 `/Applications/ccp4-9`、密度引擎留空时，点「开始」**不会**换运行时，而是把方法改成「连续 SAD」并在红条里说明「本次改用连续 SAD + 密度修饰 + Buccaneer/REFMAC，只依赖 CCP4 自带程序」；填了密度引擎路径则保留 P+ 方法。`--density-runtime` 现在只在显式指定 `density/` 时有意义，不再用来“借树”。
+窗口里的行为（2026-11-13 起）：只填 `/Applications/ccp4-9` 时，有 `phaser` 就保留「P+ 自带引擎」并把密度修饰固定为 `cparrot`；没有 `phaser` 才改走「连续 SAD」。两种都在红条里写明实际走法。「双手性判别」只在「P+ 自带引擎」下可勾，勾上则两个手性各跑一次 `cparrot` 密度修饰再按工作集测序证据选择。
 
 ## 方式 B：从维护者处拿现成构建（私有分发）
 

@@ -155,6 +155,27 @@ def pilot(cfg,root):
     return dict(status='completed' if counts['CA_residues'] else 'empty',**counts,mask_audit=mask,model=fingerprint(out/'model.pdb'),xml=fingerprint(out/'buccaneer.xml'))
 
 
+def density_modify(cfg,phase,dm,native,solvent):
+    """Density-modify one hand with the same CCP4 Parrot protocol as the final run.
+
+    The hand pilot used to go through the bundled RESOLVE/CCTBX tree, which made
+    the two-hand decision the only part of the pipeline that needed a 2.4 GB
+    Phenix copy.  Parrot needs nothing beyond the CCP4 that already supplies
+    Phaser, cbuccaneer and refmac5, so both hands can be scored on a stock CCP4.
+    """
+    from . import parrot_dm,trace_feedback
+    dm=Path(dm);nested=dm/'parrot';nested.mkdir(exist_ok=True)
+    executable=parrot_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime'))
+    info=parrot_dm.run(str(native),str(Path(phase)/'observations.mtz'),nested/'dm.mtz',float(solvent),
+        cycles=int(cfg.get('dm_cycles',20)),mask_radius=float(cfg.get('dm_mask_radius',3.0)),
+        anisotropy=bool(cfg.get('dm_anisotropy',True)),executable=executable,runtime=cfg.get('runtime'),
+        scratch=nested/'scratch',metadata={'hand_pilot':True})
+    merged=trace_feedback.merge_phase_map(str(native),str(nested/'dm.mtz'),dm/'map_phases.mtz',free_value=cfg['free_value'])
+    dump(dm/'map_phases.json',{'dm_engine':'CCP4 Parrot','dm_computed_during_hand_selection':True,
+        'parrot':info,'work_only':merged,'free_reflections_in_map':0})
+    return info
+
+
 def resolve(cfg,out,front,work):
     from . import bundled_pplus as b,trust_workflow as trust
     from .sad_input import read_sad_pairs
@@ -173,9 +194,11 @@ def resolve(cfg,out,front,work):
             data,_,_=read_sad_pairs(staged,free_label=FLAG,free_value=cfg['free_value']);sample=trust.sample_info(local,data);expected=sample['asu_residues']
             model=phase/'refined_heavy.pdb';shutil.copy2(raw.with_suffix('.pdb'),model)
             prior=phase/'native_observations.mtz';b.extract_prior(raw,data,prior)
-            local.update(heavy=str(model),observation_prior=str(prior),
-                         density_runtime=cfg.get('density_runtime') or str(Path(cfg['runtime'])/'density'))
-            trust.phase(local,phase);trust.dm(local,dm);trust.bridge(local,bridge)
+            local.update(heavy=str(model),observation_prior=str(prior))
+            trust.phase(local,phase)
+            solvent=cfg['dm_solvent'] if cfg.get('dm_solvent') is not None else sample['solvent_fraction']
+            record['dm']=density_modify(local,phase,dm,native,solvent)
+            trust.bridge(local,bridge)
             record.update(pilot(local,root))
             record['phase_artifacts']=[fingerprint(phase/name) for name in ('experimental.mtz','experimental.json','observations.mtz','observations.json','native_observations.mtz','refined_heavy.pdb')]
             record['dm_artifacts']=[fingerprint(p) for p in sorted(dm.iterdir()) if p.is_file()]
@@ -210,4 +233,4 @@ def copy_selected_dm(cfg,out):
     for row in report['selected_dm_artifacts']:
         if fingerprint(row['path'])!=row:raise RuntimeError('Selected hand density artifact changed')
         shutil.copy2(row['path'],out/Path(row['path']).name)
-    meta=json.loads((out/'map_phases.json').read_text());meta.update(auto_hand=report['selected_hand'],selected_spacegroup=report['selected_spacegroup'],hand_selection=fingerprint(phase/'hand_selection.json'),dm_computed_during_hand_selection=True,dm_engine='Bundled RESOLVE/Wang%g + CCTBX classic40'%cfg.get('trust_wang_radius',14.));dump(out/'map_phases.json',meta)
+    meta=json.loads((out/'map_phases.json').read_text());meta.update(auto_hand=report['selected_hand'],selected_spacegroup=report['selected_spacegroup'],hand_selection=fingerprint(phase/'hand_selection.json'),dm_computed_during_hand_selection=True,dm_engine='CCP4 Parrot');dump(out/'map_phases.json',meta)

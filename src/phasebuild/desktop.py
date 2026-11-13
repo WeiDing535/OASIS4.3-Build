@@ -24,7 +24,7 @@ from .jobs import Jobs
 STATUS_NAMES={'queued':'等待运行','running':'正在运行','stopping':'正在停止','cancelled':'已停止',
               'failed':'失败','success':'已完成','imported':'已导入（仅查看）','interrupted':'界面曾中断'}
 IMPORTED_NOTE='导入的既有结果：只读目录，不会重新运行；可查看曲线/表格、导出结果、保存模型。'
-METHODS=[('pplus_bundled','P+ 自带引擎（需密度引擎，推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
+METHODS=[('pplus_bundled','P+ 自带引擎（Phaser + Parrot，推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
          ('pplus_internal','内部 P+（实验性，不用于正式解析）'),
          ('likelihood','连续 SAD（只需 CCP4）'),('pplus','旧版直接法 P+（只需 CCP4）')]
 METHOD_NAMES=dict(METHODS)
@@ -41,7 +41,7 @@ METHOD_HINTS={
 PROTOCOLS=[('','不使用参数方案'),('pplus_w8_weight','P+ · Wang8＋精修权重搜索（标定配方）'),
            ('pplus_w8','P+ · Wang8'),('pplus_w14','P+ · Wang14'),('stable_w14','稳定化 P+ · Wang14')]
 RECIPES=[('pipeline','自带 Buccaneer/REFMAC'),('ccp4','外部 CCP4 流程'),('legacy','旧版逐轮流程')]
-ENGINES=[('parrot','CCP4 Parrot（推荐）'),('resolve','RESOLVE 密度修饰')]
+ENGINES=[('parrot','CCP4 Parrot（推荐）'),('internal','内置 MLHL（仅连续 SAD / 旧版 P+）')]
 PRIORS=[('dm_phifom','密度修饰相位 + 模型振幅'),('original_sad','原始 SAD 相位')]
 
 # key, title, kind, hint, options, only-methods
@@ -72,8 +72,6 @@ FIELD_SPECS=[
  ('reference','密度修饰参考 MTZ','file','随运行资源提供的通用无关参考。',None,None),
  ('runtime','CCP4 位置（可选）','directory',
   '留空用包内运行时。CCP4 装在别处时填它的根目录（含 bin/），或直接粘 ccp4.setup / bashrc 的路径，点“重新检测”会解析成根目录；定相与后续模块都改用这个安装。',None,None),
- ('density_runtime','包内密度引擎（density/）','directory',
-  'P+ 似然定相与双手判别由这里的 oasis-density-python 驱动，它不是 CCP4 的一部分。留空则先找“CCP4 位置”里的 density/，再找本机便携包；外部 CCP4 配这份引擎即可跑完整条链。',None,None),
  ('feedback_endpoints','反馈终点组合（留空=单终点）','optional','逗号分隔的反馈轮数，例如 2,3：每个值各跑一遍同一协议，再按工作集 R 选择终点（不读 R-free）。',None,None),
  ('dm_solvents','反馈终点溶剂组合（可选）','optional','与上一项配对，逗号分隔，auto 表示按序列估算，例如 auto,0.5；留空则沿用溶剂比例。',None,None),
 ]
@@ -88,7 +86,7 @@ ESSENTIAL_GROUPS=[('输入文件',('sad','heavy','sequence','elements','waveleng
 MODULE_FIELDS=('runtime',)
 ADVANCED_GROUPS=[('输入细节',('native','observation_prior','composition_sequence','labels','free_value')),
                  ('P+ 掩膜与采样',('trust_wang_radius','seed')),
-                 ('运行资源与终点组合',('density_runtime','reference','feedback_endpoints','dm_solvents'))]
+                 ('运行资源与终点组合',('reference','feedback_endpoints','dm_solvents'))]
 
 
 class Controller:
@@ -563,8 +561,8 @@ class App:
         self.dm_engine_box=ttk.Combobox(row,textvariable=self.dm_engine,values=[label for _,label in ENGINES],
                                         state='readonly',width=22)
         self.dm_engine_box.pack(side='left',fill='x',expand=True,padx=(0,2))
-        ttk.Label(dm,text='Parrot 是十案例标定的配方。内部密度修饰只能由命令行/环境变量开启，'
-                          '属实验性（图相关 0.56 vs Parrot 0.69），窗口里不提供。',
+        ttk.Label(dm,text='Parrot 是十案例标定的配方，需要 CCP4 的 cparrot；P+ 两条流程只能用它。'
+                          '内置 MLHL 不调用外部程序，只给连续 SAD / 旧版 P+ 做快速试算（图相关低约 0.13）。',
                   style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
         for key in ESSENTIAL_GROUPS[2][1]:
             self._field(dm,specs[key])
@@ -572,13 +570,17 @@ class App:
         build=self._group('build','③ Buccaneer 建模 + REFMAC 精修参数',expanded=False)
         row=ttk.Frame(build);row.pack(fill='x',pady=2)
         self.auto_hand=self.tk.BooleanVar(value=True)
-        self.auto_hand_box=ttk.Checkbutton(row,text='自动判手（双手试建，不用 R-free）',variable=self.auto_hand)
+        self.auto_hand_box=ttk.Checkbutton(row,text='双手性判别（勾选则两个手性都算，按测序证据选，不看 R-free）',variable=self.auto_hand)
         self.auto_hand_box.pack(side='left')
         row=ttk.Frame(build);row.pack(fill='x',pady=(0,2))
         self.unverified_hand=self.tk.BooleanVar(value=False)
         self.unverified_hand_box=ttk.Checkbutton(row,text='证据不足也按输入手继续（结果标注未验证）',variable=self.unverified_hand)
         self.unverified_hand_box.pack(side='left')
-        ttk.Label(build,text='默认关闭：两手都算完但测序证据不足时，程序按失败处理并保留两手输出。'
+        ttk.Label(build,text='双手性：勾选时 Phaser 按输入手与反向手各定一次相、各做一轮 Parrot 密度修饰与'
+                             '测序试建，按工作集唯一测序残基数选手（不看 R-free）；不勾只算输入重原子文件'
+                             '给出的手性，时间省一半。',
+                  style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
+        ttk.Label(build,text='未验证手性（默认关闭）：两手都算完但测序证据不足时，程序按失败处理并保留两手输出。'
                              '勾选后优先沿用输入手继续建模，并在 hand_selection.json 与流水线报告里标注“手性未验证”。',
                   style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
         for key in ESSENTIAL_GROUPS[3][1]:
@@ -691,43 +693,19 @@ class App:
         self.module_build.set(modules['build']['available'])
         self._sync_run_resources()
         self._modules_changed()
-        if initial and self.method.get()=='pplus_bundled' and not self._density_ready():
-            # Say it before the user presses 开始: the P+ method cannot run on a
-            # bare CCP4, and hiding that in the advanced group is what made a
-            # stock-CCP4 user think the whole program was useless.
+        if initial and self.method.get()=='pplus_bundled' and not self._p_plus_ready(resolved or typed):
+            # Say it before the user presses 开始: P+ needs phaser + cparrot +
+            # cbuccaneer + refmac5, and a machine without them must not discover
+            # that only after Phasing.
             located=resolved or typed or '默认运行时'
-            if self._p_plus_ready(resolved or typed):
-                self._warn('这台机器只有 CCP4（%s 里没有 density/）：P+ 的两手判别和自带 RESOLVE '
-                           '密度修饰用不了。点“开始”会保留 P+ 定相、改用 cparrot 做密度修饰，'
-                           '手性按输入重原子文件；只依赖 CCP4 自带程序，不需要包内密度引擎。'%located)
-            else:
-                self._warn('这台机器只有 CCP4（%s 里没有 density/，也没有 phaser）：P+ 定相跑不了。'
-                           '点“开始”会自动改用“连续 SAD + 密度修饰 + Buccaneer/REFMAC”，'
-                           '只依赖 CCP4 自带程序，不需要包内密度引擎。'%located)
+            self._warn('这台机器（%s）缺 P+ 需要的程序（phaser / cparrot / cbuccaneer / refmac5 之一）。'
+                       '点“开始”会自动改用“连续 SAD + Parrot + Buccaneer/REFMAC”，'
+                       '只依赖 CCP4 自带程序。'%located)
 
     def _sync_run_resources(self):
-        """Keep “密度引擎” and “参考 MTZ” pointing at this runtime's own files.
-
-        ``runtime`` may be a bare CCP4: it supplies Phaser, Parrot, Buccaneer and
-        REFMAC, while P+ itself always runs inside a density/ tree.  The two
-        paths are resolved independently so a user can mix their own CCP4 with a
-        density tree from the portable package.
-        """
+        """Keep “参考 MTZ” pointing at this runtime's own reference structure."""
         runtime=self.fields.get('runtime',{}).get('var')
         runtime=runtime.get().strip() if runtime is not None else ''
-        density=self.fields.get('density_runtime',{}).get('var')
-        if density is not None:
-            automatic=getattr(self,'_density_auto','')
-            current=density.get().strip()
-            # Show the runtime's own tree; never borrow one from elsewhere here,
-            # so a bare CCP4 stays visibly bare and 开始 can offer the switch.
-            # A path the user typed is left alone unless it no longer exists.
-            if not current or current==automatic or not Path(current).is_dir():
-                own=Path(runtime)/'density' if runtime else None
-                if own is not None and self._has_density(own):
-                    density.set(str(own));self._density_auto=str(own)
-                elif current==automatic:
-                    density.set('');self._density_auto=''
         reference=self.fields.get('reference',{}).get('var')
         if reference is not None and runtime:
             candidate=Path(runtime)/'lib/data/reference_structures/reference-1tqw.mtz'
@@ -797,19 +775,11 @@ class App:
             lines.append('未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1。')
             lines.append('模块 1 输出相位、FOM 与 MTZ；已装 CCP4 但不在默认位置时，在上方“CCP4 位置”里填根目录或 ccp4.setup 路径，再点“重新检测”。')
         if located:
-            own=Path(located)/'density/bin/oasis-density-python'
-            engine=(getattr(self,'fields',{}).get('density_runtime') or {}).get('var')
-            engine=engine.get().strip() if engine is not None else ''
-            if own.is_file():
-                lines.append('包内 P+ 引擎：'+str(own.parent.parent))
-            elif engine:
-                lines.append('包内 P+ 引擎：%s（外部 CCP4 提供 Parrot/Buccaneer/REFMAC，P+ 用这份引擎）'%engine)
+            if self._p_plus_ready(located):
+                lines.append('P+ 全链可用：Phaser 定相 + cparrot 密度修饰 + cbuccaneer/refmac5 建模。')
             else:
-                lines.append('缺包内 P+ 引擎（density/bin/oasis-density-python）：P+ 的双手判别与'
-                             '自带 RESOLVE 密度修饰用不了。有 cparrot 时点“开始”会保留 P+、'
-                             '改用 cparrot 做密度修饰（手性按输入重原子文件）；没有 cparrot 则退回'
-                             '“连续 SAD + 密度修饰 + Buccaneer/REFMAC”。想用双手判别再在'
-                             '“显示高级参数 → 运行资源”里填一份 density/ 目录。')
+                lines.append('这台机器缺 P+ 需要的程序（phaser / cparrot / cbuccaneer / refmac5 之一）：'
+                             '点“开始”会自动改用“连续 SAD + Parrot + Buccaneer/REFMAC”。')
         if not self.module_parrot.get():
             lines.append('模块 2 已关闭：跳过密度修饰，直接输出 P+ 相位；模块 3 需要修饰后的图，已一并关闭。')
         elif not self.module_build.get():
@@ -824,6 +794,34 @@ class App:
         hint=getattr(self,'method_hint',None)
         if hint is not None:
             hint.set(METHOD_HINTS.get(method,''))
+        # The two P+ routes have no in-tree density-modification backend: their
+        # DM is Parrot, so the engine box is pinned and disabled for them.
+        pinned=method in ('pplus_trust','pplus_bundled')
+        if pinned and self.dm_engine.get()!=dict(ENGINES)['parrot']:
+            self.dm_engine.set(dict(ENGINES)['parrot'])
+        box=getattr(self,'dm_engine_box',None)
+        if box is not None:
+            try:
+                box.configure(state='disabled' if pinned or not self.module_parrot.get() else 'readonly')
+            except Exception:
+                pass
+        # 双手性 is a P+ frontend feature (Phaser phases both enantiomorphs); the
+        # other routes take the hand from the input heavy-atom file, so the box
+        # is disabled there instead of being silently ignored by collect().
+        hands_ok=method=='pplus_bundled' and bool(getattr(self,'module_build',None) and self.module_build.get())
+        for name in ('auto_hand_box','unverified_hand_box'):
+            widget=getattr(self,name,None)
+            if widget is None:
+                continue
+            try:
+                widget.configure(state='normal' if hands_ok else 'disabled')
+            except Exception:
+                pass
+        if not hands_ok:
+            for name in ('auto_hand','unverified_hand'):
+                variable=getattr(self,name,None)
+                if variable is not None:
+                    variable.set(False)
         for key,field in self.fields.items():
             only=field['only']
             if not only:
@@ -847,7 +845,8 @@ class App:
         prior=dict(self.prior_values).get(values.get('refinement_prior'),None)
         if prior:
             self.prior.set(prior)
-        engine=dict(ENGINES).get(values.get('dm_engine'))
+        # Old records say 'resolve'; that engine is gone, and Parrot replaces it.
+        engine=dict(ENGINES).get({'resolve':'parrot'}.get(values.get('dm_engine'),values.get('dm_engine')))
         if engine:
             self.dm_engine.set(engine)
         # Module 2/3 start from what this machine has; a reused record keeps its
@@ -948,8 +947,7 @@ class App:
         """The runtime this form would actually use, even when the field is blank.
 
         An empty field means “whatever the workflow defaults to”, so asking only
-        the field would report “no density/” for a portable runtime that has one,
-        and would skip the switch on a machine whose only CCP4 is a stock one.
+        the field would miss a stock CCP4 that the workflow finds by itself.
         """
         field=(self.fields.get('runtime') or {}).get('var')
         typed=field.get().strip() if field is not None else ''
@@ -957,22 +955,6 @@ class App:
         report=getattr(self,'_module_report',None) or {}
         resolved=(report.get('location') or {}).get('resolved') or ''
         return str(resolved or self.defaults.get('runtime') or '')
-
-    def _density_ready(self):
-        """True when the form can reach a density/ tree for the P+ engine."""
-        explicit=(self.fields.get('density_runtime') or {}).get('var')
-        explicit=explicit.get().strip() if explicit is not None else ''
-        if explicit and self._has_density(explicit):return True
-        runtime=self._effective_runtime()
-        return bool(runtime) and self._has_density(Path(runtime)/'density')
-
-    @staticmethod
-    def _has_density(path):
-        """True when ``path`` is a density/ tree carrying the P+ engine."""
-        try:
-            return (Path(str(path)).expanduser()/'bin/oasis-density-python').is_file()
-        except (OSError,ValueError):
-            return False
 
     @staticmethod
     def _p_plus_ready(runtime):
@@ -982,37 +964,6 @@ class App:
             binary=Path(str(runtime))/'bin'/name
             if not binary.is_file() or not os.access(binary,os.X_OK):return False
         return True
-
-    def _keep_p_plus_with_parrot(self,config):
-        """Keep the P+ method on a bare CCP4 by letting cparrot do the DM.
-
-        P+ itself is in-tree Python; density/ only supplies the two-hand Wang8
-        pilot and the old RESOLVE/CCTBX density-modification backend.  Parrot
-        replaces the latter, and the hand is taken from the input heavy-atom
-        file, so Phaser + cparrot + Buccaneer + REFMAC are enough.  Returns None
-        when this runtime cannot run that chain, so the caller can fall back.
-        """
-        from . import parrot_dm
-        runtime=str(config.get('runtime') or '').strip() or self._effective_runtime()
-        if not self._p_plus_ready(runtime):return None
-        try:
-            parrot_dm.locate(str(Path(runtime)/'bin'/'cparrot'),runtime)
-        except Exception:
-            return None
-        self.dm_engine.set(dict(ENGINES)['parrot'])
-        # The two-hand pilot is the one part that is CCTBX; without density/ the
-        # hand must come from the input heavy-atom file instead of being verified.
-        self.auto_hand.set(False);self.unverified_hand.set(False)
-        self._location_warning=('这台机器只有 CCP4（%s 里没有 density/）：P+ 的两手判别和自带 RESOLVE '
-                                '密度修饰用不了。点“开始”会保留 P+ 定相，改用 cparrot 做密度修饰，'
-                                '手性按输入重原子文件（本次不做双手判别），只依赖 CCP4 自带程序。'
-                                %runtime)
-        self._refresh_module_hint()
-        self._pending_warning=self._location_warning
-        config=dict(config,method='pplus_bundled',dm_engine='parrot',auto_hand=False,
-                    allow_unverified_hand=False,density_runtime='')
-        config.pop('protocol',None)
-        return config
 
     def _switch_to_ccp4_only(self,config):
         """Fall back to the route a bare CCP4 can run, or None if it cannot.
@@ -1034,14 +985,13 @@ class App:
             parrot_dm.locate(str(Path(runtime)/'bin'/'cparrot'),runtime)
             engine='parrot'
         except Exception:
-            engine='resolve'
+            engine='internal'
         self.method.set('likelihood');self._method_changed()
         if engine=='parrot':
             self.dm_engine.set(dict(ENGINES)['parrot'])
-        self._location_warning=('这台机器只有 CCP4（%s 里没有 density/），P+ 定相跑不了；'
-                                '本次改用“连续 SAD + %s 密度修饰 + Buccaneer/REFMAC”，'
-                                '只依赖 CCP4 自带程序，不需要包内密度引擎。'
-                                %(runtime,'Parrot' if engine=='parrot' else '内部'))
+        self._location_warning=('这台机器（%s）缺 P+ 需要的 phaser/cparrot，P+ 定相跑不了；'
+                                '本次改用“连续 SAD + %s 密度修饰 + Buccaneer/REFMAC”。'
+                                %(runtime,'Parrot' if engine=='parrot' else '内置 MLHL'))
         self._refresh_module_hint()
         self._pending_warning=self._location_warning
         # Patch the collected config instead of re-reading the form: the caller
@@ -1052,40 +1002,34 @@ class App:
             config.pop(key,None)
         return config
 
-    def _apply_density_fix(self,config):
-        """A P+ run needs the package density engine; a bare CCP4 moves to 连续 SAD.
+    def _ensure_runnable(self,config):
+        """Pick a route this machine can actually finish, and say so.
 
-        Nothing is borrowed behind the user's back: either the chosen runtime
-        carries density/ (or the 密度引擎 field names one), or the run switches
-        to the route that only needs CCP4 programs and says so in the red bar.
+        P+ needs phaser + cparrot + cbuccaneer + refmac5, all from CCP4; when one
+        is missing the run switches to 连续 SAD (Phaser is not needed there) and
+        the red bar names the switch.  P+ also always density-modifies with
+        Parrot, so an 'internal' engine inherited from an old saved job is
+        corrected here rather than failing after Phasing.
         """
+        if config.get('method') in ('pplus_trust','pplus_bundled') and config.get('dm_engine')!='parrot':
+            config=dict(config,dm_engine='parrot',feedback_cycles=0)
         if config.get('method')!='pplus_bundled':return config
-        explicit=str(config.get('density_runtime') or '').strip()
-        if explicit and self._has_density(explicit):return config
         runtime=str(config.get('runtime') or '').strip() or self._effective_runtime()
-        if runtime and self._has_density(Path(runtime)/'density'):return config
         if not runtime:
             # Nothing is known about this machine: let validate() name the gap.
             return config
-        # Prefer keeping the P+ method: only its two-hand pilot and the old
-        # RESOLVE backend need density/, and cparrot replaces both when the hand
-        # is fixed by the input heavy-atom file.
-        kept=self._keep_p_plus_with_parrot(dict(config,runtime=runtime))
-        if kept is not None:return kept
+        if self._p_plus_ready(runtime):return config
         switched=self._switch_to_ccp4_only(dict(config,runtime=runtime))
         if switched is not None:return switched
         raise ValueError(
-            '这次运行缺“包内密度引擎”density/bin/oasis-density-python，%s 也不是完整的 CCP4。'
-            '保留 P+ 需要 cparrot/phaser/cbuccaneer/refmac5（用 cparrot 顶替密度修饰），'
-            '退回“连续 SAD”则需要 cbuccaneer/refmac5。'
-            '请把“CCP4 位置”指向一份完整的 CCP4，'
-            '或在“显示高级参数 → 运行资源 → 包内密度引擎”里填一份 density/ 目录。'
-            %(runtime or '（未指定运行时）'))
+            '这台机器（%s）跑不了 P+：需要 phaser / cparrot / cbuccaneer / refmac5（CCP4 自带），'
+            '也跑不了“连续 SAD”：还需要 cbuccaneer / refmac5。'
+            '请把“CCP4 位置”指向一份完整的 CCP4 安装。'%(runtime or '（未指定运行时）'))
 
     def on_start(self):
         """Start one more run; earlier runs keep going in parallel."""
         try:
-            config=self._apply_density_fix(self.collect())
+            config=self._ensure_runnable(self.collect())
             name=self.task_name.get().strip()
             job=self.controller.start(config,name)
         except Exception as error:
@@ -1372,7 +1316,7 @@ class App:
         # An older record may name a bare CCP4; show the runtime that can run it
         # rather than repeating a failure the user already saw.
         try:
-            config=self._apply_density_fix(self.collect())
+            config=self._ensure_runnable(self.collect())
         except ValueError:
             pass
         pending=getattr(self,'_pending_warning','')

@@ -2,35 +2,18 @@
 """Remove components the SAD pipeline never loads from a built bundle.
 
 Every rule here is a directory or glob that belongs to a GUI, plotting or
-validation tool that the bundled engines (phaser, refmac5, cbuccaneer, cparrot,
-RESOLVE through oasis-density-python) never import. Anything the pipeline needs
-is kept, and package_standalone re-runs its smoke tests after pruning.
+validation tool that the bundled engines (phaser, refmac5, cbuccaneer, cparrot)
+never import. Anything the pipeline needs is kept, and package_standalone re-runs
+its smoke tests after pruning. The old runtime/density/ (RESOLVE/CCTBX) tree is
+gone, so no rule here mentions it.
 """
 import hashlib, json, os, shutil, sys
 from pathlib import Path
 
-SITE_PACKAGES_27 = 'runtime/density/conda_base/lib/python2.7/site-packages'
 PYTHON_312 = 'python/lib/python3.12'
 
 # (path or glob relative to the bundle root, why)
 DROP = [
-    # GUI and plotting stacks inside the RESOLVE python 2.7 environment.
-    (SITE_PACKAGES_27 + '/bokeh', 'plotting'),
-    (SITE_PACKAGES_27 + '/PySide2', 'Qt bindings'),
-    (SITE_PACKAGES_27 + '/wx*', 'GUI toolkit'),
-    (SITE_PACKAGES_27 + '/matplotlib*', 'plotting'),
-    (SITE_PACKAGES_27 + '/pandas', 'data frames'),
-    (SITE_PACKAGES_27 + '/sklearn', 'machine learning'),
-    (SITE_PACKAGES_27 + '/babel', 'localisation'),
-    (SITE_PACKAGES_27 + '/IPython', 'interactive shell'),
-    (SITE_PACKAGES_27 + '/notebook', 'browser notebook'),
-    (SITE_PACKAGES_27 + '/jupyter*', 'browser notebook'),
-    (SITE_PACKAGES_27 + '/ensurepip', 'bundled pip'),
-    (SITE_PACKAGES_27 + '/plat-mac', 'legacy platform'),
-    ('runtime/density/conda_base/lib/libQt5*', 'Qt runtime for the dropped GUI stack'),
-    ('runtime/density/conda_base/lib/libicu*', 'Qt dependency'),
-    ('runtime/density/conda_base/plugins', 'Qt plugins'),
-    ('runtime/density/conda_base/translations', 'Qt translations'),
     # Installer-only packages in the bundled python 3.12.
     (PYTHON_312 + '/site-packages/pip', 'installer'),
     (PYTHON_312 + '/site-packages/setuptools', 'installer'),
@@ -67,7 +50,7 @@ def prune(bundle, keep_reference=True):
             size = sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) if path.is_dir() else path.stat().st_size
             shutil.rmtree(path) if path.is_dir() else path.unlink()
             removed.append(dict(path=str(path.relative_to(root)), bytes=size, why=why))
-    # RESOLVE reference structures: the GUI default points at reference-1tqw.mtz.
+    # Reference structures: the GUI default points at reference-1tqw.mtz.
     refs = root / 'runtime/lib/data/reference_structures'
     if keep_reference and refs.is_dir():
         for path in sorted(refs.iterdir()):
@@ -75,7 +58,7 @@ def prune(bundle, keep_reference=True):
                 continue
             size = sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) if path.is_dir() else path.stat().st_size
             shutil.rmtree(path) if path.is_dir() else path.unlink()
-            removed.append(dict(path=str(path.relative_to(root)), bytes=size, why='unused RESOLVE reference'))
+            removed.append(dict(path=str(path.relative_to(root)), bytes=size, why='unused reference structure'))
     # Byte-code caches are regenerated on first import.
     caches = [p for p in root.rglob('__pycache__') if p.is_dir()]
     for path in caches:
@@ -84,23 +67,9 @@ def prune(bundle, keep_reference=True):
         removed.append(dict(path=str(path.relative_to(root)), bytes=size, why='byte-code cache'))
     return removed
 
-# Payloads that ship with the RESOLVE environment but no bundled program loads.
-DROP_LATE = [
-    ('runtime/density/conda_base/lib/libLLVM-9.dylib', 'LLVM (no llvmlite/numba present)'),
-    ('runtime/density/conda_base/lib/python2.7/site-packages/sphinx', 'documentation builder'),
-    ('runtime/density/conda_base/lib/python2.7/site-packages/OpenGL', 'OpenGL bindings'),
-    ('runtime/density/conda_base/lib/python2.7/site-packages/py2app', 'app bundler'),
-    ('runtime/density/conda_base/lib/python2.7/site-packages/pip', 'installer'),
-    ('runtime/density/conda_base/lib/python2.7/site-packages/pygments', 'syntax highlighting'),
-    ('runtime/density/conda_base/lib/python2.7/site-packages/google', 'cloud client stubs'),
-    ('runtime/density/conda_base/lib/python2.7/site-packages/setuptools', 'installer'),
-    # segments/ is NOT droppable: RESOLVE reads rho.list, Richardson_rho.dat and
-    # side_chains_rho.dat from it whenever the pipeline has to discriminate the
-    # hand, so dropping it made every auto-hand run die at the P+ stage.
-    ('runtime/density/modules/solve_resolve/ext_ref_files/segments_em', 'electron-microscopy segment library'),
-    ('runtime/density/modules/solve_resolve/ext_ref_files/segments_rich_small', 'alternative RESOLVE segment library'),
-    ('runtime/density/modules/solve_resolve/ext_ref_files/patterns/patterns_txt', 'text dump of the pattern library'),
-]
+# Nothing extra to drop once the density/ tree is absent; the hook stays because
+# package_standalone calls it.
+DROP_LATE = []
 
 
 def prune_late(root):

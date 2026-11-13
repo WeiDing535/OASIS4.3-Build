@@ -53,7 +53,7 @@ def test_new_gui_plan_preserves_explicit_route_and_legacy_missing_method(trusted
 
 @pytest.mark.parametrize('change',[
     {'trust_kl':0},{'trust_kl':True},{'trust_kl':float('nan')},{'trust_kl':.1},
-    {'phenix_bin':'/missing/phenix'},{'observation_prior':''},{'trust_cleanup':'yes'},
+    {'observation_prior':''},{'trust_cleanup':'yes'},
     {'build_semet':True},{'labels':'fplus=other'}])
 def test_new_route_invalid_inputs_fail_without_creating_output(trusted,change):
     with pytest.raises(ValueError):pipeline.validate({**trusted,**change})
@@ -114,7 +114,9 @@ def test_six_stage_pipeline_retains_raw_model_on_conservative_cleanup_refusal(tr
     cfg=pipeline.validate(trusted)
     fake=FakeStages(cfg)
     def runner(command,log,env):
-        action=command[3] if not command[2].endswith('run_build_from_phases.py') else 'build'
+        if command[2].endswith('run_build_from_phases.py'):action='build'
+        elif command[2].endswith('run_trace_feedback.py'):action='dm'
+        else:action=command[3]
         out=Path(command[command.index('--output')+1])
         if action=='phase':
             prepared=out.parent/'01_inputs/sad.mtz';trust.phase({**cfg,'prepared_sad':str(prepared)},out)

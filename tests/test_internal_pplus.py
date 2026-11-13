@@ -15,7 +15,7 @@ from phasebuild.sad_input import read_sad_pairs,read_phase_prior
 
 @pytest.fixture
 def own(trusted):
-    cfg={**trusted,'method':'pplus_internal','observation_prior':'','phenix_bin':'/not-installed','reference':str(Path(trusted['sad']).parent/'reference.mtz')}
+    cfg={**trusted,'method':'pplus_internal','dm_engine':'internal','observation_prior':'','phenix_bin':'/not-installed','reference':str(Path(trusted['sad']).parent/'reference.mtz')}
     m=gemmi.read_mtz_file(cfg['sad']);a=np.array(m);d=12*np.sin(np.arange(len(a)));f=(a[:,3]+a[:,5])/2;a[:,3]=f+d/2;a[:,5]=f-d/2;m.set_data(a);m.write_to_file(cfg['sad'])
     return cfg
 

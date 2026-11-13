@@ -20,9 +20,9 @@ DEFAULTS = dict(copies='auto', phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
                 triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True, dm_enabled=True,
                 observation_prior='', composition_sequence='', phenix_bin='', trust_kl=.0005, trust_cleanup=True, trust_stability=False, trust_partial_cleanup=False, trust_work_weight=False, trust_wang_radius=14., wavelength=None,
-                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, allow_unverified_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='resolve',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all')
+                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, allow_unverified_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='parrot',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all')
 
-FALLBACK_NOTICE=('密度修饰引擎已回退到内置 RESOLVE/MLHL（原因：%s）。'
+FALLBACK_NOTICE=('密度修饰引擎已回退到内置 MLHL（原因：%s）。'
                  'trace/Fcalc 反馈已关闭；本次结果不能与 Parrot 协议（十案例流程）直接比较。')
 
 
@@ -103,22 +103,14 @@ def validate(config, inspect=True):
         cfg.update(phenix_bin='',phase_cycles=100)
         if cfg.get('observation_prior'):raise ValueError('自带模式不接受外部相位文件')
         cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None))
-        from .bundled_pplus import engine_layout,require_density
-        # The two-hand pilot and the old RESOLVE/CCTBX DM backend are the only
-        # users of density/.  With Parrot doing the density modification and the
-        # hand taken from the input heavy-atom file, a stock CCP4 is enough.
-        need_density=cfg.get('dm_engine')!='parrot' or bool(cfg.get('auto_hand'))
-        engine_layout(cfg['runtime'],cfg.get('dm_engine'),need_density=need_density)
-        if need_density:require_density(cfg)
+        from .bundled_pplus import engine_layout
+        # Phaser supplies both hands and the refined substructure; Parrot,
+        # cbuccaneer and refmac5 come from the same CCP4.  Nothing else is needed.
+        engine_layout(cfg['runtime'],cfg.get('dm_engine'))
     if trusted:
-        # The P+ trust-region phase stage itself never needs Phenix; only the
-        # original RESOLVE/CCTBX density-modification backend did. When the
-        # external Parrot engine is selected the requirement is dropped.
-        if cfg.get('dm_engine')!='parrot':
-            from .trust_workflow import phenix_directory
-            cfg['phenix_bin']=phenix_directory(cfg['phenix_bin'])
-        else:
-            cfg['phenix_bin']=''
+        # The P+ trust-region phase stage never needs Phenix, and density
+        # modification is Parrot's job, so no Phenix bin directory is required.
+        cfg['phenix_bin']=''
         cfg.update(phase_cycles=100,dm_cycles=40)
     for flag in ['trust_stability','trust_partial_cleanup','trust_work_weight']:
         if not isinstance(cfg[flag],bool):raise ValueError(flag+' must be boolean')
@@ -128,7 +120,16 @@ def validate(config, inspect=True):
     if radius!=14 and not (trusted or bundled):raise ValueError('Wang radius is active only for original-likelihood P+')
     if cfg['trust_work_weight'] and (not cfg['build_model'] or not cfg['trust_cleanup']):raise ValueError('Work-only weight calibration requires model building and cleanup enabled')
     if cfg['trust_partial_cleanup'] and (not cfg['build_model'] or not cfg['trust_cleanup']):raise ValueError('Partial cleanup requires model building and cleanup enabled')
-    if cfg['dm_engine'] not in ('resolve','parrot'):raise ValueError('Unknown density-modification engine')
+    # 'parrot' is CCP4 Parrot; 'internal' is the in-tree MLHL/legacy kernel used
+    # by 连续 SAD, 旧版 P+ and 内部 P+.  The copied RESOLVE/CCTBX tree is gone, so
+    # the two P+ routes always need Parrot.
+    if cfg['dm_engine']=='resolve':
+        if config.get('dm_engine')=='resolve':
+            raise ValueError('dm_engine=resolve 已移除：包内 RESOLVE/CCTBX 密度修饰不再随程序分发，请改用 parrot（CCP4 cparrot）')
+        cfg['dm_engine']='parrot'
+    if cfg['dm_engine'] not in ('parrot','internal'):raise ValueError('Unknown density-modification engine: '+str(cfg['dm_engine']))
+    if cfg['dm_engine']=='internal' and cfg['method'] in ('pplus_trust','pplus_bundled'):
+        raise ValueError('P+ 两条流程的密度修饰只能用 CCP4 Parrot；内部 MLHL 只用于连续 SAD、旧版 P+ 与内部 P+')
     # Parrot only consumes the standard FP/PHIB/FOM + HL quartet, which every
     # phasing method writes, so a bare CCP4 can do density modification for the
     # continuous-SAD and legacy P+ routes as well (this is the SHELXE-equivalent
@@ -157,21 +158,20 @@ def validate(config, inspect=True):
         try:
             cfg['dm_executable']=parrot_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime') or None)
         except ValueError as error:
-            # Keep older runtimes usable, but never silently: the run records the
-            # requested engine and the reason so the GUI, the report and the
-            # result page can all say what actually ran.
-            cfg['dm_engine_requested']='parrot'
-            cfg['dm_engine']='resolve'
-            cfg['dm_engine_fallback']=str(error)
-            if cfg.pop('_auto_dm_cycles',False):cfg['dm_cycles']=40
-            cfg['feedback_cycles']=0
+            if cfg['method'] in ('likelihood','pplus','pplus_internal'):
+                # Keep older runtimes usable, but never silently: the run records
+                # the requested engine and the reason so the GUI, the report and
+                # the result page can all say what actually ran.
+                cfg['dm_engine_requested']='parrot'
+                cfg['dm_engine']='internal'
+                cfg['dm_engine_fallback']=str(error)
+                if cfg.pop('_auto_dm_cycles',False):cfg['dm_cycles']=40
+                cfg['feedback_cycles']=0
+            else:
+                raise ValueError('P+ 流程的密度修饰只能用 CCP4 Parrot，但没找到 cparrot：'+str(error)
+                                 +'。请安装带 cparrot 的 CCP4，或在“CCP4 位置”里指向它')
     if cfg['dm_engine']=='parrot' and not cfg['build_model']:
-        # Phases-only runs stop after the DM map: there is no tracer, no Fcalc
-        # feedback and no model to build, so the internal engine is both
-        # sufficient and free of any external program.
-        cfg['dm_engine_requested']='parrot'
-        cfg['dm_engine']='resolve'
-        cfg['dm_engine_fallback']='phases-only runs (build_model off) use the internal density-modification engine'
+        # Phases-only runs stop after the DM map: nothing to trace or feed back.
         cfg['feedback_cycles']=0
     if cfg['feedback_cycles'] and cfg['dm_engine']!='parrot':
         raise ValueError('Trace feedback requires the Parrot density-modification engine')
@@ -238,6 +238,8 @@ def validate(config, inspect=True):
             if not (Path(cfg['runtime'])/'lib/data/reference_structures'/('reference-1tqw'+suffix)).is_file():
                 raise ValueError('External construction reference unavailable')
     if cfg['auto_hand'] and cfg['method']!='pplus_bundled':
+        # The non-bundled hands are preselected by the bundled Phaser frontend,
+        # which needs its own Phaser; density modification stays CCP4 Parrot.
         from .bundled_pplus import engine_layout
         engine_layout(cfg['runtime'],cfg.get('dm_engine'))
         if cfg.get('wavelength') is None:raise ValueError('Automatic hands require experimental SAD wavelength')
@@ -341,15 +343,18 @@ def stage_plan(cfg, python=None):
         stages.insert(1,dict(id='hand',name='双手工作集测序判别',directory=str(hand),
             command=[python,'-u',str(root/'run_hand_preselection.py'),'--config',str(out/'pipeline_report.json'),'--output',str(hand)],
             outputs=[str(hand/name) for name in ('hand_selection.json','selected_native.mtz','selected_sad.mtz','refined_heavy.pdb')]))
+    # The hand stage (when present) sits at index 1, so the later blocks must
+    # address stages by id instead of by position.
+    by_id={stage['id']:stage for stage in stages}
     if cfg.get('building_recipe')=='pipeline' and cfg.get('build_model',True):
-        stages[4].update(name='内置 Buccaneer+REFMAC 构建循环（与对照流程同一协议）',
+        by_id['build'].update(name='内置 Buccaneer+REFMAC 构建循环（与对照流程同一协议）',
             command=[python,'-u',str(root/'run_build_pipeline.py'),'--map',str(dm/'map_phases.mtz'),
                      '--native',str(hand/'selected_native.mtz') if scout else (str(phase/'selected_native.mtz') if cfg.get('auto_hand') else (str(prepare/'native.mtz') if cfg.get('input_columns') else cfg['native'])),
                      '--sequence',str(prepare/'building.fasta'),'--runtime',cfg['runtime'],
                      '--rounds',str(cfg['rounds']),'--free-value',str(cfg['free_value']),'--output',str(build)],
             outputs=[str(build/'primary_model.cif'),str(build/'hybrid_report.json')])
     if cfg.get('dm_engine')=='parrot':
-        stages[2].update(name=('Parrot 各向异性校正/溶剂掩膜密度修饰（工作集）' if not cfg.get('feedback_cycles')
+        by_id['dm'].update(name=('Parrot 各向异性校正/溶剂掩膜密度修饰（工作集）' if not cfg.get('feedback_cycles')
                                else 'Parrot 密度修饰 + %d 轮工作集 trace/Fcalc 反馈'%cfg['feedback_cycles']),
             command=[python,'-u',str(root/'run_trace_feedback.py'),'--config',str(out/'pipeline_report.json'),'--output',str(dm)],
             outputs=[str(dm/'map_phases.mtz'),str(dm/'map_phases.json')])
@@ -434,9 +439,6 @@ def _run_pipeline(config, resume=False, runner=None, progress=print):
     if cfg['method'] in ('pplus_trust','pplus_internal','pplus_bundled'):
         for key in ['observation_prior','composition_sequence']:
             if cfg[key]:inputs[key]=fingerprint(cfg[key])
-    if cfg['method']=='pplus_trust' and cfg.get('dm_engine')!='parrot':
-        for name in ['phenix.python','mmtbx.density_modification']:
-            inputs[name]=fingerprint(Path(cfg['phenix_bin'])/name)
     runtime=Path(cfg['runtime']) if cfg['build_model'] or cfg['method']=='pplus_bundled' else None
     if runtime and (cfg['build_model'] or cfg['auto_hand']):inputs.update({name:fingerprint(runtime/'bin'/name) for name in ['cbuccaneer','refmac5']})
     if cfg['method']=='pplus_bundled':inputs['native_phaser']=fingerprint(runtime/'bin/phaser')

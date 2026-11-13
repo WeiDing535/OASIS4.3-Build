@@ -1,7 +1,8 @@
-"""Self-contained engine adapter: native Phaser -> genuine P+ -> RESOLVE/CCTBX.
+"""Self-contained engine adapter: native Phaser -> genuine P+ -> CCP4 Parrot.
 
-Independence means no separately installed suites. This explicitly retains
-third-party kernels; copied licensed components are for local evaluation only.
+Independence means no separately installed suites. Phaser and Parrot are part of
+the CCP4 that also supplies cbuccaneer/refmac5, so one CCP4 install runs the whole
+chain; the in-tree P+ likelihood refinement is OASIS's own code.
 """
 from pathlib import Path
 import json
@@ -15,65 +16,14 @@ from .data import fingerprint
 from .trust_workflow import dump,launch,sample_info
 
 
-DENSITY_ENGINE='bin/oasis-density-python'
-
-
-def density_root(cfg):
-    """Locate the bundled RESOLVE/CCTBX tree, which is not part of CCP4.
-
-    ``runtime`` is the installation that supplies Phaser and the optional
-    Parrot/Buccaneer/REFMAC programs; it may legitimately be a bare CCP4.  The
-    P+ likelihood refinement and the two-hand pilot are driven by the copied
-    RESOLVE/CCTBX tree, so that tree is resolved separately: an explicit
-    ``density_runtime``, ``PHASEBUILD_DENSITY``, ``<runtime>/density``, then the
-    package's own runtime next to the application directory.
-    """
-    runtime=Path(cfg['runtime']).expanduser()
-    explicit=str(cfg.get('density_runtime') or os.environ.get('PHASEBUILD_DENSITY') or '')
-    candidates=[]
-    if explicit:
-        path=Path(explicit).expanduser()
-        candidates+=[path] if path.name=='density' else [path,path/'density']
-    candidates.append(runtime/'density')
-    app=Path(__file__).resolve().parents[2]
-    for base in (app,app.parent):
-        candidates+=[base/'runtime/density',base/'density']
-    # A portable bundle installed next to the application keeps its density tree
-    # in its own runtime; a stale config naming a bare CCP4 should still find it.
-    for folder in (app/'dist',app.parent):
-        if folder.is_dir():
-            candidates+=[path/'density' for path in sorted(folder.glob('OASIS4.3*portable*/runtime'),reverse=True)]
-    for path in candidates:
-        engine=path/DENSITY_ENGINE
-        if engine.is_file() and os.access(engine,os.X_OK):return path.resolve()
-    return None
-
-
-def require_density(cfg):
-    """Fail before Phaser starts, with the one sentence that fixes it."""
-    density=density_root(cfg)
-    if density is None:
-        raise ValueError(
-            '这次运行缺“包内密度修饰引擎”'+DENSITY_ENGINE+'：当前运行时 '+str(Path(cfg['runtime']).expanduser())
-            +' 里没有 density/，它只是外部 CCP4 安装。改用 CCP4 的 cparrot 做密度修饰、'
-            '并把手性固定为输入重原子文件（--dm-engine parrot --no-auto-hand）就不需要 density/；'
-            '要保留双手判别或旧的 RESOLVE 后端，才需要把“CCP4 位置”指向便携包的 runtime 目录'
-            '（例如 …/OASIS4.3-…-portable local/runtime，里面有 density/ 和 bin/），或直接启动便携包里的 OASIS4.3')
-    return density
-
-
-def engine_layout(runtime,dm_engine=None,density=None,need_density=False):
-    """Check the bundled engines; the RESOLVE/CCTBX tree is unused under Parrot."""
-    runtime=Path(runtime).expanduser().resolve();density=Path(density).expanduser().resolve() if density else runtime/'density'
-    required=[runtime/'bin/phaser']
-    if dm_engine!='parrot' or need_density:required+=[density/DENSITY_ENGINE,density/'conda_base/bin/python2.7']
-    for p in required:
-        if not p.is_file() or not os.access(p,os.X_OK):
-            raise ValueError('P+ 引擎缺失：'+str(p)+'。若“CCP4 位置”填的是外部安装，请确认它有 bin/phaser，或清空该栏改用包内运行时')
-    if dm_engine=='parrot':return runtime,None
-    for p in [density/'build/libtbx_env',density/'modules/solve_resolve/ext_ref_files']:
-        if not p.exists():raise ValueError('自带密度修饰资源缺失：'+str(p))
-    return runtime,density
+def engine_layout(runtime,dm_engine=None):
+    """Check the bundled engine; density modification is CCP4 Parrot's job."""
+    runtime=Path(runtime).expanduser().resolve()
+    if dm_engine not in (None,'parrot','internal'):raise ValueError('未知密度修饰引擎：'+str(dm_engine))
+    phaser=runtime/'bin/phaser'
+    if not phaser.is_file() or not os.access(phaser,os.X_OK):
+        raise ValueError('P+ 引擎缺失：'+str(phaser)+'。若“CCP4 位置”填的是外部安装，请确认它有 bin/phaser，或清空该栏改用包内运行时')
+    return runtime
 
 
 def preflight(cfg):
@@ -137,18 +87,10 @@ def phase(cfg,output):
     from .runtime import runtime_environment
     from . import trust_workflow
     out=Path(output)
-    # density/ supplies two things: the two-hand Wang8 pilot (only when
-    # auto_hand runs) and the old RESOLVE/CCTBX density-modification backend.
-    # With Parrot as the DM engine and the hand taken from the input heavy-atom
-    # file, neither is needed, so a stock CCP4 can run this stage.
-    need_density=cfg.get('dm_engine')!='parrot' or bool(cfg.get('auto_hand'))
-    density=require_density(cfg) if need_density else None
-    if density is not None and Path(density).parent!=Path(cfg['runtime']).expanduser().resolve():
-        # density_root() also looks next to the application; say so out loud
-        # instead of letting a run appear to use only the chosen runtime.
-        print('density/ 取自 %s（不在所选运行时 %s 内）'%(density,cfg['runtime']),flush=True)
-    cfg=dict(cfg,density_runtime=str(density) if density else '')
-    runtime,_=engine_layout(cfg['runtime'],cfg.get('dm_engine'),density=density,need_density=need_density);front=out/'phaser';front.mkdir()
+    # Everything here comes from the runtime: Phaser for the frontend, the
+    # in-tree P+ likelihood refinement, and CCP4 Parrot for density
+    # modification.  No separately copied Phenix tree is involved any more.
+    runtime=engine_layout(cfg['runtime'],cfg.get('dm_engine'));front=out/'phaser';front.mkdir()
     work=stage_work(cfg,front/'work.mtz');shutil.copyfile(cfg['sequence'],front/'sequence.fasta')
     if Path(cfg['heavy']).suffix.lower() in ('.pdb','.ent'):shutil.copyfile(cfg['heavy'],front/'heavy.pdb')
     else:gemmi.read_structure(cfg['heavy']).write_pdb(str(front/'heavy.pdb'))
@@ -216,10 +158,5 @@ def dm(cfg,output):
     if cfg.get('auto_hand'):
         from .hand_selection import copy_selected_dm
         return copy_selected_dm(cfg,output)
-    from . import trust_workflow
-    out=Path(output);density=require_density(cfg);model=out.parent/'02_sad/refined_heavy.pdb'
-    meta=json.loads((out.parent/'02_sad/frontend.json').read_text())
-    if fingerprint(model)['sha256']!=meta['refined_substructure']['sha256']:raise ValueError('Refined substructure changed before density modification')
-    trust_workflow.dm({**cfg,'heavy':str(model),'density_runtime':str(density)},out)
-    meta=json.loads((out/'map_phases.json').read_text());meta.update(phase_method='pplus_bundled',dm_engine='Bundled RESOLVE/Wang%g + CCTBX classic40'%cfg.get('trust_wang_radius',14.),backend_origin='Third-party components copied from existing local authorized distributions; not a new OASIS implementation',requires_separate_Phenix_installation=False)
-    dump(out/'map_phases.json',meta)
+    raise ValueError('P+ 自带引擎的密度修饰统一由 CCP4 Parrot 完成（--dm-engine parrot）；'
+                     '旧的包内 RESOLVE/CCTBX 后端已移除')

@@ -15,7 +15,9 @@ def root():return Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize('method',['likelihood','pplus'])
 def test_both_real_phase_and_dm_routes_match_preserved_upstream(inputs,method):
-    cfg={**inputs,'method':method,'solvent_fraction':.45}
+    # This test compares the in-tree MLHL/legacy DM against the upstream engine;
+    # pin it so a host CCP4 cannot swap in the Parrot stage.
+    cfg={**inputs,'method':method,'solvent_fraction':.45,'dm_engine':'internal'}
     runner=FakeStages(cfg,real_phase=True)
     state=pipeline.run_pipeline(cfg,runner=runner,progress=lambda x:None)
     out=Path(cfg['output']);raw=out/'02_sad/experimental.mtz';dm=out/'03_dm/map_phases.mtz'
@@ -97,8 +99,9 @@ def test_desktop_controller_only_accepts_the_two_method_pipeline(inputs):
 
 
 def test_results_keep_intermediate_separate_and_verify_final_hash(inputs):
-    runner=FakeStages(inputs);pipeline.run_pipeline(inputs,runner=runner,progress=lambda x:None)
-    out=Path(inputs['output']);state_path=out/'pipeline_report.json';state=json.loads(state_path.read_text())
+    cfg={**inputs,'dm_engine':'internal'}
+    runner=FakeStages(cfg);pipeline.run_pipeline(cfg,runner=runner,progress=lambda x:None)
+    out=Path(cfg['output']);state_path=out/'pipeline_report.json';state=json.loads(state_path.read_text())
     # Replace fake builder's minimal report with a coherent saved refinement endpoint.
     folder=out/'05_build/round_01_refine';folder.mkdir()
     (folder/'model.cif').write_bytes((out/'primary_model.cif').read_bytes())
@@ -157,7 +160,7 @@ def test_focused_source_runs_without_legacy_entrypoints_or_training_models(input
 @pytest.mark.parametrize('method',['likelihood','pplus'])
 def test_phases_only_completes_without_resolving_or_fingerprinting_external_engines(inputs,method,monkeypatch):
     cfg={**inputs,'method':method,'build_model':False,'runtime':'/missing/unused/runtime',
-         'rounds':None,'cycles':None}
+         'rounds':None,'cycles':None,'dm_engine':'internal'}
     def forbidden(*a,**kw):raise AssertionError('Phases-only must never resolve external engines')
     monkeypatch.setattr(pipeline,'resolve_runtime',forbidden)
     monkeypatch.setattr(pipeline,'runtime_info',forbidden)
@@ -182,7 +185,7 @@ def test_phases_only_completes_without_resolving_or_fingerprinting_external_engi
 
 def test_optional_build_flag_in_preflight_and_resume_protocol(inputs):
     assert pipeline.validate(inputs)['build_model'] is True
-    cfg={**inputs,'build_model':False,'runtime':''}
+    cfg={**inputs,'build_model':False,'runtime':'','dm_engine':'internal'}
     checked,steps=workflow.make_plan(cfg,root())
     assert '--no-build-model' in steps[0]['command'] and '--runtime' not in steps[0]['command']
     plan=workflow.describe_plan(checked)
@@ -191,7 +194,7 @@ def test_optional_build_flag_in_preflight_and_resume_protocol(inputs):
     assert not Path(inputs['output']).exists()
     pipeline.run_pipeline(cfg,runner=FakeStages(cfg),progress=lambda x:None)
     with pytest.raises(ValueError,match='Resume refused'):
-        pipeline.run_pipeline({**inputs,'build_model':True},resume=True,runner=FakeStages(inputs))
+        pipeline.run_pipeline({**inputs,'build_model':True,'dm_engine':'internal'},resume=True,runner=FakeStages(inputs))
     with pytest.raises(ValueError,match='boolean'):pipeline.validate({**inputs,'build_model':'false'})
 
 

@@ -23,8 +23,7 @@ def test_controller_defaults_and_plan_come_from_the_workflow(tmp_path):
 def test_unverified_hand_switch_reaches_the_job_command(tmp_path,monkeypatch,inputs):
     """The opt-in must be a real argv flag, not a silently dropped form value."""
     from phasebuild import bundled_pplus
-    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None,need_density=False:None)
-    monkeypatch.setattr(bundled_pplus,'require_density',lambda cfg:Path(cfg['runtime'])/'density')
+    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None:Path(runtime))
     root=project(tmp_path)
     base=dict(inputs,auto_hand=True,method='pplus_bundled',wavelength=2.0,
               output=str(tmp_path/'run'))
@@ -820,8 +819,8 @@ def test_browse_buttons_stay_visible_and_ccp4_location_feeds_detection(tmp_path,
         app.root.destroy()
 
 
-def test_a_complete_ccp4_keeps_p_plus_and_parrot_replaces_density(tmp_path,monkeypatch):
-    """P+ itself is in-tree Python; cparrot covers the part density/ used to do."""
+def test_a_complete_ccp4_runs_p_plus_with_parrot(tmp_path,monkeypatch):
+    """P+ is in-tree Python; the only external pieces are the four CCP4 programs."""
     from phasebuild import oasis_workflow
     monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
     app=window(tmp_path)
@@ -830,22 +829,19 @@ def test_a_complete_ccp4_keeps_p_plus_and_parrot_replaces_density(tmp_path,monke
         for name in ('bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
-        app.fields['runtime']['var'].set(str(bare))
-        config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
-                                           runtime=str(bare),density_runtime=''))
+        config=app._ensure_runnable(dict(app.defaults,method='pplus_bundled',
+                                         runtime=str(bare),dm_engine='internal'))
         assert config['runtime']==str(bare)
         assert config['method']=='pplus_bundled'
-        assert config['dm_engine']=='parrot'
-        assert config['auto_hand'] is False and config['allow_unverified_hand'] is False
-        assert config['density_runtime']==''
-        assert app.method.get()=='pplus_bundled' and app.dm_engine.get()==dict(desktop.ENGINES)['parrot']
-        assert str(bare) in app._location_warning
-        assert 'cparrot' in app._location_warning and '双手判别' in app._location_warning
+        # P+ can only density-modify with Parrot: an inherited 'internal' is fixed.
+        assert config['dm_engine']=='parrot' and config['feedback_cycles']==0
+        assert 'density_runtime' not in config
+        assert app._p_plus_ready(str(bare))
     finally:
         app.root.destroy()
 
 
-def test_a_ccp4_without_phaser_still_moves_to_continuous_sad(tmp_path,monkeypatch):
+def test_a_ccp4_without_phaser_moves_to_continuous_sad(tmp_path,monkeypatch):
     """No Phaser means no P+ frontend: the method really has to change."""
     from phasebuild import oasis_workflow
     monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
@@ -855,82 +851,78 @@ def test_a_ccp4_without_phaser_still_moves_to_continuous_sad(tmp_path,monkeypatc
         for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
-        app.fields['runtime']['var'].set(str(bare))
-        config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
-                                           runtime=str(bare),density_runtime=''))
+        config=app._ensure_runnable(dict(app.defaults,method='pplus_bundled',
+                                         runtime=str(bare),dm_engine='parrot'))
         assert config['method']=='likelihood' and config['dm_engine']=='parrot'
-        assert '连续 SAD' in app._location_warning
+        assert config['auto_hand'] is False and config['allow_unverified_hand'] is False
+        assert '连续 SAD' in app._location_warning and 'Parrot' in app._location_warning
+        assert app.method.get()=='likelihood'
     finally:
         app.root.destroy()
 
 
-def test_a_bare_ccp4_keeps_its_engines_and_borrows_a_density_tree(tmp_path,monkeypatch):
+def test_a_bare_ccp4_keeps_its_engines(tmp_path,monkeypatch):
     """The user's own CCP4 is enough for Phaser/Parrot/Buccaneer/REFMAC."""
-    app=window(tmp_path)
-    try:
-        bare=tmp_path/'ccp4-9';bare.mkdir()
-        for name in ('bin/cphaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
-            path=bare/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#!/bin/sh\n')
-        tree=tmp_path/'elsewhere/density'
-        engine=tree/'bin/oasis-density-python';engine.parent.mkdir(parents=True);engine.write_text('#!/bin/sh\n')
-        app.fields['runtime']['var'].set(str(bare))
-        app.fields['density_runtime']['var'].set(str(tree))
-        config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
-                                           runtime=str(bare),density_runtime=str(tree)))
-        # Nothing is switched: CCP4 supplies the engines, the tree only P+.
-        assert config['runtime']==str(bare)
-        assert config['density_runtime']==str(tree)
-    finally:
-        app.root.destroy()
-
-
-def test_a_run_without_any_density_tree_switches_to_the_ccp4_only_route(tmp_path,monkeypatch):
-    """Bare CCP4 cannot run P+, but it can run 连续 SAD: switch, do not refuse."""
-    from phasebuild import bundled_pplus,oasis_workflow
-    monkeypatch.setattr(bundled_pplus,'density_root',lambda cfg:None)
+    from phasebuild import oasis_workflow
     monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+        for name in ('bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
-        app.fields['runtime']['var'].set(str(bare))
-        app.fields['density_runtime']['var'].set('')
-        config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
-                                           runtime=str(bare),density_runtime=''))
-        assert config['method']=='likelihood' and config['runtime']==str(bare)
-        assert '连续 SAD' in app._location_warning
-        # A directory that is not a complete CCP4 still has to be refused.
-        empty=tmp_path/'nothing';empty.mkdir()
-        with pytest.raises(ValueError) as caught:
-            app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
-                                        runtime=str(empty),density_runtime=''))
-        assert 'density/bin/oasis-density-python' in str(caught.value)
+        config=app._ensure_runnable(dict(app.defaults,method='pplus_bundled',
+                                         runtime=str(bare),dm_engine='parrot'))
+        assert config['runtime']==str(bare) and config['method']=='pplus_bundled'
+        assert app._location_warning==''
     finally:
         app.root.destroy()
 
 
-def test_the_density_field_shows_the_runtime_own_tree(tmp_path):
-    """A portable runtime carries density/; the form must say which one is used."""
+def test_an_incomplete_ccp4_is_refused_with_the_missing_program(tmp_path,monkeypatch):
+    """Nothing can be finished on this runtime, so 开始 must name the gap."""
+    from phasebuild import oasis_workflow
+    monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
+    app=window(tmp_path)
+    try:
+        bare=tmp_path/'ccp4-9'
+        for name in ('bin/phaser','bin/cparrot'):
+            path=bare/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#!/bin/sh\n')
+        with pytest.raises(ValueError) as caught:
+            app._ensure_runnable(dict(app.defaults,method='pplus_bundled',
+                                      runtime=str(bare),dm_engine='parrot'))
+        assert 'cbuccaneer' in str(caught.value) and 'CCP4' in str(caught.value)
+    finally:
+        app.root.destroy()
+
+
+def test_the_engine_box_is_pinned_for_the_p_plus_routes(tmp_path):
+    """P+ has no in-tree DM backend, so the engine choice is not the user's."""
+    app=window(tmp_path)
+    try:
+        app.method.set('pplus_bundled');app._method_changed()
+        assert app.dm_engine.get()==dict(desktop.ENGINES)['parrot']
+        assert str(app.dm_engine_box.cget('state'))=='disabled'
+        app.method.set('likelihood');app._method_changed()
+        assert str(app.dm_engine_box.cget('state'))=='readonly'
+    finally:
+        app.root.destroy()
+
+
+def test_reference_mtz_follows_the_runtime(tmp_path):
+    """A runtime carries its own reference structure; the form points at it."""
     app=window(tmp_path)
     try:
         runtime=tmp_path/'runtime'
-        engine=runtime/'density/bin/oasis-density-python'
-        engine.parent.mkdir(parents=True);engine.write_text('#!/bin/sh\n')
+        library=runtime/'lib/data/reference_structures'
+        library.mkdir(parents=True)
+        (library/'reference-1tqw.mtz').write_text('placeholder')
         app.fields['runtime']['var'].set(str(runtime))
-        app.fields['density_runtime']['var'].set('')
+        app.fields['reference']['var'].set('')
         app._sync_run_resources()
-        assert app.fields['density_runtime']['var'].get()==str(runtime/'density')
-        # A bare CCP4 stays visibly bare, so 开始 can offer the switch.
-        bare=tmp_path/'ccp4';bare.mkdir()
-        app.fields['runtime']['var'].set(str(bare))
-        app._sync_run_resources()
-        assert app.fields['density_runtime']['var'].get()==''
-        assert '缺包内 P+ 引擎' in app.module_hint.get()
+        assert app.fields['reference']['var'].get()==str(library/'reference-1tqw.mtz')
     finally:
         app.root.destroy()
-
 
 def test_starting_on_a_bare_ccp4_says_the_method_changed(tmp_path,monkeypatch):
     """Switching the method is a real change; the red bar must name it."""
@@ -980,18 +972,17 @@ def test_another_method_drops_the_bundled_recipe(tmp_path):
         app.root.destroy()
 
 
-def test_default_runtime_prefers_the_one_with_the_density_engine(tmp_path,monkeypatch):
-    """A bare CCP4 can run Phaser but not the bundled P+ route."""
+def test_default_runtime_prefers_a_complete_bundled_engine(tmp_path,monkeypatch):
+    """A bare CCP4 cannot run P+; the bundle that has Phaser and Buccaneer can."""
     from phasebuild import oasis_workflow
     bare=tmp_path/'ccp4';bare.mkdir()
     bundle=tmp_path/'dist/OASIS4.3-portable local/runtime'
-    for name in ('bin/cbuccaneer','bin/refmac5','density/bin/oasis-density-python'):
+    for name in ('bin/phaser','bin/cbuccaneer','bin/refmac5'):
         path=bundle/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#!/bin/sh\n')
     monkeypatch.setattr(oasis_workflow,'default_runtime',lambda:str(bare))
     assert oasis_workflow.bundled_runtime(tmp_path)==bundle
     assert oasis_workflow.defaults(tmp_path)['runtime']==str(bundle)
     assert oasis_workflow.bundled_runtime(tmp_path/'dist') is None
-
 
 def test_the_log_pane_shows_each_stage_not_only_the_headers(tmp_path):
     """gui.log holds stage headers only; the pane must add each stage's own lines."""
@@ -1071,21 +1062,15 @@ def test_a_bare_ccp4_warns_before_the_first_run_not_only_after(tmp_path,monkeypa
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+        for name in ('bin/phaser','bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
         app.fields['runtime']['var'].set(str(bare))
-        app.fields['density_runtime']['var'].set('')
         app.method.set('pplus_bundled')
         app._detect_modules(initial=True)
         text=app.warning.cget('text')
-        assert 'cparrot' in text and 'density/' in text and str(bare) in text
+        assert 'cparrot' in text and '连续 SAD' in text and str(bare) in text
         # The method itself is untouched until 开始, so nothing is hidden either.
         assert app.method.get()=='pplus_bundled'
-        # A CCP4 without Phaser cannot keep P+: the notice must say so instead.
-        for name in ('phaser',):
-            (bare/'bin'/name).unlink()
-        app._detect_modules(initial=True)
-        assert '连续 SAD' in app.warning.cget('text')
     finally:
         app.root.destroy()

@@ -10,10 +10,10 @@ from phasebuild.sad_input import read_sad_pairs
 @pytest.fixture
 def bundled(trusted,tmp_path):
  cfg={**trusted,'method':'pplus_bundled','observation_prior':'','wavelength':.9792}
- runtime=Path(cfg['runtime']);density=runtime/'density'
- for name in ['bin/phaser','density/bin/oasis-density-python','density/conda_base/bin/python2.7']:
+ runtime=Path(cfg['runtime'])
+ # P+ needs exactly these four CCP4 programs; no bundled density/ tree.
+ for name in ['bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5']:
   p=runtime/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('#!/bin/sh\nexit 0\n');p.chmod(0o755)
- (density/'build').mkdir();(density/'build/libtbx_env').touch();(density/'modules/solve_resolve/ext_ref_files').mkdir(parents=True)
  return cfg
 
 def test_bundle_plan_and_explicit_experimental_wavelength(bundled):
@@ -57,27 +57,6 @@ def test_prior_missing_hl_uniform_and_moments_consistent(bundled,tmp_path):
  for i,key in enumerate(h):
   row=lookup[tuple(key)];assert row[6]==pytest.approx(fom[i],abs=1e-6)
 
-def test_bundled_dm_supplies_its_own_symmetry_dictionary_environment(bundled,tmp_path,monkeypatch):
- from phasebuild import trust_workflow as trust
- import shutil
- cfg=pipeline.validate(bundled);root=tmp_path/'pipeline';sad=root/'02_sad';sad.mkdir(parents=True);dm=root/'03_dm';dm.mkdir()
- prepared=root/'prepared.mtz';prepare_sad(cfg['sad'],cfg['native'],prepared,cfg['free_value']);cfg['prepared_sad']=str(prepared)
- # Use the synthetic original likelihood fixture, never a target protein model.
- source=tmp_path/'observations.mtz';cfg['observation_prior']=str(source);trust.phase(cfg,sad)
- commands=[]
- def launch(command,cwd,name,stdin=None,environment=None):
-  commands.append((command,environment))
-  if name=='resolve':
-   (cwd/'resolve.log').write_text('Column assignments:\noriginal\nColumn assignments:\nPHIB taken from column 4\nClosed mtz file\n')
-   shutil.copyfile(source,cwd/'wang14.mtz')
-  else:shutil.copyfile(source,cwd/'map_phases.mtz')
- monkeypatch.setattr(trust,'launch',launch);cfg['density_runtime']=str(Path(cfg['runtime'])/'density');trust.dm(cfg,dm)
- assert len(commands)==2
- for command,env in commands:
-  assert command[0].endswith('density/bin/oasis-density-python')
-  assert env['CLIBD']==str(Path(cfg['runtime'])/'lib/data')
- assert commands[1][0][1:3]==['-m','mmtbx.command_line.density_modification']
-
 
 def test_phase_confidence_correction_reaches_build_command_only(bundled):
  cfg=pipeline.validate({**bundled,'refinement_prior':'dm_phifom','phase_blur_scale':.7,'phase_blur_b':20.})
@@ -115,29 +94,3 @@ def test_per_round_cleanup_rejects_multiple_sequences_at_preflight(bundled):
  with pytest.raises(ValueError,match='one sequence record'):
   pipeline.validate({**bundled,'copies':1,'refinement_prior':'dm_phifom','per_round_cleanup':True})
  assert not Path(bundled['output']).exists()
-
-
-def _fake_bundle(root,app_name='OASIS4.3-Build'):
-    """A bare CCP4 runtime plus a portable bundle installed beside the app."""
-    app=root/app_name
-    (app/'src/phasebuild').mkdir(parents=True)
-    bare=root/'ccp4-9';bare.mkdir()
-    bundle=root/'OASIS4.3-dev17-portable local/runtime'
-    engine=bundle/'density/bin/oasis-density-python'
-    engine.parent.mkdir(parents=True)
-    engine.write_text('#!/bin/sh\nexit 0\n');engine.chmod(0o755)
-    return app,bare,bundle
-
-
-def test_density_tree_is_found_in_a_bundle_beside_the_application(tmp_path,monkeypatch):
-    """A stale config naming a bare CCP4 must still reach the package tree."""
-    app,bare,bundle=_fake_bundle(tmp_path)
-    monkeypatch.setattr(b,'__file__',str(app/'src/phasebuild/bundled_pplus.py'))
-    assert b.density_root({'runtime':str(bare)})==(bundle/'density').resolve()
-
-
-def test_density_root_stays_empty_without_a_bundle(tmp_path,monkeypatch):
-    app=tmp_path/'app/src/phasebuild';app.mkdir(parents=True)
-    bare=tmp_path/'ccp4-9';bare.mkdir()
-    monkeypatch.setattr(b,'__file__',str(app/'bundled_pplus.py'))
-    assert b.density_root({'runtime':str(bare)}) is None

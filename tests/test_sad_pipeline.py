@@ -52,7 +52,10 @@ def write_phases(path, native_path, free=7, dm=False):
 class FakeStages:
     def __init__(self, cfg, fail_dm=False, real_phase=False):self.cfg=cfg;self.calls=[];self.fail_dm=fail_dm;self.real_phase=real_phase
     def __call__(self,command,log,env):
-        kind='build' if command[2].endswith('run_build_from_phases.py') else command[3]
+        script=Path(command[2]).name
+        if script in ('run_build_from_phases.py','run_build_pipeline.py'):kind='build'
+        elif script=='run_trace_feedback.py':kind='dm'
+        else:kind=command[3]
         self.calls.append(kind)
         if kind=='dm' and self.fail_dm:
             self.fail_dm=False;raise RuntimeError('synthetic interrupted DM')
@@ -83,9 +86,8 @@ def test_stage_failure_reports_what_the_stage_log_said(inputs):
 
 def test_unverified_hand_continuation_is_an_explicit_auto_hand_option(tmp_path,inputs,monkeypatch):
     from phasebuild import bundled_pplus
-    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None,need_density=False:None)
-    monkeypatch.setattr(bundled_pplus,'require_density',lambda cfg:Path(cfg['runtime'])/'density')
-    base={**inputs,'method':'pplus_bundled','auto_hand':True,'wavelength':2.0}
+    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None:None)
+    base={**inputs,'method':'pplus_bundled','auto_hand':True,'wavelength':2.0,'dm_engine':'parrot'}
     cfg=pipeline.validate(base,inspect=False)
     assert cfg['allow_unverified_hand'] is False          # marginal data still fails closed by default
     cfg=pipeline.validate({**base,'allow_unverified_hand':True},inspect=False)
@@ -96,19 +98,21 @@ def test_unverified_hand_continuation_is_an_explicit_auto_hand_option(tmp_path,i
         pipeline.validate({**base,'allow_unverified_hand':'yes'},inspect=False)
 
 
-def test_p_plus_with_parrot_needs_no_density_tree(inputs,monkeypatch):
-    """The P+ likelihood refinement is in-tree; only the two-hand pilot is CCTBX."""
+def test_p_plus_with_parrot_runs_on_a_stock_ccp4(inputs,monkeypatch):
+    """P+ needs no bundled tree: Phaser, cparrot, Buccaneer and REFMAC are enough."""
     from phasebuild import bundled_pplus
-    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None,need_density=False:None)
-    def missing(cfg):raise AssertionError('density/ must not be required under Parrot')
-    monkeypatch.setattr(bundled_pplus,'require_density',missing)
-    base={**inputs,'method':'pplus_bundled','wavelength':2.0,'dm_engine':'parrot',
-          'auto_hand':False,'density_runtime':''}
+    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None:None)
+    base={**inputs,'method':'pplus_bundled','wavelength':2.0,'dm_engine':'parrot','auto_hand':False}
     cfg=pipeline.validate(base,inspect=False)
-    assert cfg['dm_engine']=='parrot' and cfg['density_runtime']==''
-    # The two-hand pilot really is the CCTBX part, so asking for it must fail.
-    with pytest.raises(AssertionError):
-        pipeline.validate({**base,'auto_hand':True},inspect=False)
+    assert cfg['dm_engine']=='parrot' and 'density_runtime' not in cfg
+    # The removed RESOLVE/CCTBX backend cannot come back through an old config.
+    with pytest.raises(ValueError,match='已移除'):pipeline.validate({**base,'dm_engine':'resolve'},inspect=False)
+    # P+ has no in-tree DM: asking it to density-modify itself must fail loudly.
+    with pytest.raises(ValueError,match='CCP4 Parrot'):
+        bundled_pplus.dm({**base,'output':inputs['output']},Path(inputs['output'])/'03_dm')
+    # Two-hand selection now runs Parrot per hand, so it needs no density/ either.
+    cfg=pipeline.validate({**base,'auto_hand':True},inspect=False)
+    assert cfg['auto_hand'] is True and cfg['dm_engine']=='parrot'
 
 
 @pytest.mark.parametrize('method',['pplus_internal','likelihood','pplus'])
@@ -228,10 +232,11 @@ def test_malformed_dm_fom_and_wrong_cell_are_rejected(tmp_path,inputs):
 
 @pytest.mark.skipif(sys.version_info<(3,12),reason='Unified engine uses Python 3.12')
 def test_pipeline_restarts_from_verified_checkpoint_without_rephasing(inputs):
-    runner=FakeStages(inputs,fail_dm=True)
-    with pytest.raises(RuntimeError,match='interrupted'):pipeline.run_pipeline(inputs,runner=runner,progress=lambda x:None)
+    config={**inputs,'dm_engine':'internal'}
+    runner=FakeStages(config,fail_dm=True)
+    with pytest.raises(RuntimeError,match='interrupted'):pipeline.run_pipeline(config,runner=runner,progress=lambda x:None)
     root=Path(inputs['output']);raw=(root/'02_sad/experimental.mtz').read_bytes()
-    report=pipeline.run_pipeline(inputs,resume=True,runner=runner,progress=lambda x:None)
+    report=pipeline.run_pipeline(config,resume=True,runner=runner,progress=lambda x:None)
     assert report['status']=='completed' and runner.calls==['phase','dm','dm','build']
     assert (root/'02_sad/experimental.mtz').read_bytes()==raw
     assert list(root.glob('03_dm.interrupted-*'))
@@ -242,15 +247,17 @@ def test_pipeline_restarts_from_verified_checkpoint_without_rephasing(inputs):
 @pytest.mark.skipif(sys.version_info<(3,12),reason='Unified engine uses Python 3.12')
 @pytest.mark.parametrize('artifact',['experimental.mtz','observations.mtz'])
 def test_checkpoint_tampering_and_protocol_changes_refuse_resume(inputs,artifact):
-    runner=FakeStages(inputs);pipeline.run_pipeline(inputs,runner=runner,progress=lambda x:None)
-    with pytest.raises(ValueError,match='Resume refused'):pipeline.run_pipeline({**inputs,'phase_cycles':2},resume=True,runner=runner)
+    config={**inputs,'dm_engine':'internal'}
+    runner=FakeStages(config);pipeline.run_pipeline(config,runner=runner,progress=lambda x:None)
+    with pytest.raises(ValueError,match='Resume refused'):pipeline.run_pipeline({**config,'phase_cycles':2},resume=True,runner=runner)
     p=Path(inputs['output'])/'02_sad'/artifact;p.write_bytes(p.read_bytes()+b'tamper')
-    with pytest.raises(ValueError,match='artifact changed'):pipeline.run_pipeline(inputs,resume=True,runner=runner)
+    with pytest.raises(ValueError,match='artifact changed'):pipeline.run_pipeline(config,resume=True,runner=runner)
 
 
 @pytest.mark.parametrize('failed_stage',['dm','build'])
 def test_resume_preserves_each_failed_attempt_log(inputs,failed_stage):
-    delegate=FakeStages(inputs);attempts=0
+    config={**inputs,'dm_engine':'internal'}
+    delegate=FakeStages(config);attempts=0
     def runner(command,log,env):
         nonlocal attempts
         stage='build' if command[2].endswith('run_build_from_phases.py') else command[3]
@@ -261,8 +268,8 @@ def test_resume_preserves_each_failed_attempt_log(inputs,failed_stage):
         return delegate(command,log,env)
     for resume in [False,True]:
         with pytest.raises(RuntimeError,match='interrupted attempt'):
-            pipeline.run_pipeline(inputs,resume=resume,runner=runner,progress=lambda _:None)
-    report=pipeline.run_pipeline(inputs,resume=True,runner=runner,progress=lambda _:None)
+            pipeline.run_pipeline(config,resume=resume,runner=runner,progress=lambda _:None)
+    report=pipeline.run_pipeline(config,resume=True,runner=runner,progress=lambda _:None)
     assert report['status']=='completed' and attempts==3
     saved=report['preserved_stage_logs']
     assert [entry['stage'] for entry in saved]==[failed_stage,failed_stage]
@@ -306,8 +313,9 @@ def test_gui_full_plan_is_read_only_and_ignores_hidden_map_and_seed(inputs):
 
 @pytest.mark.skipif(sys.version_info<(3,12),reason='Unified engine uses Python 3.12')
 def test_real_oasis_sad_and_dm_feed_a_stub_construction_stage(inputs):
-    runner=FakeStages(inputs,real_phase=True)
-    report=pipeline.run_pipeline(inputs,runner=runner,progress=lambda x:None)
+    config={**inputs,'dm_engine':'internal'}
+    runner=FakeStages(config,real_phase=True)
+    report=pipeline.run_pipeline(config,runner=runner,progress=lambda x:None)
     assert report['status']=='completed' and runner.calls==['phase','dm','build']
     root=Path(inputs['output']);prepared=gemmi.read_mtz_file(str(root/'01_inputs/sad.mtz'))
     np.testing.assert_array_equal(prepared.column_with_label(bridge.FLAG).array,
@@ -318,11 +326,12 @@ def test_real_oasis_sad_and_dm_feed_a_stub_construction_stage(inputs):
 
 @pytest.mark.skipif(sys.version_info<(3,12),reason='Unified engine uses Python 3.12')
 def test_resume_rejects_runtime_resource_changes(inputs):
-    runner=FakeStages(inputs);pipeline.run_pipeline(inputs,runner=runner,progress=lambda x:None)
+    config={**inputs,'dm_engine':'internal'}
+    runner=FakeStages(config);pipeline.run_pipeline(config,runner=runner,progress=lambda x:None)
     reference=Path(inputs['runtime'])/'lib/data/reference_structures/reference-1tqw.pdb'
     reference.write_text(reference.read_text()+'REMARK changed runtime\n')
     with pytest.raises(ValueError,match='Resume refused'):
-        pipeline.run_pipeline(inputs,resume=True,runner=runner)
+        pipeline.run_pipeline(config,resume=True,runner=runner)
 
 
 def test_missing_hkl_stays_nan_and_existing_output_is_preserved(tmp_path,inputs):
