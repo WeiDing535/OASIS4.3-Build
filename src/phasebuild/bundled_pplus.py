@@ -38,6 +38,11 @@ def density_root(cfg):
     app=Path(__file__).resolve().parents[2]
     for base in (app,app.parent):
         candidates+=[base/'runtime/density',base/'density']
+    # A portable bundle installed next to the application keeps its density tree
+    # in its own runtime; a stale config naming a bare CCP4 should still find it.
+    for folder in (app/'dist',app.parent):
+        if folder.is_dir():
+            candidates+=[path/'density' for path in sorted(folder.glob('OASIS4.3*portable*/runtime'),reverse=True)]
     for path in candidates:
         engine=path/DENSITY_ENGINE
         if engine.is_file() and os.access(engine,os.X_OK):return path.resolve()

@@ -50,6 +50,36 @@ ValueError: 这次运行缺“包内密度修饰引擎”bin/oasis-density-pytho
 density/ 和 bin/），或直接启动便携包里的 OASIS4.3
 ```
 
+### 1.1 补完：旧配置不再需要人工改路径（2026-11-13）
+
+上面的修复只管“新打开的窗口默认值正确”，两种旧情形仍会复现同一个失败：
+用“沿用参数”载入 `7c8b11d7c0d9ee23` 这类旧记录（里面存着
+`runtime=/Applications/ccp4-9`），或在检测环节把一个裸 CCP4 写回表单。现在两条路都堵住了：
+
+- `bundled_pplus.density_root()`：在原有候选之后增加“应用目录旁的便携包”，
+  即 `<app>/dist/OASIS4.3*portable*/runtime/density` 与
+  `<app>/../OASIS4.3*portable*/runtime/density`。即使 `cfg['runtime']` 仍是裸
+  CCP4，引擎也能找到密度树——这是执行层的兜底。
+- `oasis_workflow.runtime_candidates()/bundled_runtime()`：把运行时扫描抽成
+  公共函数，`defaults()` 与 GUI 共用同一套候选与优先级。
+- `desktop._density_runtime_fix()/_apply_density_fix()`：提交前与“沿用参数”后检查
+  表单里的运行时**自身**是否带 `density/bin/oasis-density-python`；不带且存在
+  可用便携包时，把“CCP4 位置”改成便携包 runtime，并在模块提示里写明
+  “‘CCP4 位置’已从 X 改为 Y：前者没有 density/，跑不了包内 P+ 流程。”
+  只对 `pplus_bundled` 生效，其它方法（如 `likelihood`）原样保留用户输入。
+
+用失败作业的原始配置（`runtime=/Applications/ccp4-9`，同一份 japan_2.0 输入）
+直接过 `sad_pipeline.validate()`：
+
+```
+validate OK; density tree used:
+/Volumes/Fast_4T/Deepseek-Oasis/OASIS4.3-dev17-portable local/runtime/density
+output created: False        # 预检阶段，不建目录
+```
+
+新增 4 个回归测试（`tests/test_bundled_pplus.py` 2 个、`tests/test_desktop_window.py` 2 个），
+全量 828 passed。
+
 ## 2. 单手有结果时继续算（明确标注，不静默）
 
 `hand_selection.choose()` 原先是“任一手 status 不是 completed/empty 就整单失败”。

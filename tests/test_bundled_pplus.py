@@ -115,3 +115,29 @@ def test_per_round_cleanup_rejects_multiple_sequences_at_preflight(bundled):
  with pytest.raises(ValueError,match='one sequence record'):
   pipeline.validate({**bundled,'copies':1,'refinement_prior':'dm_phifom','per_round_cleanup':True})
  assert not Path(bundled['output']).exists()
+
+
+def _fake_bundle(root,app_name='OASIS4.3-Build'):
+    """A bare CCP4 runtime plus a portable bundle installed beside the app."""
+    app=root/app_name
+    (app/'src/phasebuild').mkdir(parents=True)
+    bare=root/'ccp4-9';bare.mkdir()
+    bundle=root/'OASIS4.3-dev17-portable local/runtime'
+    engine=bundle/'density/bin/oasis-density-python'
+    engine.parent.mkdir(parents=True)
+    engine.write_text('#!/bin/sh\nexit 0\n');engine.chmod(0o755)
+    return app,bare,bundle
+
+
+def test_density_tree_is_found_in_a_bundle_beside_the_application(tmp_path,monkeypatch):
+    """A stale config naming a bare CCP4 must still reach the package tree."""
+    app,bare,bundle=_fake_bundle(tmp_path)
+    monkeypatch.setattr(b,'__file__',str(app/'src/phasebuild/bundled_pplus.py'))
+    assert b.density_root({'runtime':str(bare)})==(bundle/'density').resolve()
+
+
+def test_density_root_stays_empty_without_a_bundle(tmp_path,monkeypatch):
+    app=tmp_path/'app/src/phasebuild';app.mkdir(parents=True)
+    bare=tmp_path/'ccp4-9';bare.mkdir()
+    monkeypatch.setattr(b,'__file__',str(app/'bundled_pplus.py'))
+    assert b.density_root({'runtime':str(bare)}) is None

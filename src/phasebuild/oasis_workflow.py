@@ -32,17 +32,35 @@ def cli_options(project):
     return options
 
 
-def defaults(project):
+def runtime_candidates(project):
+    """Runtimes this installation could use, most specific first."""
     project=Path(project)
     candidates=[project/'runtime']
     for folder in (project/'dist',project.parent):
         if folder.is_dir():candidates+=sorted(folder.glob('OASIS4.3*portable*/runtime'),reverse=True)
     candidates+=[project/'dist/OASIS4.3-Build-macOS-Intel-0.8.3-local/runtime']
-    usable=[p for p in candidates if (p/'bin/cbuccaneer').is_file() and (p/'bin/refmac5').is_file()]
+    return candidates
+
+
+def bundled_runtime(project):
+    """The runtime carrying the package's density engine, else None.
+
+    Only this one can run the bundled P+ route end to end; a bare external CCP4
+    has bin/ but no density/, so pointing the form at it fails before Phasing.
+    """
+    for path in runtime_candidates(project):
+        if (path/'density/bin/oasis-density-python').is_file() and (path/'bin/cbuccaneer').is_file():
+            return path
+    return None
+
+
+def defaults(project):
+    project=Path(project)
+    usable=[p for p in runtime_candidates(project) if (p/'bin/cbuccaneer').is_file() and (p/'bin/refmac5').is_file()]
     # A runtime that also carries the package's RESOLVE/CCTBX tree is the only
     # one that can run the bundled P+ route end to end; prefer it over a bare
     # external CCP4 installation.
-    runtime=next((p for p in usable if (p/'density/bin/oasis-density-python').is_file()),None) or (usable[0] if usable else None)
+    runtime=bundled_runtime(project) or (usable[0] if usable else None)
     runtime=str(runtime) if runtime else (default_runtime() or '')
     cfg=dict(DEFAULTS)
     cfg['phenix_bin']=''

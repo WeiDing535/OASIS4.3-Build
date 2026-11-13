@@ -735,10 +735,48 @@ class App:
         self._warn('\n'.join(plan.get('sample_warnings') or []))
         self._say('配置检查通过',ok=True)
 
+    def _density_runtime_fix(self,config):
+        """Point a bundled-route run at a runtime that carries density/, else ''.
+
+        A record made before the density tree was resolved separately, or a
+        runtime detected as a bare CCP4, names an installation with bin/ but no
+        density/.  Starting it fails before Phasing, so switch the form to the
+        package runtime and say so instead of letting the job die.
+        """
+        from . import oasis_workflow
+        if config.get('method')!='pplus_bundled':return ''
+        runtime=str(config.get('runtime') or '').strip()
+        if not runtime:return ''
+        # Look at this runtime's own tree, not the engine's wider search: the
+        # form should show the installation that actually carries density/.
+        try:
+            if (Path(runtime).expanduser()/'density/bin/oasis-density-python').is_file():return ''
+        except (OSError,ValueError):
+            return ''
+        suggested=oasis_workflow.bundled_runtime(self.controller.project)
+        if suggested is None or str(suggested)==runtime:return ''
+        return str(suggested)
+
+    def _use_runtime(self,path,old=''):
+        """Show ``path`` in the form and explain why it replaced ``old``."""
+        field=self.fields.get('runtime')
+        if field is not None:field['var'].set(path)
+        self._detect_modules()
+        self._location_warning=('“CCP4 位置”已从 %s 改为 %s：前者没有 density/，跑不了包内 P+ 流程。'
+                                %(old or '（空）',path))
+        self._refresh_module_hint()
+
+    def _apply_density_fix(self,config):
+        """Apply ``_density_runtime_fix`` to the form and return the new config."""
+        fixed=self._density_runtime_fix(config)
+        if not fixed:return config
+        self._use_runtime(fixed,str(config.get('runtime') or ''))
+        return self.collect()
+
     def on_start(self):
         """Start one more run; earlier runs keep going in parallel."""
         try:
-            config=self.collect()
+            config=self._apply_density_fix(self.collect())
             name=self.task_name.get().strip()
             job=self.controller.start(config,name)
         except Exception as error:
@@ -982,6 +1020,12 @@ class App:
         self.task_name.set(job.get('name') or '')
         self.fields['output']['var'].set(str(self._fresh_output()))
         self._method_changed()
+        # An older record may name a bare CCP4; show the runtime that can run it
+        # rather than repeating a failure the user already saw.
+        try:
+            config=self._apply_density_fix(self.collect())
+        except ValueError:
+            pass
         if self._needs_advanced(config):
             self.advanced.set(True);self._toggle_advanced()
         self.job=None

@@ -763,3 +763,39 @@ def test_browse_buttons_stay_visible_and_ccp4_location_feeds_detection(tmp_path,
         assert app.module_parrot.get() and app.module_build.get()
     finally:
         app.root.destroy()
+
+
+def test_a_bare_ccp4_runtime_is_switched_to_the_bundled_one(tmp_path,monkeypatch):
+    """A record made against a bare CCP4 must not repeat the same failure."""
+    app=window(tmp_path)
+    try:
+        bundle=tmp_path/'dist/OASIS4.3-portable local/runtime'
+        for name in ('density/bin/oasis-density-python','bin/cbuccaneer'):
+            path=bundle/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#!/bin/sh\n')
+        bare=tmp_path/'ccp4-9';bare.mkdir()
+        cfg={'method':'pplus_bundled','runtime':str(bare)}
+        assert app._density_runtime_fix(cfg)==str(bundle)
+        # A runtime that carries the tree, or a method that does not need it,
+        # is left exactly as the user typed it.
+        assert app._density_runtime_fix(dict(cfg,runtime=str(bundle)))==''
+        assert app._density_runtime_fix(dict(cfg,method='likelihood'))==''
+        monkeypatch.setattr(app,'_detect_modules',lambda initial=False:None)
+        app._use_runtime(str(bundle),str(bare))
+        assert app.fields['runtime']['var'].get()==str(bundle)
+        assert str(bare) in app._location_warning
+        assert 'density/' in app._location_warning
+    finally:
+        app.root.destroy()
+
+
+def test_default_runtime_prefers_the_one_with_the_density_engine(tmp_path,monkeypatch):
+    """A bare CCP4 can run Phaser but not the bundled P+ route."""
+    from phasebuild import oasis_workflow
+    bare=tmp_path/'ccp4';bare.mkdir()
+    bundle=tmp_path/'dist/OASIS4.3-portable local/runtime'
+    for name in ('bin/cbuccaneer','bin/refmac5','density/bin/oasis-density-python'):
+        path=bundle/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#!/bin/sh\n')
+    monkeypatch.setattr(oasis_workflow,'default_runtime',lambda:str(bare))
+    assert oasis_workflow.bundled_runtime(tmp_path)==bundle
+    assert oasis_workflow.defaults(tmp_path)['runtime']==str(bundle)
+    assert oasis_workflow.bundled_runtime(tmp_path/'dist') is None
