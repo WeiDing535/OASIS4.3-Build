@@ -56,6 +56,19 @@ dist/OASIS4.3-portable/
 
 双击 `OASIS4.3.command` 即开原生窗口，不需要另装 Python、CCP4 或 Phenix。
 
+### 双击 `OASIS4.3.command` 会留一个终端窗口；想要图标就生成 `.app`
+
+Finder 把 `.command` 当终端文档：双击会开一个 Terminal 窗口，那个窗口关掉，程序也跟着退出。想要“像普通 Mac 程序那样双击图标”，在同一个目录里生成一个 `.app` 外壳：
+
+```bash
+python3 packaging/make_macos_app.py                  # 生成 ./OASIS4.3.app（源码树里）
+python3 packaging/make_macos_app.py --tree dist/OASIS4.3-portable   # 给便携包也生成一个
+```
+
+`.app` 里没有第二份运行时，`Contents/MacOS/OASIS4.3` 只做三件事：找到同目录的 `OASIS4.3.command`（先看 `OASIS43_TREE` 环境变量，再看包内记录的路径，最后看 `../../../`），`cd` 过去，`exec /bin/bash OASIS4.3.command`，所以图标和脚本永远不会走成两套代码。标准错误写进 `~/Library/Logs/OASIS4.3-app.log`；找不到脚本时用 `osascript` 弹窗提示，而不是静默消失。图标是 `packaging/make_macos_app.py` 里用 Pillow 现画的（深蓝圆角底 + 衍射环 + `OASIS 4.3`），`iconutil` 编译成 `.icns`，不依赖外部美术资源。
+
+把 `OASIS4.3.app` 拖到程序坞或“应用程序”文件夹都行；**不要**只把它单独拷走——它按相对位置找源码树，换地方后重新生成一次即可。`.app` 是生成物，已写进 `.gitignore`，不入库。
+
 `bundle.json` 里的引擎清单和 `default_method` 是从 `runtime/runtime_manifest.json` 里实际带上的可执行文件推导出来的，所以四个引擎都在时它写 `"default_method": "pplus_bundled"`、`"bundled_engine_ids": ["phaser","cparrot","cbuccaneer","refmac5"]`；只带 Buccaneer/REFMAC 时写 `pplus_internal`。
 
 **实测记录**（2026-11-11，macOS Intel）：

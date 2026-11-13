@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+*.app/
 .gui/
 .DS_Store
 validation/

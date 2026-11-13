@@ -76,3 +76,33 @@ def test_linux_launcher_runs_from_space_path_with_host_runtime_disabled(tmp_path
     assert process.returncode == 0 and 'linux-x86_64' in process.stdout
     process = subprocess.run([str(bundle / 'OASIS4.3-Build.sh'), '--help'], capture_output=True, text=True, env=environment)
     assert process.returncode == 0 and '--exit-on-finish' in process.stdout
+
+
+def test_macos_app_wraps_the_trees_own_launcher(tmp_path):
+    import os
+    import plistlib
+    module = load('oasis43_macos_app', ROOT / 'packaging/make_macos_app.py')
+    tree = tmp_path / 'tree with spaces'
+    tree.mkdir()
+    script = tree / 'OASIS4.3.command'
+    script.write_text('#!/bin/bash\nexit 0\n')
+    script.chmod(0o755)
+    app = module.build(tree, icon=False)
+    assert app == tree / 'OASIS4.3.app'
+    info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+    assert info['CFBundleExecutable'] == 'OASIS4.3'
+    assert info['CFBundleIdentifier'] == 'cn.ac.iphy.oasis43'
+    assert info['CFBundlePackageType'] == 'APPL'
+    wrapper = app / 'Contents/MacOS/OASIS4.3'
+    assert wrapper.stat().st_mode & 0o111
+    body = wrapper.read_text()
+    assert 'OASIS4.3.command' in body and str(tree) in body
+    # Rebuilding in place replaces the previous bundle instead of refusing.
+    assert module.build(tree, icon=False) == app
+    # The wrapper really starts the tree's script, with no terminal attached.
+    marker = tree / 'ran.txt'
+    script.write_text('#!/bin/bash\necho ran > "%s"\n' % marker)
+    environment = {key: value for key, value in os.environ.items() if key != 'OASIS43_TREE'}
+    process = subprocess.run([str(wrapper)], capture_output=True, text=True, env=environment, timeout=120)
+    assert process.returncode == 0, process.stderr
+    assert marker.read_text().strip() == 'ran'
