@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Phaser is no longer a hard requirement for the SAD front end, and the numbers
+  behind that are now in `docs/NO_CCP4_REPLACEMENT.md` §2. With `--dm-engine
+  parrot` the internal likelihood front end reaches 25.24 / 31.35 on 7TJ1 and
+  26.69 / 29.36 on 5D9D against the Phaser campaign's 23.92 / 31.08 and
+  25.43 / 27.51 — gaps of 0.3 and 1.9 points R-free, where the old table
+  (internal front end *and* internal DM) showed +15.2 and +18.9. The remaining
+  handicap is substructure refinement, which stock CCP4 `bp3` supplies: on
+  insulin it refines six S sites in 12 s and its SAD phases agree with Phaser's
+  `experimental.mtz` at CC 0.981 (4508 reflections, within45 0.999), against
+  0.893 for the internal likelihood on the same sites. `bp3` is not wired into
+  the pipeline yet.
+- `--dm-engine parrot` with `--refinement-prior dm_phifom` is now accepted for
+  `--method pplus_internal`. The restraint is applied by REFMAC and written by
+  Parrot, so nothing about it belonged to Phaser; only the bundled route was
+  allowed to use it because that was the only route that had been calibrated.
+- `--max-per-target` defaults to 48, matching the GUI and the calibrated
+  ten-case protocol. The old 96 built 96 relations per reflection, which for
+  any case above ~21k reflections exceeded the 2 M hard relation budget and
+  aborted the trust-region stage with "Relation memory budget exceeded" before
+  any phasing happened (7TJ1: 31 479 reflections, 5D9D: 35 489). The budget
+  error now names the flag and the reflection count instead of suggesting an
+  unexposed "increase budget".
 - Deletes `density/` (2.4 GB of Phenix-derived RESOLVE/CCTBX). It only backed
   the two-hand Wang8 pilot and the old RESOLVE density-modification backend;
   both now run on CCP4 `cparrot`. P+ needs `phaser` + `cparrot` + `cbuccaneer` +

@@ -71,7 +71,9 @@ def build_relations(data,e,kappa_scale,kmin=.03,max_neighbors=1000,
             local=local[:max_per_target]
         records.extend(local)
         if len(records)>max_relations:
-            raise ValueError('Relation memory budget exceeded; increase budget or set explicit caps')
+            raise ValueError('Relation memory budget exceeded (%d relations for %d reflections); '
+                             'lower --max-per-target (currently %s) or raise kmin'
+                             % (len(records),n,max_per_target))
     arr=np.asarray(records,dtype=float).reshape(-1,7)
     ints=[arr[:,i].astype(np.int64) for i in range(5)]
     stats={'relations':len(records),'expanded_hkl':expanded,'neighbors_used':len(keys),

@@ -33,8 +33,9 @@ METHOD_NAMES=dict(METHODS)
 METHOD_HINTS={
  'pplus_bundled':'标定配方：P+ 定相 + Parrot 密度修饰 + Buccaneer/REFMAC，十案例 R-free 落在对照 ±5 点内。',
  'pplus_trust':'外部对照：Phaser 做 SAD，P+ 只接密度修饰之后的相位。',
- 'pplus_internal':'实验性：SAD 定相已到 Phaser 水平，但密度修饰比 Parrot 低约 0.13（图相关 0.56 vs 0.69），'
-                  '且没有自动追踪；结果只用于研究对比，不要用来定结构。',
+ 'pplus_internal':'不用 Phaser：SAD 似然在程序内部算，密度修饰可选 Parrot、建模与推荐配方相同。'
+                  '代价是重原子不做精修：位点已是精修后的，两个最差案例只落后 Phaser 前端 0.3/1.9 点 R-free；'
+                  '位点是原始 SHELXD 输出时要差 4 点以上。标为实验性，默认仍走推荐配方。',
  'likelihood':'连续 SAD：不经过 P+，直接用似然法定相；密度修饰与建模只用 CCP4 的 Parrot/Buccaneer/REFMAC，'
                '所以只装一份 CCP4 就能跑完整条链（对标 SHELXC/D/E）。',
  'pplus':'旧版直接法 P+：保留用于复现历史结果，同样只需要 CCP4。'}

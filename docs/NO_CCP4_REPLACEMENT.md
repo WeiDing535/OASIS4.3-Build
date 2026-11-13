@@ -6,13 +6,13 @@
 
 结论先给：
 
-1. **定相这一段已经够用**：内部 P+ 与 campaign 的 P+ 后端给出的密度修饰输入相位质量相当（十案例 complex CC 均值 0.279 vs 0.272）。
+1. **定相这一段已经够用，Phaser 可以不用**：把密度修饰换回 Parrot 之后，内部前端在两个最差案例上只落后 Phaser 0.3 / 1.9 点 R-free（§2.1）；CCP4 自带的 `bp3` 精修位点后给出的 SAD 相位与 Phaser 逐反射 CC 0.981（§2.2）。
 2. **唯一的实质缺口在密度修饰**：Parrot 把相关从 0.272 提到 0.688（增益 +0.416），内部 MLHL 只提到 0.558（增益 +0.279）。终点差 0.125，十案例无一例外。**这才是挡住"达到 SHELXE 水平"的东西。**
 3. **Buccaneer / REFMAC 不在这条验收线上**：它们带来的是带序列、带侧链、R 25–47 % 的完整模型，远超 SHELXE 的多聚丙氨酸 trace。留着是产品档次问题，去掉也不影响"达到 SHELXE 水平"。
 
 | 模块 | 用途 | 替换状态 | 量化证据 | 发布阻塞 |
 | --- | --- | --- | --- | --- |
-| Phaser | SAD 定相（位点已给定） | ✅ 已实现，质量相当 | DM 输入相位 0.279 vs 0.272 | 否 |
+| Phaser | SAD 定相（位点已给定） | ✅ 可去掉，实测见 §2 | 内部前端 +Parrot 落后 0.3–1.9 点 R-free；`bp3` 相位 CC 0.981 | 否 |
 | Parrot | 密度修饰 | 🔶 已实现，**差 0.125** | 增益 0.279 vs 0.416 | **是（质量）** |
 | REFMAC | 约束精修 | 🔶 原型可用 | 前向模型差距 5.5–6 点 | 否（SHELXE 不做） |
 | Buccaneer | 自动建链 | ❌ 仅有原型 | 约 2400 行未接入 | 否（SHELXE 不做） |
@@ -30,11 +30,67 @@
 
 这四点之外的 CCP4 依赖只有数据文件（单体库、`atomsf.lib`、`symop.lib`、参考 MTZ），这些是可以合法随包分发的公开数据。
 
-## 2. Phaser：可以替换，因为它的任务比想象中窄
+`bp3` 目前**没有**被调用。§2.2 的实测说明它可以直接顶掉 `phaser` 在前端的角色（精修 + 定相），而它和 `phaser` 一样属于同一份 CCP4 安装，不改变"用户自备 CCP4"这条发布前提。
+
+## 2. Phaser：可以替换，而且现在有实测
 
 十案例协议把子结构位点作为**输入**交给 Phaser（`02_sad/refined_heavy.pdb`，最初来自 SHELXD）。因此 `EP_AUTO` 实际只做三件事：位点精修、SAD 对数似然定相、`HAND BOTH`。子结构搜索不在其中。
 
-`src/phasebuild/internal_pplus.py` 已经用 NumPy/SciPy/Gemmi 实现了这三件事（`phase` 与 `seeded_dm`，后者是内部 MLHL 密度修饰），不调用任何外部可执行文件。在 7ENM 上，内部 P+ 链路的终点是 26.73/32.21，campaign（Phaser + Parrot）是 28.34/31.47：R 低 1.6 点、R-free 高 0.7 点（见第 3 节表格）。也就是说定相这一段可以自研，代价落在密度修饰上而不是 Phaser 上。
+`src/phasebuild/internal_pplus.py` 用 NumPy/SciPy/Gemmi 实现了第 2、3 件事（异常差高斯似然，读取原始位点，不调用外部程序），**唯独没有位点精修**。2026-11 之前"内部 P+ 差 15–19 点 R-free"的结论把两件事混在了一起：那张表里的内部 P+ 列同时换了密度修饰引擎（内部 MLHL 替 Parrot）。现在 `--dm-engine parrot` 对 `pplus_internal` 合法，可以把前端单独摘出来测。
+
+### 2.1 只换前端（同一套位点、同一 Parrot 协议、同一建链配方）
+
+| 案例 | Phaser 前端（十案例） | 内部 P+ + Parrot | 差 |
+| --- | --- | --- | --- |
+| 7TJ1（16 Se，P2₁2₁2₁） | 23.92 / 31.08 | 25.24 / 31.35 | R-free +0.27 |
+| 5D9D（3 Hg，P2₁2₁2₁） | 25.43 / 27.51 | 26.69 / 29.36 | R-free +1.85 |
+
+旧表里这两个案例的差是 **+15.23 / +18.94**。也就是说那 15–19 点几乎全部来自密度修饰引擎，不是前端。换回 Parrot 之后，内部前端落在 Phaser 的 2 点以内。
+
+### 2.2 位点精修才是真正的差距，而 `bp3` 能补
+
+胰岛素 2.1 Å（`I 2₁ 3`，6 个 Cys-SG 位点）上把位点来源也作为变量：
+
+| 前端 | 位点 | 建链配方 | R / R-free | 残基 |
+| --- | --- | --- | --- | --- |
+| Phaser | Phaser 精修后 | pipeline + dm_phifom | 0.3166 / 0.3779 | 48 |
+| 内部 P+ | Phaser 精修后 | pipeline + dm_phifom | 0.3209 / 0.3698 | 53 |
+| 内部 P+ | 原始 `sg.pdb` | pipeline + dm_phifom | 0.3646 / 0.3915 | 42 |
+| 内部 P+ | 原始 `sg.pdb` | legacy | 0.2944 / 0.3341 | 47 |
+| **内部 P+** | **`bp3` 精修后** | pipeline + dm_phifom | **0.2758 / 0.3181** | 50 |
+| 连续 SAD | — | pipeline | 0.3150 / 0.3583 | 51 |
+| 旧版直接法 P+ | — | pipeline | 0.3452 / 0.4015 | 55 |
+
+`bp3`（CCP4 自带的多元似然子结构精修，v2.0.346）在同一个 MTZ 上跑 12 秒，从 6 个原始硫位点精修出坐标与相对占有率（0.89–1.23，B 2.5–21.3），并直接给出 SAD 相位。它的相位与 Phaser 的 `02_sad/experimental.mtz` 在 4508 个公共反射上 **CC 0.981、within45 0.999**；内部似然对同一套位点是 CC 0.893。也就是说 `bp3` 几乎逐反射复现了 Phaser 前端，而且是**同一份 CCP4 安装里就有**的程序。
+
+复现（不需要任何外部依赖，只要 `bp3`）：
+
+```bash
+# 1) 位点名字必须是元素名（S 而不是 SG），bp3 查 $CLIBD/atomsf.lib
+sed -E 's/^(.{12})SG  (.{4})/\1 S   \2/' sg.pdb > sg_s.pdb
+# 2) 精修 + 定相，12 秒
+bp3 HKLIN ins_sad.mtz HKLOUT bp3out.mtz <<'eof'
+Xtal SAD
+MODL sg_s.pdb
+DNAME peak
+COLUmn F+=F(+) SF+=SIGF(+) F-=F(-) SF-=SIGF(-)
+REFIne
+OUTPut bp3out
+ALLIn
+eof
+# 3) 精修后的位点在 bp3out-1.pdb，相位/FOM/HL 在 bp3out.mtz
+python3 -m phasebuild.cli --sad ins_sad.mtz --native ins_sad.mtz --sequence 3INS.pir \
+    --heavy bp3out-1.pdb --reference reference-1tqw.mtz --runtime /Applications/ccp4-9 \
+    --method pplus_internal --dm-engine parrot --refinement-prior dm_phifom \
+    --building-recipe pipeline --elements S --wavelength 2.0 --auto-fpp \
+    --input-columns --dm-solvent 0.5 --dm-cycles 40 --phase-cycles 100 \
+    --rounds 5 --cycles 10 --feedback-cycles 2 --max-per-target 48 --output run/
+```
+
+### 2.3 读数时的两条噪声提醒
+
+- 胰岛素上同协议、不同位点的终点散布约 **±0.03 R-free**（建链对图的响应是非线性的，`0.2758` 与 `0.3166` 之间有一部分是这个）。单案例的排序不能直接改推荐配方。
+- 因此"把 `bp3` 前端做成默认"需要先按十案例复测；本文只主张**技术上可以不用 Phaser**，并给出可复现的两条免 Phaser 路线：`bp3` 精修 + 内部似然，或直接取 `bp3` 的相位。
 
 ## 3. Parrot：可以替换，但修饰增益只有 Parrot 的三分之二
 
@@ -157,7 +213,7 @@ Buccaneer 在本流程里承担的是"从 2.5 Å 的 DM 图里建出 100 个残�
 
 按"能否发布免 CCP4 的包"分三档：
 
-1. **现在就能做（推荐）**：保持现有形态——安装包内不含 CCP4 二进制，用户自备 CCP4 授权；`docs/INSTALL_BUNDLE.md` 已说明这一点。内部 P+/内部 DM 作为可选实验路径保留，但不作为默认。
+1. **现在就能做（推荐）**：保持现有形态——安装包内不含 CCP4 二进制，用户自备 CCP4 授权；`docs/INSTALL_BUNDLE.md` 已说明这一点。内部 P+（配 Parrot）与 `bp3` 作为免 Phaser 的可选路径保留，默认仍是标定过的 `pplus_bundled`；要改默认，先按十案例复测 `bp3` 前端（§2.3 的噪声提醒）。
 2. **达到 SHELXE 水平（近期，按当前证据这是唯一必须做的一项）**：把内部 DM 的修饰增益从 0.279 提到 0.42 量级（终点 complex CC 0.558 → ≥0.68，十案例逐例不低于 SHELXE − 0.03）。验收脚本已经就位（`work/noCCP4/compare_map_phases.py`，十案例约 2 分钟）。做完这一步，"定相 + 密度修饰"就在 SHELXE 水平上，可以摘掉 CCP4。
 3. **SHELXE 式输出（未达成，需重写生长器）**：`trace.py` 已能独立跑通并输出多聚丙氨酸 `backbone.cif`，但实测在**最好的图**（SHELXE 自己的，complex CC 0.70）上也只有 39 个残基、12 个 3–5 残基碎片、33 % CA 落在真值 1 Å 内；生长在第三个残基就被单点密度阈值卡死（29 个候选全被拒，阈值降到 0.3σ 也一样）。瓶颈不是地图质量，也不能靠"接进流水线"解决，需要按 SHELXE 的闭环（低阈值生长 + 片段连接 + 密度修饰反馈 + 全局一致性打分）重做生长器。详见 `docs/SHELXE_BASELINE.md` §3.4。
 4. **可选增强（不必需）**：REFMAC 掩膜对齐（把前向模型差距从 6 点压到 2 点内）与 Buccaneer 等价物（约 2400 行原型接入）。这两项决定的是"能不能给出完整模型"，不影响"能不能达到 SHELXE 水平"。

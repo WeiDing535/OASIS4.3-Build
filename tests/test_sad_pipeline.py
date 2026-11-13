@@ -215,6 +215,19 @@ def test_dm_enabled_keeps_the_full_plan(tmp_path,inputs):
     assert [stage['id'] for stage in pipeline.stage_plan(cfg)]==['prepare','sad','dm','bridge','build']
 
 
+def test_dm_restraint_protocol_belongs_to_parrot_not_to_phaser(tmp_path,inputs,monkeypatch):
+    """REFMAC reads the restraint, Parrot writes the map: the internal P+ route qualifies."""
+    from phasebuild import internal_pplus
+    monkeypatch.setattr(internal_pplus,'preflight',lambda cfg: None)
+    base=dict(inputs,output=str(tmp_path/'protocol'),build_model=False,refinement_prior='dm_phifom')
+    cfg=pipeline.validate(dict(base,method='pplus_internal',dm_engine='parrot'))
+    assert cfg['refinement_prior']=='dm_phifom'
+    with pytest.raises(ValueError,match='--dm-engine parrot'):
+        pipeline.validate(dict(base,method='pplus_internal',dm_engine='internal'))
+    with pytest.raises(ValueError,match='P\\+ phasing route'):
+        pipeline.validate(dict(base,method='likelihood',dm_engine='parrot'))
+
+
 def test_conflicting_original_flags_fail_before_output(tmp_path,inputs):
     p=Path(inputs['sad']);m=gemmi.read_mtz_file(str(p));a=np.array(m,copy=True);a[0,-1]=3;m.set_data(a);m.write_to_file(str(p))
     target=tmp_path/'prepared.mtz'

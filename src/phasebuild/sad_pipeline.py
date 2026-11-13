@@ -18,7 +18,7 @@ from .sad_bridge import inspect_inputs, prepare_sad, adapt_maps, FLAG
 DEFAULTS = dict(copies='auto', phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 free_value=0, seed=20261023, labels='', build_semet=False,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
-                triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True, dm_enabled=True,
+                triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=48, build_model=True, dm_enabled=True,
                 observation_prior='', composition_sequence='', phenix_bin='', trust_kl=.0005, trust_cleanup=True, trust_stability=False, trust_partial_cleanup=False, trust_work_weight=False, trust_wang_radius=14., wavelength=None,
                 elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, allow_unverified_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='parrot',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all')
 
@@ -41,7 +41,11 @@ def validate(config, inspect=True):
     if not isinstance(cfg['allow_unverified_hand'],bool):raise ValueError('allow_unverified_hand must be boolean')
     if cfg['allow_unverified_hand'] and not cfg['auto_hand']:raise ValueError('证据不足继续只用于自动判手：请同时开启自动判手（auto_hand）')
     if cfg['refinement_prior'] not in ('original_sad','dm_phifom'):raise ValueError('Unknown refinement phase source')
-    if cfg['refinement_prior']=='dm_phifom' and cfg['method']!='pplus_bundled':raise ValueError('DM phase restraints currently require bundled P+')
+    # The DM restraint is written by Parrot and consumed by REFMAC, so it is not
+    # tied to the Phaser front end: the internal P+ route gets the same protocol
+    # once its density modification is Parrot's (dm_engine='parrot').
+    if cfg['refinement_prior']=='dm_phifom' and cfg['method'] not in ('pplus_bundled','pplus_internal'):raise ValueError('DM phase restraints require a P+ phasing route')
+    if cfg['refinement_prior']=='dm_phifom' and cfg['method']=='pplus_internal' and cfg.get('dm_engine')!='parrot':raise ValueError('内部 P+ 的 DM 相位约束需要 --dm-engine parrot')
     if not isinstance(cfg['canonical_dm_seed'],bool):raise ValueError('Canonical DM seed must be boolean')
     if cfg['canonical_dm_seed'] and cfg['method'] not in ('pplus_trust','pplus_bundled'):raise ValueError('Canonical DM seed requires original-likelihood P+ density modification')
     if not isinstance(cfg['per_round_cleanup'],bool):raise ValueError('Per-round cleanup must be boolean')

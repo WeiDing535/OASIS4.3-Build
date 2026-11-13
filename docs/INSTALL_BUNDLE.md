@@ -268,11 +268,11 @@ python -B package_oasis.py --output /new/path.zip
 
 | 模块 | 开关 | 状态 |
 | --- | --- | --- |
-| 自研 SAD 定相 `pplus_internal` | 窗口方法选项 / `--method pplus_internal` | 可用：输入相位图相关 0.279（Phaser 0.272） |
-| 自研密度修饰 `internal_pplus.seeded_dm` | 命令行/环境变量 `OASIS_INTERNAL_DM_*` | 实验性：终点图相关 0.558（Parrot 0.688） |
+| 自研 SAD 定相 `pplus_internal` | 窗口方法选项 / `--method pplus_internal` | 可用：配 Parrot 后两个最差案例只落后 Phaser 0.3 / 1.9 点 R-free；位点未精修时差 4 点以上 |
+| 自研密度修饰 `internal_pplus.seeded_dm` | `--dm-engine internal` | 实验性：终点图相关 0.558（Parrot 0.688）；`内部 P+` 现在也可以直接用 Parrot |
 | 自研自动追踪 `trace.py` | 未接入流水线 | 原型：SHELXE 级地图上也只长出 3–8 残基碎片 |
 
-- 窗口里 `内部 P+` 标着"实验性，不用于正式解析"，方法下方直接写上述数字；密度修饰下拉框只有 Parrot/RESOLVE。
+- 窗口里 `内部 P+` 标着"实验性，不用于正式解析"，方法下方直接写上述数字；密度修饰下拉框只有 Parrot/内置。
 - 判断依据与复现命令：`docs/NO_CCP4_REPLACEMENT.md`、`docs/SHELXE_BASELINE.md` §3.3/§3.4。
 - 为什么要留在包里：它们是"能不能不依赖 CCP4"这条线的实测记录，去掉就无法复现结论；但它们**不是**可以替代 Parrot/Buccaneer 的选项。
 
