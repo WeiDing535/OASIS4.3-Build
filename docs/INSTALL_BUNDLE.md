@@ -16,7 +16,8 @@
 | --- | --- | --- | --- | --- |
 | 连续 SAD + 内部 MLHL-best 密度修饰 | 只要 CCP4（`cbuccaneer`/`refmac5`） | **0.2796 / 0.3331** | 50 | 12 min |
 | 连续 SAD + Parrot 密度修饰 | 只要 CCP4（多一个 `cparrot`） | 0.3150 / 0.3583 | 51 | 6.5 min |
-| P+ 自带引擎（可选） | CCP4 + 一份 `density/` | 0.3166 / 0.3779 | 50 | 18.1 min |
+| P+ 自带引擎 + `cparrot` 密度修饰（无 `density/`） | 只要 CCP4（多一个 `phaser`） | **0.3166 / 0.3779** | 48 | 17 min |
+| P+ 自带引擎（完整便携包） | CCP4 + 一份 `density/` | 0.3166 / 0.3779 | 48 | 18.1 min |
 
 三条路线都是同一份 CCP4（`/Applications/ccp4-9`，`cparrot`/`cbuccaneer`/`refmac5`）跑出来的，命令与日志都在 `runs/oasis_ccp4_only_*/` 里，可复算。
 
@@ -27,13 +28,15 @@
 
 所以默认推荐仍是内部 MLHL-best；Parrot 留在高级参数里，作为“想更快、或想让 CCP4 的 Parrot 参与密度修饰”的选项。P+ 的价值在十案例那一组配方，不在这一个例子——这一例里它 0.3166 / 0.3779，反而最高。
 
-如果方法还停在默认的「P+ 自带引擎」而机器上没有 `density/`，点「开始」不会再报错：程序自动改走 CCP4 路线，并在红条里写明「本次改用连续 SAD……只依赖 CCP4 自带程序」。
+**P+ 也不再需要 `density/`。** P+ 的定相与似然精修本来就是树内 Python（`oasis_py`），`density/` 只承担两件事：双手判别用的 Wang8 试点，和旧的 RESOLVE/CCTBX 密度修饰后端。把密度修饰交给 CCP4 的 `cparrot`、手性按输入重原子文件定（不做双手判别），这条 P+ 链就只要 `phaser` + `cparrot` + `cbuccaneer` + `refmac5`。上表第四行是实测：与完整便携包（第五行）的 `experimental.mtz`、`map_phases.mtz` 逐字节相同（sha256 一致），末轮 R 也一样——也就是说这一例里去掉 `density/` 没有任何损失。GUI 在“只有 CCP4”的机器上点「开始」会自己这么走，并在红条里写明“保留 P+ 定相、改用 cparrot 做密度修饰、手性按输入重原子文件（本次不做双手判别）”。
 
-**P+ 是可选项，不是前提。** P+ 定相与 RESOLVE 密度修饰需要一份 Phenix 派生的 `density/` 树（`oasis-density-python`），它不能随包公开分发。有它时多一条标定路线；没有它时，上面的链照样出结构。
+只有想保留**双手判别**（`auto_hand`，用 CCTBX 试两只手哪只对）或旧的 RESOLVE 后端时，才需要那份 `density/`；它不能随包公开分发。没有它时，两条 CCP4 路线照样出结构。
 
 ## 以前为什么“填了 CCP4 也跑不了”
 
-旧版把默认方法设成 `pplus_bundled`，而那条路第一步就要 `density/bin/oasis-density-python`；`/Applications/ccp4-9` 自然没有，于是「CCP4 位置」填得再对也起不来，程序还会把运行时悄悄换成便携包——用户看到的结论就是“填这个没意义”。这是设计错误，已修正：现在检测到“只有 CCP4”就改走 CCP4 路线，不偷换运行时，也不再拒绝运行。
+旧版把默认方法设成 `pplus_bundled`，而那条路第一步就要 `density/bin/oasis-density-python`；`/Applications/ccp4-9` 自然没有，于是「CCP4 位置」填得再对也起不来，程序还会把运行时悄悄换成便携包——用户看到的结论就是“填这个没意义”。这是设计错误，已修正：现在检测到“只有 CCP4”时，有 `phaser` 就保留 P+ 并把密度修饰换成 `cparrot`，没有 `phaser` 才改走连续 SAD；两种都在红条里写明，不偷换运行时，也不再拒绝运行。
+
+还有一处旧行为要说明：如果便携包就放在程序旁边，`density_root()` 会把它找出来借用（这是为了让便携包用户不填路径也能跑）。现在借用时会在日志里打印“density/ 取自 …（不在所选运行时内）”，不再让它看起来只用了一台机器的运行时。
 
 ## 为什么完整包不能上传 GitHub
 

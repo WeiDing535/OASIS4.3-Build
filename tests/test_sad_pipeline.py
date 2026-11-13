@@ -96,6 +96,21 @@ def test_unverified_hand_continuation_is_an_explicit_auto_hand_option(tmp_path,i
         pipeline.validate({**base,'allow_unverified_hand':'yes'},inspect=False)
 
 
+def test_p_plus_with_parrot_needs_no_density_tree(inputs,monkeypatch):
+    """The P+ likelihood refinement is in-tree; only the two-hand pilot is CCTBX."""
+    from phasebuild import bundled_pplus
+    monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None,need_density=False:None)
+    def missing(cfg):raise AssertionError('density/ must not be required under Parrot')
+    monkeypatch.setattr(bundled_pplus,'require_density',missing)
+    base={**inputs,'method':'pplus_bundled','wavelength':2.0,'dm_engine':'parrot',
+          'auto_hand':False,'density_runtime':''}
+    cfg=pipeline.validate(base,inspect=False)
+    assert cfg['dm_engine']=='parrot' and cfg['density_runtime']==''
+    # The two-hand pilot really is the CCTBX part, so asking for it must fail.
+    with pytest.raises(AssertionError):
+        pipeline.validate({**base,'auto_hand':True},inspect=False)
+
+
 @pytest.mark.parametrize('method',['pplus_internal','likelihood','pplus'])
 def test_nonbundled_auto_hand_routes_selected_inputs(tmp_path,inputs,monkeypatch,method):
     from phasebuild import bundled_pplus

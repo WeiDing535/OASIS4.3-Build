@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- P+ no longer requires `density/`. Only the two-hand Wang8 pilot and the old
+  RESOLVE/CCTBX density-modification backend lived there; with `--dm-engine
+  parrot --no-auto-hand` the P+ chain runs on `phaser` + `cparrot` +
+  `cbuccaneer` + `refmac5` alone. On insulin 2.1 Å this gives Rwork 0.3166 /
+  Rfree 0.3779 with 48 residues in 17 min, byte-identical (`experimental.mtz`
+  and `map_phases.mtz` sha256) to the portable-package P+ run that does use
+  `density/`. The GUI keeps the P+ method on a bare CCP4 when `phaser` and
+  `cparrot` are present, and states in the red notice that the hand now comes
+  from the input heavy-atom file and was not verified.
+- `require_density()` is only called when the run really needs the tree, and a
+  `density/` borrowed from a neighbouring portable tree is now printed instead
+  of being used silently.
 - Adds `packaging/make_macos_app.py`, which wraps a tree's `OASIS4.3.command` in
   a double-clickable `OASIS4.3.app` (generated icon, no Terminal window).
 - Shows every pipeline stage's own log in the 运行日志 pane and clears the

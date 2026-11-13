@@ -820,8 +820,33 @@ def test_browse_buttons_stay_visible_and_ccp4_location_feeds_detection(tmp_path,
         app.root.destroy()
 
 
-def test_a_bare_ccp4_runtime_is_kept_and_the_method_moves(tmp_path,monkeypatch):
-    """The user's own CCP4 must stay the runtime: only the method changes."""
+def test_a_complete_ccp4_keeps_p_plus_and_parrot_replaces_density(tmp_path,monkeypatch):
+    """P+ itself is in-tree Python; cparrot covers the part density/ used to do."""
+    from phasebuild import oasis_workflow
+    monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
+    app=window(tmp_path)
+    try:
+        bare=tmp_path/'ccp4-9'
+        for name in ('bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+            path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text('#!/bin/sh\n');path.chmod(0o755)
+        app.fields['runtime']['var'].set(str(bare))
+        config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
+                                           runtime=str(bare),density_runtime=''))
+        assert config['runtime']==str(bare)
+        assert config['method']=='pplus_bundled'
+        assert config['dm_engine']=='parrot'
+        assert config['auto_hand'] is False and config['allow_unverified_hand'] is False
+        assert config['density_runtime']==''
+        assert app.method.get()=='pplus_bundled' and app.dm_engine.get()==dict(desktop.ENGINES)['parrot']
+        assert str(bare) in app._location_warning
+        assert 'cparrot' in app._location_warning and '双手判别' in app._location_warning
+    finally:
+        app.root.destroy()
+
+
+def test_a_ccp4_without_phaser_still_moves_to_continuous_sad(tmp_path,monkeypatch):
+    """No Phaser means no P+ frontend: the method really has to change."""
     from phasebuild import oasis_workflow
     monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
     app=window(tmp_path)
@@ -833,12 +858,8 @@ def test_a_bare_ccp4_runtime_is_kept_and_the_method_moves(tmp_path,monkeypatch):
         app.fields['runtime']['var'].set(str(bare))
         config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
                                            runtime=str(bare),density_runtime=''))
-        assert config['runtime']==str(bare)
-        assert config['method']=='likelihood'
-        assert config['dm_engine']=='parrot'
-        assert app.method.get()=='likelihood'
-        assert str(bare) in app._location_warning
-        assert 'density/' in app._location_warning
+        assert config['method']=='likelihood' and config['dm_engine']=='parrot'
+        assert '连续 SAD' in app._location_warning
     finally:
         app.root.destroy()
 
@@ -1050,7 +1071,7 @@ def test_a_bare_ccp4_warns_before_the_first_run_not_only_after(tmp_path,monkeypa
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+        for name in ('bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
         app.fields['runtime']['var'].set(str(bare))
@@ -1058,8 +1079,13 @@ def test_a_bare_ccp4_warns_before_the_first_run_not_only_after(tmp_path,monkeypa
         app.method.set('pplus_bundled')
         app._detect_modules(initial=True)
         text=app.warning.cget('text')
-        assert '连续 SAD' in text and 'density/' in text and str(bare) in text
+        assert 'cparrot' in text and 'density/' in text and str(bare) in text
         # The method itself is untouched until 开始, so nothing is hidden either.
         assert app.method.get()=='pplus_bundled'
+        # A CCP4 without Phaser cannot keep P+: the notice must say so instead.
+        for name in ('phaser',):
+            (bare/'bin'/name).unlink()
+        app._detect_modules(initial=True)
+        assert '连续 SAD' in app.warning.cget('text')
     finally:
         app.root.destroy()

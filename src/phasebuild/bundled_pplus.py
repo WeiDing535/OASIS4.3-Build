@@ -55,7 +55,9 @@ def require_density(cfg):
     if density is None:
         raise ValueError(
             '这次运行缺“包内密度修饰引擎”'+DENSITY_ENGINE+'：当前运行时 '+str(Path(cfg['runtime']).expanduser())
-            +' 里没有 density/，它只是外部 CCP4 安装。请把“CCP4 位置”指向便携包的 runtime 目录'
+            +' 里没有 density/，它只是外部 CCP4 安装。改用 CCP4 的 cparrot 做密度修饰、'
+            '并把手性固定为输入重原子文件（--dm-engine parrot --no-auto-hand）就不需要 density/；'
+            '要保留双手判别或旧的 RESOLVE 后端，才需要把“CCP4 位置”指向便携包的 runtime 目录'
             '（例如 …/OASIS4.3-…-portable local/runtime，里面有 density/ 和 bin/），或直接启动便携包里的 OASIS4.3')
     return density
 
@@ -134,8 +136,19 @@ def phase(cfg,output):
     from .oasis_options import pairs
     from .runtime import runtime_environment
     from . import trust_workflow
-    out=Path(output);density=require_density(cfg);cfg=dict(cfg,density_runtime=str(density))
-    runtime,_=engine_layout(cfg['runtime'],cfg.get('dm_engine'),density=density,need_density=True);front=out/'phaser';front.mkdir()
+    out=Path(output)
+    # density/ supplies two things: the two-hand Wang8 pilot (only when
+    # auto_hand runs) and the old RESOLVE/CCTBX density-modification backend.
+    # With Parrot as the DM engine and the hand taken from the input heavy-atom
+    # file, neither is needed, so a stock CCP4 can run this stage.
+    need_density=cfg.get('dm_engine')!='parrot' or bool(cfg.get('auto_hand'))
+    density=require_density(cfg) if need_density else None
+    if density is not None and Path(density).parent!=Path(cfg['runtime']).expanduser().resolve():
+        # density_root() also looks next to the application; say so out loud
+        # instead of letting a run appear to use only the chosen runtime.
+        print('density/ 取自 %s（不在所选运行时 %s 内）'%(density,cfg['runtime']),flush=True)
+    cfg=dict(cfg,density_runtime=str(density) if density else '')
+    runtime,_=engine_layout(cfg['runtime'],cfg.get('dm_engine'),density=density,need_density=need_density);front=out/'phaser';front.mkdir()
     work=stage_work(cfg,front/'work.mtz');shutil.copyfile(cfg['sequence'],front/'sequence.fasta')
     if Path(cfg['heavy']).suffix.lower() in ('.pdb','.ent'):shutil.copyfile(cfg['heavy'],front/'heavy.pdb')
     else:gemmi.read_structure(cfg['heavy']).write_pdb(str(front/'heavy.pdb'))

@@ -104,10 +104,12 @@ def validate(config, inspect=True):
         if cfg.get('observation_prior'):raise ValueError('自带模式不接受外部相位文件')
         cfg['runtime']=str(resolve_runtime(cfg.get('runtime') or None))
         from .bundled_pplus import engine_layout,require_density
-        engine_layout(cfg['runtime'],cfg.get('dm_engine'))
-        # The bundled route drives P+ refinement and the two-hand pilot with the
-        # package's RESOLVE/CCTBX tree, which a bare external CCP4 does not have.
-        require_density(cfg)
+        # The two-hand pilot and the old RESOLVE/CCTBX DM backend are the only
+        # users of density/.  With Parrot doing the density modification and the
+        # hand taken from the input heavy-atom file, a stock CCP4 is enough.
+        need_density=cfg.get('dm_engine')!='parrot' or bool(cfg.get('auto_hand'))
+        engine_layout(cfg['runtime'],cfg.get('dm_engine'),need_density=need_density)
+        if need_density:require_density(cfg)
     if trusted:
         # The P+ trust-region phase stage itself never needs Phenix; only the
         # original RESOLVE/CCTBX density-modification backend did. When the
