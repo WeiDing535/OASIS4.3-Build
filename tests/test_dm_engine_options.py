@@ -29,9 +29,38 @@ def test_unknown_engine_is_rejected():
         _validate(None, dm_engine='parrot2')
 
 
-def test_parrot_requires_p_plus_method():
-    with pytest.raises(ValueError):
-        _validate(None, method='likelihood', dm_engine='parrot')
+@pytest.mark.parametrize('method',['likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'])
+def test_parrot_is_allowed_on_every_phasing_method(method,tmp_path):
+    """Both SAD front ends write an observation likelihood, so Parrot fits both."""
+    for name in ('sad','native','sequence','heavy','reference','prior'):
+        (tmp_path/name).write_text('placeholder')
+    parrot=tmp_path/'cparrot';parrot.write_text('#!/bin/sh\nexit 1\n');parrot.chmod(0o755)
+    extra={'observation_prior':str(tmp_path/'prior')} if method=='pplus_trust' else {}
+    cfg=_validate(None, method=method, dm_engine='parrot', dm_executable=str(parrot),
+                  **extra,
+                  sad=str(tmp_path/'sad'), native=str(tmp_path/'native'),
+                  sequence=str(tmp_path/'sequence'), heavy=str(tmp_path/'heavy'),
+                  reference=str(tmp_path/'reference'), output=str(tmp_path/'out'))
+    # BASE is phases-only, so the accepted request is downgraded for a reason
+    # about the missing tracer, never about the phasing method.
+    assert cfg['dm_engine_requested']=='parrot'
+    assert 'phasing method' not in cfg['dm_engine_fallback']
+
+
+def test_phases_only_runs_keep_the_internal_engine(tmp_path):
+    """No tracer means no Fcalc feedback: do not resolve an external Parrot."""
+    for name in ('sad','native','sequence','heavy','reference'):
+        (tmp_path/name).write_text('placeholder')
+    parrot=tmp_path/'cparrot';parrot.write_text('#!/bin/sh\nexit 1\n');parrot.chmod(0o755)
+    cfg=_validate(None, method='likelihood', dm_engine='parrot', feedback_cycles=2,
+                  dm_executable=str(parrot), build_model=False,
+                  sad=str(tmp_path/'sad'), native=str(tmp_path/'native'),
+                  sequence=str(tmp_path/'sequence'), heavy=str(tmp_path/'heavy'),
+                  reference=str(tmp_path/'reference'), output=str(tmp_path/'out'))
+    assert cfg['dm_engine']=='resolve' and cfg['dm_engine_requested']=='parrot'
+    assert cfg['feedback_cycles']==0 and 'phases-only' in cfg['dm_engine_fallback']
+    dm=[s for s in stage_plan(cfg) if s['id']=='dm'][0]
+    assert 'run_trace_feedback.py' not in ' '.join(dm['command'])
 
 
 @pytest.mark.parametrize('solvent',[0.0,1.0,-0.1,1.5,float('nan')])
@@ -88,9 +117,29 @@ def test_stage_plan_default_dm_command_is_untouched(tmp_path):
                           cfg['output']+'/03_dm/map_phases.json']
 
 
-def test_stage_plan_routes_parrot_engine_to_trace_feedback(tmp_path):
+def test_stage_plan_keeps_phases_only_runs_on_the_internal_engine(tmp_path):
     cfg,stages=_stage_plan(None,tmp_path,dm_engine='parrot',feedback_cycles=2,dm_solvent=0.5)
     dm=[s for s in stages if s['id']=='dm'][0]
+    assert 'run_trace_feedback.py' not in ' '.join(dm['command'])
+
+
+def test_stage_plan_routes_a_building_parrot_run_to_trace_feedback(tmp_path):
+    runtime=tmp_path/'runtime'
+    for name in ('cbuccaneer','refmac5'):
+        binary=runtime/'bin'/name;binary.parent.mkdir(parents=True,exist_ok=True)
+        binary.write_text('#!/bin/sh\nexit 1\n');binary.chmod(0o755)
+    lib=runtime/'lib/data/reference_structures';lib.mkdir(parents=True)
+    for suffix in ('.mtz','.pdb'):(lib/('reference-1tqw'+suffix)).write_text('placeholder')
+    parrot=tmp_path/'cparrot';parrot.write_text('#!/bin/sh\nexit 1\n');parrot.chmod(0o755)
+    for name in ('sad','native','sequence','heavy','reference'):
+        (tmp_path/name).write_text('placeholder')
+    cfg=_validate(None, method='pplus_internal', build_model=True, dm_engine='parrot',
+                  feedback_cycles=2, dm_solvent=0.5, dm_executable=str(parrot),
+                  runtime=str(runtime),
+                  sad=str(tmp_path/'sad'), native=str(tmp_path/'native'),
+                  sequence=str(tmp_path/'sequence'), heavy=str(tmp_path/'heavy'),
+                  reference=str(tmp_path/'reference'), output=str(tmp_path/'out'))
+    dm=[s for s in stage_plan(cfg) if s['id']=='dm'][0]
     assert 'run_trace_feedback.py' in ' '.join(dm['command'])
     assert 'trace/Fcalc' in dm['name']
 

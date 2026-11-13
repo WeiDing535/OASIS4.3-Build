@@ -103,11 +103,12 @@ def make_plan(config, project, python=None, inspect=True):
             if key not in config and protocol is None:cfg[key]=DEFAULTS[key]
     if protocol is not None and not cfg['build_model']:cfg.update(trust_work_weight=False,trust_partial_cleanup=False)
     if 'method' not in config:cfg['method']='pplus_bundled' if protocol is not None else DEFAULTS['method'] # old saved configs retain their historical route
-    if cfg.get('dm_engine')=='parrot' and cfg.get('method') not in ('pplus_trust','pplus_internal','pplus_bundled'):
-        # Parrot 只在 P+ 流程里有意义；其他定相方式退回内部 RESOLVE 引擎并记录原因。
+    if cfg.get('dm_engine')=='parrot' and cfg.get('method') not in ('likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'):
+        # Every phasing method writes the same FP/PHIB/FOM + HL quartet, so
+        # Parrot is meaningful on the continuous-SAD and legacy P+ routes too.
         cfg['dm_engine']='resolve'
         cfg['feedback_cycles']=0
-        cfg['dm_engine_fallback']='parrot requires a P+ phasing method'
+        cfg['dm_engine_fallback']='parrot requires a phasing method that writes an observation likelihood'
     if 'explore' not in config:cfg['explore']=False # never silently migrate saved single-run configs
     explore=cfg.pop('explore');workers=cfg.pop('explore_workers')
     if not isinstance(explore,bool):raise ValueError('多流程探索选项必须为布尔值')

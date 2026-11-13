@@ -127,8 +127,12 @@ def validate(config, inspect=True):
     if cfg['trust_work_weight'] and (not cfg['build_model'] or not cfg['trust_cleanup']):raise ValueError('Work-only weight calibration requires model building and cleanup enabled')
     if cfg['trust_partial_cleanup'] and (not cfg['build_model'] or not cfg['trust_cleanup']):raise ValueError('Partial cleanup requires model building and cleanup enabled')
     if cfg['dm_engine'] not in ('resolve','parrot'):raise ValueError('Unknown density-modification engine')
-    if cfg['dm_engine']=='parrot' and cfg['method'] not in ('pplus_trust','pplus_internal','pplus_bundled'):
-        raise ValueError('The Parrot engine currently requires a P+ phasing method')
+    # Parrot only consumes the standard FP/PHIB/FOM + HL quartet, which every
+    # phasing method writes, so a bare CCP4 can do density modification for the
+    # continuous-SAD and legacy P+ routes as well (this is the SHELXE-equivalent
+    # step of the SHELXC/D/E chain).
+    if cfg['dm_engine']=='parrot' and cfg['method'] not in ('likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'):
+        raise ValueError('The Parrot engine requires a phasing method that writes an observation likelihood')
     if cfg['dm_solvent']=='auto':
         # 显式要求按序列估算：不要被标定的 0.50 常数覆盖。
         cfg['dm_solvent']=None;cfg['dm_solvent_auto']=True
@@ -142,8 +146,6 @@ def validate(config, inspect=True):
     if isinstance(cfg['feedback_cycles'],bool) or not isinstance(cfg['feedback_cycles'],int) or not 0<=cfg['feedback_cycles']<=8:
         raise ValueError('feedback_cycles must be 0-8')
     if cfg['fcalc'] not in ('fc','fc_all','refined'):raise ValueError('fcalc must be fc, fc_all or refined')
-    if cfg['feedback_cycles'] and cfg['dm_engine']!='parrot':
-        raise ValueError('Trace feedback requires the Parrot density-modification engine')
     if config.get('trace_resolution') is not None:
         value=cfg['trace_resolution']
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not 0.5<=value<=10:
@@ -161,6 +163,16 @@ def validate(config, inspect=True):
             cfg['dm_engine_fallback']=str(error)
             if cfg.pop('_auto_dm_cycles',False):cfg['dm_cycles']=40
             cfg['feedback_cycles']=0
+    if cfg['dm_engine']=='parrot' and not cfg['build_model']:
+        # Phases-only runs stop after the DM map: there is no tracer, no Fcalc
+        # feedback and no model to build, so the internal engine is both
+        # sufficient and free of any external program.
+        cfg['dm_engine_requested']='parrot'
+        cfg['dm_engine']='resolve'
+        cfg['dm_engine_fallback']='phases-only runs (build_model off) use the internal density-modification engine'
+        cfg['feedback_cycles']=0
+    if cfg['feedback_cycles'] and cfg['dm_engine']!='parrot':
+        raise ValueError('Trace feedback requires the Parrot density-modification engine')
     if optimized:
         if isinstance(cfg['trust_kl'],bool) or not isinstance(cfg['trust_kl'],(int,float)) or not math.isfinite(cfg['trust_kl']) or not 0<cfg['trust_kl']<=.05:
             raise ValueError('P+ KL 上限须大于 0 且不超过 0.05')

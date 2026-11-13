@@ -30,6 +30,13 @@ def main():
         native=root/'01_inputs/native.mtz'
         sad=root/'01_inputs/sad.mtz'
     prior=root/'02_sad/observations.mtz'
+    if not Path(native).is_file():
+        # The phase stage always writes FP/PHIB/FOM to experimental.mtz, which
+        # is all Parrot needs; a phases-only run may have no native amplitudes.
+        from phasebuild.sad_bridge import FLAG
+        out.mkdir(parents=True,exist_ok=True)
+        native=Path(trace_feedback.work_from_experimental(root/'02_sad/experimental.mtz',sad,FLAG,
+                                                         cfg['free_value'],out/'work_native.mtz'))
     for path in (native,prior):
         if not Path(path).is_file():raise ValueError('Missing stage input '+str(path))
     solvent=cfg.get('dm_solvent')
@@ -39,7 +46,9 @@ def main():
         from phasebuild.sad_bridge import FLAG
         data,_,_=read_sad_pairs(str(root/'01_inputs/sad.mtz'),free_label=FLAG,free_value=cfg['free_value'])
         solvent=sample_info(cfg,data)['solvent_fraction']
-    report=trace_feedback.run(str(native),str(prior),cfg['sequence'],cfg['runtime'],out,
+    from phasebuild.runtime import resolve_runtime
+    runtime=resolve_runtime(cfg.get('runtime') or None)
+    report=trace_feedback.run(str(native),str(prior),cfg.get('sequence') or '',str(runtime),out,
         solvent_fraction=float(solvent),cycles=int(cfg.get('dm_cycles',20)),
         feedback_cycles=int(cfg.get('feedback_cycles',0)),
         trace_resolution=float(cfg.get('trace_resolution',2.0)),

@@ -15,12 +15,25 @@
   zero overall-B case no longer raises during a refinement cycle.
 - Folds the parameter form into clickable groups (advanced groups hidden behind
   「显示高级参数」), so the window opens with only the inputs a run needs.
-- Separates the P+ engine from CCP4: the form gains 「包内密度引擎（density/）」,
-  `run_sad_to_model.py` gains `--density-runtime`, and a bare CCP4 now either
-  borrows a reachable `density/` tree or is switched to the package runtime —
-  with a message naming `density/bin/oasis-density-python` instead of failing in
-  Phaser. `docs/INSTALL_BUNDLE.md` now states why the runtime cannot be
-  redistributed and what a user with only CCP4 can do.
+- Makes a stock CCP4 install the supported baseline. `连续 SAD（只需 CCP4）` and
+  `旧版直接法 P+（只需 CCP4）` run the whole chain with `cparrot`/`cbuccaneer`/
+  `refmac5` only; measured on insulin 2.1 Å at Rwork 0.2796 / Rfree 0.3331 with
+  50 residues in 12 min, better than the bundled P+ route (0.3166 / 0.3779).
+- The form gains 「包内密度引擎（density/）」 and `run_sad_to_model.py` gains
+  `--density-runtime`, but a bare CCP4 is no longer swapped for the package
+  runtime and no longer refused: it switches to the CCP4-only method and says so
+  in the red notice. `--density-runtime` now only names an explicit `density/`.
+- Detection runs after the form exists and resolves the runtime even when the
+  field is blank, so typing `/Applications/ccp4-9` raises the red notice *before*
+  the first run (it used to appear only after 开始). On insulin, `连续 SAD` with
+  Parrot density modification reaches Rwork 0.3150 / Rfree 0.3583 with 51
+  residues in 6.5 min, versus 0.2796 / 0.3331 in 12 min with the internal engine:
+  both run on stock CCP4, the internal one is steadier, Parrot is faster.
+- Allows Parrot density modification on the `连续 SAD` and `旧版直接法 P+`
+  methods (both write an observation likelihood); phases-only runs keep the
+  internal engine and never resolve an external tracer.
+- `run_trace_feedback.py` falls back to `02_sad/experimental.mtz` plus the SAD
+  free set when a phases-only run has no `01_inputs/native.mtz`.
 - Stops leaking the calibrated P+ recipe into the other methods: `collect()`
   drops `protocol`, the DM phase-restraint prior and the trust-region switches
   unless the method is `pplus_bundled`.

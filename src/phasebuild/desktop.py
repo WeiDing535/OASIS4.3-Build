@@ -24,9 +24,9 @@ from .jobs import Jobs
 STATUS_NAMES={'queued':'等待运行','running':'正在运行','stopping':'正在停止','cancelled':'已停止',
               'failed':'失败','success':'已完成','imported':'已导入（仅查看）','interrupted':'界面曾中断'}
 IMPORTED_NOTE='导入的既有结果：只读目录，不会重新运行；可查看曲线/表格、导出结果、保存模型。'
-METHODS=[('pplus_bundled','P+ 自带引擎（推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
-         ('pplus_internal','内部 P+（实验性，不用于正式解析）'),('likelihood','连续 SAD'),
-         ('pplus','旧版直接法 P+')]
+METHODS=[('pplus_bundled','P+ 自带引擎（需密度引擎，推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
+         ('pplus_internal','内部 P+（实验性，不用于正式解析）'),
+         ('likelihood','连续 SAD（只需 CCP4）'),('pplus','旧版直接法 P+（只需 CCP4）')]
 METHOD_NAMES=dict(METHODS)
 # Shown under the method radios; the internal chain is the one that must not be
 # mistaken for a validated route (see docs/NO_CCP4_REPLACEMENT.md).
@@ -35,8 +35,9 @@ METHOD_HINTS={
  'pplus_trust':'外部对照：Phaser 做 SAD，P+ 只接密度修饰之后的相位。',
  'pplus_internal':'实验性：SAD 定相已到 Phaser 水平，但密度修饰比 Parrot 低约 0.13（图相关 0.56 vs 0.69），'
                   '且没有自动追踪；结果只用于研究对比，不要用来定结构。',
- 'likelihood':'连续 SAD：不经过 P+，直接用似然法定相，作为对照使用。',
- 'pplus':'旧版直接法 P+：保留用于复现历史结果。'}
+ 'likelihood':'连续 SAD：不经过 P+，直接用似然法定相；密度修饰与建模只用 CCP4 的 Parrot/Buccaneer/REFMAC，'
+               '所以只装一份 CCP4 就能跑完整条链（对标 SHELXC/D/E）。',
+ 'pplus':'旧版直接法 P+：保留用于复现历史结果，同样只需要 CCP4。'}
 PROTOCOLS=[('','不使用参数方案'),('pplus_w8_weight','P+ · Wang8＋精修权重搜索（标定配方）'),
            ('pplus_w8','P+ · Wang8'),('pplus_w14','P+ · Wang14'),('stable_w14','稳定化 P+ · Wang14')]
 RECIPES=[('pipeline','自带 Buccaneer/REFMAC'),('ccp4','外部 CCP4 流程'),('legacy','旧版逐轮流程')]
@@ -531,7 +532,6 @@ class App:
         self.module_hint=self.tk.StringVar(value='正在检测本机 CCP4…')
         ttk.Label(modules,textvariable=self.module_hint,style='Hint.TLabel',wraplength=340,
                   justify='left').pack(fill='x',padx=(2,0),pady=(4,0))
-        self._detect_modules(initial=True)
 
         inputs=self._group('inputs','输入文件',expanded=True)
         for key in ESSENTIAL_GROUPS[0][1]:
@@ -610,6 +610,9 @@ class App:
                         command=self._toggle_advanced).pack(side='left')
         ttk.Button(actions,text='检查配置',command=self.on_check).pack(side='right')
         self.actions=actions
+        # Detect last: the notice and the per-method field states need the form
+        # to exist, otherwise a bare CCP4 gets no warning until 开始.
+        self._detect_modules(initial=True)
 
     def _toggle_advanced(self):
         if self.advanced.get():
@@ -688,6 +691,14 @@ class App:
         self.module_build.set(modules['build']['available'])
         self._sync_run_resources()
         self._modules_changed()
+        if initial and self.method.get()=='pplus_bundled' and not self._density_ready():
+            # Say it before the user presses 开始: the P+ method cannot run on a
+            # bare CCP4, and hiding that in the advanced group is what made a
+            # stock-CCP4 user think the whole program was useless.
+            located=resolved or typed or '默认运行时'
+            self._warn('这台机器只有 CCP4（%s 里没有 density/）：P+ 定相跑不了。'
+                       '点“开始”会自动改用“连续 SAD + 密度修饰 + Buccaneer/REFMAC”，'
+                       '只依赖 CCP4 自带程序，不需要包内密度引擎。'%located)
 
     def _sync_run_resources(self):
         """Keep “密度引擎” and “参考 MTZ” pointing at this runtime's own files.
@@ -789,8 +800,10 @@ class App:
             elif engine:
                 lines.append('包内 P+ 引擎：%s（外部 CCP4 提供 Parrot/Buccaneer/REFMAC，P+ 用这份引擎）'%engine)
             else:
-                lines.append('缺包内 P+ 引擎（density/bin/oasis-density-python）：只装 CCP4 跑不了 P+ 流程。'
-                             '在“显示高级参数 → 运行资源”里填一份 density/ 目录，或把“CCP4 位置”指向便携包的 runtime。')
+                lines.append('缺包内 P+ 引擎（density/bin/oasis-density-python）：P+ 定相用不了。'
+                             '只装 CCP4 也能跑完整条链——点“开始”会自动改用“连续 SAD + 密度修饰 + '
+                             'Buccaneer/REFMAC”，不需要 density/；想用 P+ 再在“显示高级参数 → 运行资源”'
+                             '里填一份 density/ 目录。')
         if not self.module_parrot.get():
             lines.append('模块 2 已关闭：跳过密度修饰，直接输出 P+ 相位；模块 3 需要修饰后的图，已一并关闭。')
         elif not self.module_build.get():
@@ -925,6 +938,28 @@ class App:
         self._warn('\n'.join(plan.get('sample_warnings') or []))
         self._say('配置检查通过',ok=True)
 
+    def _effective_runtime(self):
+        """The runtime this form would actually use, even when the field is blank.
+
+        An empty field means “whatever the workflow defaults to”, so asking only
+        the field would report “no density/” for a portable runtime that has one,
+        and would skip the switch on a machine whose only CCP4 is a stock one.
+        """
+        field=(self.fields.get('runtime') or {}).get('var')
+        typed=field.get().strip() if field is not None else ''
+        if typed:return typed
+        report=getattr(self,'_module_report',None) or {}
+        resolved=(report.get('location') or {}).get('resolved') or ''
+        return str(resolved or self.defaults.get('runtime') or '')
+
+    def _density_ready(self):
+        """True when the form can reach a density/ tree for the P+ engine."""
+        explicit=(self.fields.get('density_runtime') or {}).get('var')
+        explicit=explicit.get().strip() if explicit is not None else ''
+        if explicit and self._has_density(explicit):return True
+        runtime=self._effective_runtime()
+        return bool(runtime) and self._has_density(Path(runtime)/'density')
+
     @staticmethod
     def _has_density(path):
         """True when ``path`` is a density/ tree carrying the P+ engine."""
@@ -933,68 +968,67 @@ class App:
         except (OSError,ValueError):
             return False
 
-    def _density_runtime_fix(self,config):
-        """Name the package runtime to use when the chosen one has no density/.
+    def _switch_to_ccp4_only(self,config):
+        """Fall back to the route a bare CCP4 can run, or None if it cannot.
 
-        A bare CCP4 supplies Phaser, Parrot, Buccaneer and REFMAC, but not the
-        package's P+ likelihood engine: that one lives in a density/ tree copied
-        from RESOLVE/CCTBX.  Such a run would die in Phaser, so it is moved to
-        the package runtime.  Two cases keep the user's own CCP4: its runtime
-        already carries density/, or “密度引擎” names a tree explicitly (the
-        engines then come from CCP4 and only P+ borrows that tree).
+        Continuous SAD writes the same observation likelihood the bundled route
+        does, so Phaser is not needed at all: Parrot (or the internal engine)
+        modifies the density and Buccaneer/REFMAC build the model.  This is the
+        SHELXC/D/E-equivalent chain and it needs nothing outside a stock CCP4.
         """
-        from . import oasis_workflow
-        if config.get('method')!='pplus_bundled':return ''
+        from .runtime import resolve_runtime
+        from . import parrot_dm
         runtime=str(config.get('runtime') or '').strip()
-        explicit=str(config.get('density_runtime') or '').strip()
-        if explicit and self._has_density(explicit):return ''
-        if runtime and self._has_density(Path(runtime)/'density'):return ''
-        suggested=oasis_workflow.bundled_runtime(self.controller.project)
-        if suggested is None or str(suggested)==runtime:return ''
-        return str(suggested)
-
-    def _use_runtime(self,path,old=''):
-        """Show ``path`` in the form and explain why it replaced ``old``."""
-        field=self.fields.get('runtime')
-        if field is not None:field['var'].set(path)
-        self._detect_modules()
-        self._location_warning=('“CCP4 位置”已从 %s 改为 %s：前者没有 density/，跑不了包内 P+ 流程。'
-                                %(old or '（空）',path))
+        if not runtime:return None
+        try:
+            resolve_runtime(runtime,required=('cbuccaneer','refmac5'))
+        except Exception:
+            return None
+        try:
+            parrot_dm.locate(str(Path(runtime)/'bin'/'cparrot'),runtime)
+            engine='parrot'
+        except Exception:
+            engine='resolve'
+        self.method.set('likelihood');self._method_changed()
+        if engine=='parrot':
+            self.dm_engine.set(dict(ENGINES)['parrot'])
+        self._location_warning=('这台机器只有 CCP4（%s 里没有 density/），P+ 定相跑不了；'
+                                '本次改用“连续 SAD + %s 密度修饰 + Buccaneer/REFMAC”，'
+                                '只依赖 CCP4 自带程序，不需要包内密度引擎。'
+                                %(runtime,'Parrot' if engine=='parrot' else '内部'))
         self._refresh_module_hint()
-        # on_start shows this once, next to the start button; setting the red
-        # bar here would be cleared by the fallback notice two lines later.
         self._pending_warning=self._location_warning
+        # Patch the collected config instead of re-reading the form: the caller
+        # may be validating a saved job whose fields are not all on screen.
+        config=dict(config,method='likelihood',dm_engine=engine,refinement_prior='original_sad',
+                    auto_hand=False,allow_unverified_hand=False,trust_wang_radius=14.)
+        for key in ('protocol','trust_partial_cleanup','trust_work_weight','trust_stability'):
+            config.pop(key,None)
+        return config
 
     def _apply_density_fix(self,config):
-        """Make sure a bundled-route run has a density/ tree, or say what to do."""
-        from . import bundled_pplus
+        """A P+ run needs the package density engine; a bare CCP4 moves to 连续 SAD.
+
+        Nothing is borrowed behind the user's back: either the chosen runtime
+        carries density/ (or the 密度引擎 field names one), or the run switches
+        to the route that only needs CCP4 programs and says so in the red bar.
+        """
         if config.get('method')!='pplus_bundled':return config
-        runtime=str(config.get('runtime') or '').strip()
-        fixed=self._density_runtime_fix(config)
-        if fixed:
-            self._use_runtime(fixed,runtime)
-            return self.collect()
-        found=bundled_pplus.density_root(dict(runtime=runtime or '.',
-                                              density_runtime=str(config.get('density_runtime') or '')))
-        if found is None:
-            raise ValueError(
-                '这次运行缺“包内密度引擎”density/bin/oasis-density-python：%s 里没有，本机也没找到便携包。'
-                'CCP4 自己不含这个引擎（它来自 RESOLVE/CCTBX，我们无权随包分发），所以只装 CCP4 跑不了 P+ 流程。'
-                '三种解决办法：①把“CCP4 位置”指向便携包的 runtime（…/OASIS4.3-…-portable local/runtime）；'
-                '②在“显示高级参数 → 运行资源 → 包内密度引擎”里填一份 density/ 目录，CCP4 仍用你自己的；'
-                '③用 packaging/build_bundled_pplus.py --density-source <你自己的 Phenix 安装> 生成一份 density/。'
-                %(runtime or '（未指定运行时）'))
-        if not str(config.get('density_runtime') or '').strip():
-            # Record the tree that will really be used, so the job can be
-            # re-run from its saved config on a machine that keeps it elsewhere.
-            field=self.fields.get('density_runtime')
-            if field is not None:field['var'].set(str(found))
-            config=dict(config,density_runtime=str(found))
-            self._location_warning=('外部 CCP4 %s 只提供 Phaser/Parrot/Buccaneer/REFMAC；'
-                                    'P+ 定相改用 %s 里的引擎。'%(runtime or '（未指定）',found))
-            self._refresh_module_hint()
-            self._pending_warning=self._location_warning
-        return config
+        explicit=str(config.get('density_runtime') or '').strip()
+        if explicit and self._has_density(explicit):return config
+        runtime=str(config.get('runtime') or '').strip() or self._effective_runtime()
+        if runtime and self._has_density(Path(runtime)/'density'):return config
+        if not runtime:
+            # Nothing is known about this machine: let validate() name the gap.
+            return config
+        switched=self._switch_to_ccp4_only(dict(config,runtime=runtime))
+        if switched is not None:return switched
+        raise ValueError(
+            '这次运行缺“包内密度引擎”density/bin/oasis-density-python，%s 也不是完整的 CCP4。'
+            'P+ 定相需要这份引擎（它来自 RESOLVE/CCTBX，不能随包分发）。'
+            '请把“CCP4 位置”指向一份带 cbuccaneer/refmac5 的 CCP4，'
+            '或在“显示高级参数 → 运行资源 → 包内密度引擎”里填一份 density/ 目录。'
+            %(runtime or '（未指定运行时）'))
 
     def on_start(self):
         """Start one more run; earlier runs keep going in parallel."""

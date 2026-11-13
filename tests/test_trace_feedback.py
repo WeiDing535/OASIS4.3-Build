@@ -159,3 +159,21 @@ def test_ccp4_pipeline_input_masks_free_phases(tmp_path):
     assert not np.isfinite(ph[free]).all() and not np.isfinite(fom[free]).all()
     assert np.isfinite(ph[~free]).all() and np.isfinite(fom[~free]).all()
     assert np.allclose(np.asarray(m.column_with_label('FP'))[[0,1]],[10.0,11.0])
+
+
+def test_work_from_experimental_supplies_the_free_set_a_phases_only_run_lacks(tmp_path):
+    h=gemmi.make_miller_array(gemmi.UnitCell(40,40,40,90,90,90),gemmi.SpaceGroup('P 1'),3.0)
+    flags=np.where(np.arange(len(h))%10==0,7,3)
+    sad=_mtz(tmp_path/'sad.mtz',np.column_stack([h,np.full(len(h),30.),np.ones(len(h)),
+                                                 np.zeros(len(h)),np.ones(len(h)),flags]),
+             extra=[('FP','F'),('SIGFP','Q'),('DANO','D'),('SIGDANO','Q'),('PIPELINE_FREE','I')])
+    experimental=_mtz(tmp_path/'experimental.mtz',
+                      np.column_stack([h,np.full(len(h),30.),np.ones(len(h)),np.full(len(h),60.),
+                                       np.full(len(h),.5),np.zeros((len(h),4))]),
+                      extra=[('FP','F'),('SIGFP','Q'),('PHIB','P'),('FOM','W'),
+                             ('HLA','A'),('HLB','A'),('HLC','A'),('HLD','A')])
+    out=trace_feedback.work_from_experimental(experimental,sad,'PIPELINE_FREE',7,tmp_path/'work.mtz')
+    merged=gemmi.read_mtz_file(out)
+    assert merged.column_labels()==['H','K','L','FP','SIGFP','FreeR_flag']
+    kept=np.array(merged)[:,5]!=7
+    assert kept.sum()==int((flags!=7).sum())

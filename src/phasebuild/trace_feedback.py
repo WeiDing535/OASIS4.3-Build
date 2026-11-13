@@ -194,3 +194,29 @@ def merge_work(work_mtz, destination):
         data[keep][:,labels.index(sig_label)],data[keep][:,labels.index('FreeR_flag')]])
     out.set_data(rows.astype(np.float32));out.write_to_file(str(destination))
     return {'work_rows':int(keep.sum()),'excluded':int((~keep).sum())}
+
+
+def work_from_experimental(experimental,sad,free_label,free_value,destination):
+    """Write FP/SIGFP/FreeR_flag from the phase-stage map plus the SAD free set.
+
+    A phases-only run has no ``01_inputs/native.mtz``; Parrot still needs the
+    observed amplitudes and the test set, both of which the SAD file carries.
+    """
+    exp=gemmi.read_mtz_file(str(experimental));exp.ensure_asu()
+    obs=gemmi.read_mtz_file(str(sad));obs.ensure_asu()
+    labels=obs.column_labels();data=np.array(obs)
+    exp_labels=exp.column_labels();exp_data=np.array(exp)
+    fp,sig=_amp_labels(exp_labels)
+    flags={}
+    for row in data:
+        flags[(int(row[0]),int(row[1]),int(row[2]))]=row[labels.index(free_label)]
+    rows=[]
+    for row in exp_data:
+        key=(int(row[0]),int(row[1]),int(row[2]))
+        rows.append([row[0],row[1],row[2],row[exp_labels.index(fp)],row[exp_labels.index(sig)],
+                     flags.get(key,free_value)])
+    out=gemmi.Mtz(with_base=True);out.spacegroup=exp.spacegroup;out.set_cell_for_all(exp.cell)
+    out.add_dataset('work')
+    for label,kind in [('FP','F'),('SIGFP','Q'),('FreeR_flag','I')]:out.add_column(label,kind)
+    out.set_data(np.array(rows,dtype=np.float32));out.write_to_file(str(destination))
+    return str(destination)

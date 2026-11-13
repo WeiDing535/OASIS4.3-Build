@@ -195,6 +195,8 @@ def test_fallback_warning_is_a_red_line_that_clears(tmp_path):
     app=desktop.App(desktop.Controller(project(tmp_path)))
     try:
         app.root.update_idletasks()
+        app._warn('')                       # detection may already have said something
+        app.root.update_idletasks()
         assert not app.warning.winfo_ismapped()
         notice=app.controller.fallback_notice({'dm_engine_fallback':'Parrot (cparrot) was not found'})
         assert '已回退' in notice
@@ -818,23 +820,23 @@ def test_browse_buttons_stay_visible_and_ccp4_location_feeds_detection(tmp_path,
         app.root.destroy()
 
 
-def test_a_bare_ccp4_runtime_is_switched_to_the_bundled_one(tmp_path,monkeypatch):
-    """A record made against a bare CCP4 must not repeat the same failure."""
+def test_a_bare_ccp4_runtime_is_kept_and_the_method_moves(tmp_path,monkeypatch):
+    """The user's own CCP4 must stay the runtime: only the method changes."""
+    from phasebuild import oasis_workflow
+    monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
     app=window(tmp_path)
     try:
-        bundle=tmp_path/'dist/OASIS4.3-portable local/runtime'
-        for name in ('density/bin/oasis-density-python','bin/cbuccaneer'):
-            path=bundle/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#!/bin/sh\n')
-        bare=tmp_path/'ccp4-9';bare.mkdir()
-        cfg={'method':'pplus_bundled','runtime':str(bare)}
-        assert app._density_runtime_fix(cfg)==str(bundle)
-        # A runtime that carries the tree, or a method that does not need it,
-        # is left exactly as the user typed it.
-        assert app._density_runtime_fix(dict(cfg,runtime=str(bundle)))==''
-        assert app._density_runtime_fix(dict(cfg,method='likelihood'))==''
-        monkeypatch.setattr(app,'_detect_modules',lambda initial=False:None)
-        app._use_runtime(str(bundle),str(bare))
-        assert app.fields['runtime']['var'].get()==str(bundle)
+        bare=tmp_path/'ccp4-9'
+        for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+            path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text('#!/bin/sh\n');path.chmod(0o755)
+        app.fields['runtime']['var'].set(str(bare))
+        config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
+                                           runtime=str(bare),density_runtime=''))
+        assert config['runtime']==str(bare)
+        assert config['method']=='likelihood'
+        assert config['dm_engine']=='parrot'
+        assert app.method.get()=='likelihood'
         assert str(bare) in app._location_warning
         assert 'density/' in app._location_warning
     finally:
@@ -861,22 +863,29 @@ def test_a_bare_ccp4_keeps_its_engines_and_borrows_a_density_tree(tmp_path,monke
         app.root.destroy()
 
 
-def test_a_run_without_any_density_tree_says_what_to_install(tmp_path,monkeypatch):
-    """Bare CCP4 alone cannot run P+: the message must name the way out."""
+def test_a_run_without_any_density_tree_switches_to_the_ccp4_only_route(tmp_path,monkeypatch):
+    """Bare CCP4 cannot run P+, but it can run 连续 SAD: switch, do not refuse."""
     from phasebuild import bundled_pplus,oasis_workflow
     monkeypatch.setattr(bundled_pplus,'density_root',lambda cfg:None)
     monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
     app=window(tmp_path)
     try:
-        bare=tmp_path/'ccp4-9';bare.mkdir()
+        bare=tmp_path/'ccp4-9'
+        for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+            path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text('#!/bin/sh\n');path.chmod(0o755)
         app.fields['runtime']['var'].set(str(bare))
         app.fields['density_runtime']['var'].set('')
+        config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
+                                           runtime=str(bare),density_runtime=''))
+        assert config['method']=='likelihood' and config['runtime']==str(bare)
+        assert '连续 SAD' in app._location_warning
+        # A directory that is not a complete CCP4 still has to be refused.
+        empty=tmp_path/'nothing';empty.mkdir()
         with pytest.raises(ValueError) as caught:
             app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
-                                        runtime=str(bare),density_runtime=''))
-        message=str(caught.value)
-        assert 'density/bin/oasis-density-python' in message
-        assert '便携包' in message and 'build_bundled_pplus.py' in message
+                                        runtime=str(empty),density_runtime=''))
+        assert 'density/bin/oasis-density-python' in str(caught.value)
     finally:
         app.root.destroy()
 
@@ -902,16 +911,15 @@ def test_the_density_field_shows_the_runtime_own_tree(tmp_path):
         app.root.destroy()
 
 
-def test_starting_after_the_runtime_switch_says_so(tmp_path,monkeypatch):
-    """Switching the runtime is a real change; the red bar must name it."""
+def test_starting_on_a_bare_ccp4_says_the_method_changed(tmp_path,monkeypatch):
+    """Switching the method is a real change; the red bar must name it."""
     from phasebuild import oasis_workflow
+    monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
     app=window(tmp_path)
     try:
-        bare=tmp_path/'ccp4-9';bare.mkdir()
-        bundle=tmp_path/'dist/OASIS4.3-portable local/runtime'
-        for name in ('density/bin/oasis-density-python','bin/cbuccaneer','bin/refmac5',
-                     'bin/cparrot','bin/phaser'):
-            path=bundle/name;path.parent.mkdir(parents=True,exist_ok=True)
+        bare=tmp_path/'ccp4-9'
+        for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+            path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
         for key,value in [('sad','sad.mtz'),('heavy','heavy.pdb'),('sequence','seq.pir')]:
             app.fields[key]['var'].set(str(tmp_path/value))
@@ -926,9 +934,10 @@ def test_starting_after_the_runtime_switch_says_so(tmp_path,monkeypatch):
         monkeypatch.setattr(app.controller,'start',fake_start)
         monkeypatch.setattr(app.controller,'fallback_notice',lambda config:'')
         app.on_start()
-        assert started['runtime']==str(bundle)
-        assert '改为' in app.warning.cget('text')
-        assert str(bundle) in app.warning.cget('text')
+        assert started['method']=='likelihood'
+        assert started['runtime']==str(bare)
+        assert '连续 SAD' in app.warning.cget('text')
+        assert str(bare) in app.warning.cget('text')
     finally:
         app.root.destroy()
 
@@ -1032,5 +1041,25 @@ def test_a_finished_job_clears_the_progress_bar(tmp_path):
         controller.results=lambda identifier:{}
         app._refresh()
         assert float(str(app.progress['value']))==0
+    finally:
+        app.root.destroy()
+
+
+def test_a_bare_ccp4_warns_before_the_first_run_not_only_after(tmp_path,monkeypatch):
+    """The red bar must explain the switch while the user is still filling the form."""
+    app=window(tmp_path)
+    try:
+        bare=tmp_path/'ccp4-9'
+        for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+            path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text('#!/bin/sh\n');path.chmod(0o755)
+        app.fields['runtime']['var'].set(str(bare))
+        app.fields['density_runtime']['var'].set('')
+        app.method.set('pplus_bundled')
+        app._detect_modules(initial=True)
+        text=app.warning.cget('text')
+        assert '连续 SAD' in text and 'density/' in text and str(bare) in text
+        # The method itself is untouched until 开始, so nothing is hidden either.
+        assert app.method.get()=='pplus_bundled'
     finally:
         app.root.destroy()

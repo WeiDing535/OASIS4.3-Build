@@ -1,32 +1,57 @@
 # 怎样获得“免安装”的 OASIS4.3 完整包
 
-## 结论先说
+## 结论先说：只装一份 CCP4 就能跑完整条链
 
-**目前没有公开下载地址。** 公开仓库只有源码（约 5 MB）；完整包在 1.4–3.8 GB 之间，里面带着 Phaser、Parrot、Buccaneer、REFMAC 等第三方二进制，包内 `bundle.json` 明确写着：
+**不需要 `density/`，也不需要我们分发任何二进制。** 本机装一份 CCP4（学术用户免费），新建任务时：
 
-```json
-"public_redistribution_ready": false
-```
+1. 「CCP4 位置」填本机安装，例如 `/Applications/ccp4-9`；
+2. 方法选「连续 SAD（只需 CCP4）」；
+3. 点「开始」。
 
-所以它不能直接挂到公开仓库或公开 Release 上。已有 CCP4 授权的用户，可以按下面的步骤在本机组装出一模一样的包——**只要本机装了 CCP4 9，就不需要任何额外安装**。
+跑的是：连续 SAD 定相 → 密度修饰 → Buccaneer 构建 → REFMAC 精修，全部调用 CCP4 自带的 `cparrot` / `cbuccaneer` / `refmac5`，对标 SHELXC/D/E 那条独立链。
 
-## 为什么 runtime 不能上传 GitHub，那用户怎么用？
+胰岛素 2.1 Å SAD 实测（`ins_wave2.0_reso2.1A_sad.mtz` + `sg.pdb` + `3INS.pir`，λ=2.0 Å，S 边）：
+
+| 路线 | 需要什么 | 5 轮后 Rwork / Rfree | 残基 | 用时 |
+| --- | --- | --- | --- | --- |
+| 连续 SAD + 内部 MLHL-best 密度修饰 | 只要 CCP4（`cbuccaneer`/`refmac5`） | **0.2796 / 0.3331** | 50 | 12 min |
+| 连续 SAD + Parrot 密度修饰 | 只要 CCP4（多一个 `cparrot`） | 0.3150 / 0.3583 | 51 | 6.5 min |
+| P+ 自带引擎（可选） | CCP4 + 一份 `density/` | 0.3166 / 0.3779 | 50 | 18.1 min |
+
+三条路线都是同一份 CCP4（`/Applications/ccp4-9`，`cparrot`/`cbuccaneer`/`refmac5`）跑出来的，命令与日志都在 `runs/oasis_ccp4_only_*/` 里，可复算。
+
+两条 CCP4 路线的差别要说清楚：
+
+- **内部 MLHL-best（默认）**：5 轮 R 逐轮下降（0.4735→0.4061→0.3779→0.3296→0.2796），末轮 0.2796 / 0.3331，最稳。
+- **Parrot + 2 轮 trace/Fcalc 反馈**：快（6.5 min 对 12 min），第 3 轮一度到 0.2670 / 0.3092，但第 4、5 轮回升到 0.3150 / 0.3583。本流程的模型选择规则是“固定末轮、不用 Rfree 挑模型”（`hybrid_report.json` 里 `selection` 字段写明），所以报告取末轮，不取第 3 轮。
+
+所以默认推荐仍是内部 MLHL-best；Parrot 留在高级参数里，作为“想更快、或想让 CCP4 的 Parrot 参与密度修饰”的选项。P+ 的价值在十案例那一组配方，不在这一个例子——这一例里它 0.3166 / 0.3779，反而最高。
+
+如果方法还停在默认的「P+ 自带引擎」而机器上没有 `density/`，点「开始」不会再报错：程序自动改走 CCP4 路线，并在红条里写明「本次改用连续 SAD……只依赖 CCP4 自带程序」。
+
+**P+ 是可选项，不是前提。** P+ 定相与 RESOLVE 密度修饰需要一份 Phenix 派生的 `density/` 树（`oasis-density-python`），它不能随包公开分发。有它时多一条标定路线；没有它时，上面的链照样出结构。
+
+## 以前为什么“填了 CCP4 也跑不了”
+
+旧版把默认方法设成 `pplus_bundled`，而那条路第一步就要 `density/bin/oasis-density-python`；`/Applications/ccp4-9` 自然没有，于是「CCP4 位置」填得再对也起不来，程序还会把运行时悄悄换成便携包——用户看到的结论就是“填这个没意义”。这是设计错误，已修正：现在检测到“只有 CCP4”就改走 CCP4 路线，不偷换运行时，也不再拒绝运行。
+
+## 为什么完整包不能上传 GitHub
 
 这是许可问题，不是技术问题，代码里绕不过去：
 
 - `runtime/` 里是 **CCP4 的二进制**（`phaser`、`cparrot`、`cbuccaneer`、`refmac5`）加上 CCP4 的 `lib/data`（monomer library、`reference-1tqw.mtz` 等）。CCP4 对学术用户免费，但**再分发要单独授权**；`runtime/runtime_manifest.json` 与包内 `bundle.json` 都记着 `"public_redistribution_ready": false`，所以它不能进公开仓库、也不能挂公开 Release。
 - `runtime/density/` 是 **Phenix 派生**的 RESOLVE/CCTBX 树（`oasis-density-python`、`conda_base`、`libtbx_env`、`ext_ref_files`）。Phenix 本身不允许再分发，学术版也要按机构申请，所以这份树同样不能公开。
-- 公开仓库能放的是**源码和组装脚本**（约 5 MB）：`packaging/build_local_runtime.py`、`build_installation_free.py`、`build_bundled_pplus.py`。谁有授权，谁在本机跑一遍就能得到同样的包——这是目前唯一许可干净的分发方式。
+- 公开仓库能放的是**源码和组装脚本**（约 5 MB）：`packaging/build_local_runtime.py`、`build_installation_free.py`、`build_bundled_pplus.py`。谁有授权，谁在本机跑一遍就能得到同样的包。
 
-于是用户有三条路，按“手上有什么”选：
+所以用户按“手上有什么”选：
 
 | 手上有什么 | 怎么做 | 能跑到哪一步 |
 | --- | --- | --- |
-| 只有源码 | 克隆仓库，直接 `./oasis gui`，在「CCP4 位置」填本机 CCP4 | 需要另有一份 `density/` 才能跑 P+（见下）；否则点「开始」会被明确拦下并给出三条途径 |
-| CCP4 + 一份带 `density/` 的完整包 | 「CCP4 位置」填便携包 runtime；或填自己的 CCP4 + 在「包内密度引擎」填那份 `density/` | 完整链（P+ → Parrot → Buccaneer → REFMAC） |
-| 从维护者处拿私有 tarball | 见「方式 B」，解压即用，`./oasis doctor` 自检 | 完整链 |
+| 只有一份 CCP4 | 「CCP4 位置」填它，方法选「连续 SAD（只需 CCP4）」 | 完整链（SAD → 密度修饰 → Buccaneer → REFMAC），实测 0.2796 / 0.3331 |
+| CCP4 + 一份 `density/` | 方法选「P+ 自带引擎」，在「包内密度引擎」填那份 `density/` | 完整链，外加 P+ 标定配方 |
+| 源码 | 克隆仓库，`./oasis gui` | 同上，取决于本机有没有 CCP4 |
 
-换句话说：**runtime 不上 GitHub，但“怎么造出 runtime”全部在 GitHub 上。** 界面上也不再假装“检测到 CCP4 就能跑”——只装 CCP4 时它会说明缺的是 `density/bin/oasis-density-python`，并给出「指向便携包 / 填一份 density / 用自己的 Phenix 生成」三个具体动作。
+换句话说：**runtime 不上 GitHub，但“怎么造出 runtime”全部在 GitHub 上；而只装 CCP4 的用户已经不需要 runtime 了。**
 
 ## 方式 A：自己组装（推荐，许可上最干净）
 
@@ -177,7 +202,7 @@ python3 packaging/make_macos_app.py --tree dist/OASIS4.3-portable   # 给便携�
   --output runs/mixed
 ```
 
-窗口里的两种走法都验证过：只填 `/Applications/ccp4-9`、密度引擎留空时，点「开始」会把「CCP4 位置」切到便携包 `runtime`，红条写明「前者没有 density/，跑不了包内 P+ 流程」；填了密度引擎路径则保留你的 CCP4，只把 P+ 借过去。
+窗口里的行为（2026-11-13 起）：只填 `/Applications/ccp4-9`、密度引擎留空时，点「开始」**不会**换运行时，而是把方法改成「连续 SAD」并在红条里说明「本次改用连续 SAD + 密度修饰 + Buccaneer/REFMAC，只依赖 CCP4 自带程序」；填了密度引擎路径则保留 P+ 方法。`--density-runtime` 现在只在显式指定 `density/` 时有意义，不再用来“借树”。
 
 ## 方式 B：从维护者处拿现成构建（私有分发）
 
