@@ -71,6 +71,8 @@ FIELD_SPECS=[
  ('reference','密度修饰参考 MTZ','file','随运行资源提供的通用无关参考。',None,None),
  ('runtime','CCP4 位置（可选）','directory',
   '留空用包内运行时。CCP4 装在别处时填它的根目录（含 bin/），或直接粘 ccp4.setup / bashrc 的路径，点“重新检测”会解析成根目录；定相与后续模块都改用这个安装。',None,None),
+ ('density_runtime','包内密度引擎（density/）','directory',
+  'P+ 似然定相与双手判别由这里的 oasis-density-python 驱动，它不是 CCP4 的一部分。留空则先找“CCP4 位置”里的 density/，再找本机便携包；外部 CCP4 配这份引擎即可跑完整条链。',None,None),
  ('feedback_endpoints','反馈终点组合（留空=单终点）','optional','逗号分隔的反馈轮数，例如 2,3：每个值各跑一遍同一协议，再按工作集 R 选择终点（不读 R-free）。',None,None),
  ('dm_solvents','反馈终点溶剂组合（可选）','optional','与上一项配对，逗号分隔，auto 表示按序列估算，例如 auto,0.5；留空则沿用溶剂比例。',None,None),
 ]
@@ -85,7 +87,7 @@ ESSENTIAL_GROUPS=[('输入文件',('sad','heavy','sequence','elements','waveleng
 MODULE_FIELDS=('runtime',)
 ADVANCED_GROUPS=[('输入细节',('native','observation_prior','composition_sequence','labels','free_value')),
                  ('P+ 掩膜与采样',('trust_wang_radius','seed')),
-                 ('运行资源与终点组合',('reference','feedback_endpoints','dm_solvents'))]
+                 ('运行资源与终点组合',('density_runtime','reference','feedback_endpoints','dm_solvents'))]
 
 
 class Controller:
@@ -188,13 +190,14 @@ def _stamp():
     return time.strftime('%Y%m%d_%H%M%S')
 
 
-def stage_log_text(output,per_stage=60):
-    """Per-stage narration for a SAD→model run, in pipeline order.
+def stage_log_text(output):
+    """Everything the pipeline and its engines wrote, in run order.
 
     ``gui.log`` only carries the stage headers and the final report: every stage
-    writes its own progress lines to ``<pipeline dir>/<stage id>.log`` (P+ sites,
-    Parrot feedback cycles, Buccaneer/REFMAC cycles, hand decision).  Reading
-    those back is what makes the log pane show what the run actually did.
+    writes its own progress lines to ``<pipeline dir>/<stage id>.log`` and its
+    engines write deeper ones (``03_dm/cycle_02/parrot.log``,
+    ``02_sad/hands/input_hand/pilot/buccaneer.log``, ...).  The log pane is
+    where a run gets debugged, so it shows all of them, untruncated.
     """
     report=Path(str(output or ''))/'00_sad_to_model/pipeline_report.json'
     if not report.is_file():return ''
@@ -205,14 +208,29 @@ def stage_log_text(output,per_stage=60):
     current=data.get('current')
     if current and current not in {identifier for identifier,_ in order}:
         order.append((current,data.get('current_name') or current))
-    blocks=[]
+    blocks=[];seen=set()
+    def add(path,title):
+        try:path=path.resolve()
+        except OSError:return
+        if path in seen:return
+        seen.add(path)
+        try:lines=path.read_text(errors='replace').splitlines()
+        except OSError:return
+        while lines and not lines[-1].strip():lines.pop()
+        if not lines:return
+        blocks.append('── %s ──\n%s'%(title,'\n'.join(lines)))
+    # Pipeline order first (stage summary, then the engines inside that stage),
+    # so the pane reads top-to-bottom like the run did.
     for identifier,name in order:
-        try:lines=[line for line in (folder/(identifier+'.log')).read_text(errors='replace').splitlines() if line.strip()]
-        except OSError:continue
-        if not lines:continue
-        hidden=len(lines)-per_stage
-        if hidden>0:lines=['…（前面 %d 行省略）'%hidden]+lines[-per_stage:]
-        blocks.append('── %s ──\n%s'%(name or identifier,'\n'.join(lines)))
+        title=name or identifier
+        add(folder/(identifier+'.log'),title)
+        for sub in sorted(folder.glob('*_'+identifier)):
+            if not sub.is_dir():continue
+            for path in sorted(sub.rglob('*.log')):
+                add(path,'%s / %s'%(title,path.relative_to(sub)))
+    # Anything else the run left behind (e.g. sub-logs of an unknown stage).
+    for path in sorted(folder.glob('*.log'))+sorted(folder.rglob('*.log')):
+        add(path,str(path.relative_to(folder)))
     return '\n\n'.join(blocks)
 
 
@@ -227,6 +245,8 @@ class App:
         self.exit_on_finish=exit_on_finish
         self.defaults=controller.defaults()
         self.fields={}
+        self.groups={}
+        self._current_group=None
         self.job=None
         self.result=None
         self.error_text=''
@@ -259,6 +279,7 @@ class App:
         style.configure('Hint.TLabel',foreground='#6b6b6b')
         style.configure('Status.TLabel',foreground='#1f5f9e')
         style.configure('Bad.TLabel',foreground='#a3242b')
+        style.configure('Group.TLabel',font=('Helvetica',12,'bold'),foreground='#1f3b57')
 
     def _layout(self):
         tk,ttk=self.tk,self.ttk
@@ -341,6 +362,7 @@ class App:
         tools=ttk.Frame(frame);tools.pack(fill='x',pady=(4,2))
         ttk.Checkbutton(tools,text='自动滚动',variable=self.follow).pack(side='left')
         ttk.Button(tools,text='清空显示',command=lambda:(self.log.delete('1.0','end'))).pack(side='right')
+        ttk.Button(tools,text='打开日志目录',command=self.on_open_logs).pack(side='right',padx=6)
         self.log=tk.Text(frame,wrap='none',height=20,font=('Menlo',11),background='#101418',
                          foreground='#d8e0e8',insertbackground='#d8e0e8')
         y=ttk.Scrollbar(frame,orient='vertical',command=self.log.yview)
@@ -399,6 +421,83 @@ class App:
         box.pack(fill='x',pady=(0,8))
         return box
 
+    # Groups are foldable: a collapsed group is one line of text, so a form with
+    # twenty-six parameters still reads like a short list of decisions.  Only the
+    # groups whose values were changed (or that the user opened) take space.
+    def _group(self,key,title,expanded=False,parent=None):
+        ttk=self.ttk
+        holder=ttk.Frame(parent or self.form)
+        holder.pack(fill='x',pady=(0,8))
+        header=ttk.Label(holder,text=self._group_title(title,expanded),style='Group.TLabel',
+                         anchor='w',cursor='hand2')
+        header.pack(fill='x')
+        header.bind('<Button-1>',lambda event:self._toggle_group(key))
+        body=ttk.Frame(holder,padding=(14,2,0,2))
+        if expanded:
+            body.pack(fill='x')
+        self.groups[key]=dict(title=title,header=header,body=body,holder=holder,
+                              expanded=bool(expanded),fields=[])
+        self._current_group=key
+        return body
+
+    @staticmethod
+    def _group_title(title,expanded,note=''):
+        text=('▾ ' if expanded else '▸ ')+title
+        return text+('：'+note if note else '')
+
+    def _toggle_group(self,key,expanded=None):
+        group=self.groups.get(key)
+        if not group:
+            return
+        if expanded is None:
+            expanded=not group['expanded']
+        if expanded:
+            group['body'].pack(fill='x')
+        else:
+            group['body'].pack_forget()
+        group['expanded']=bool(expanded)
+        group['header'].configure(text=self._group_title(group['title'],expanded,
+                                                        self._group_note(key)))
+
+    def _group_note(self,key):
+        """A one-line reminder of what a folded group currently holds."""
+        if key=='method':
+            return METHOD_NAMES.get(self.method.get(),'') if hasattr(self,'method') else ''
+        group=self.groups.get(key) or {}
+        changed=[self.fields[field]['title'] for field in group.get('fields',[])
+                 if field in self.fields and self._is_changed(field)]
+        if key=='phase' and hasattr(self,'protocol'):
+            label=dict(PROTOCOLS).get(self.protocol.get(),'')
+            if self.protocol.get()!=self.defaults.get('protocol'):
+                changed.insert(0,'方案 '+label if label else '方案')
+        return ('已改：'+'、'.join(changed[:3])+('…' if len(changed)>3 else '')) if changed else ''
+
+    def _is_changed(self,key):
+        field=self.fields.get(key)
+        if not field:
+            return False
+        default=self.defaults.get(key,'')
+        default='' if default is None else str(default)
+        return field['var'].get().strip()!=default.strip()
+
+    def _refresh_group_headers(self):
+        for key,group in getattr(self,'groups',{}).items():
+            group['header'].configure(text=self._group_title(group['title'],group['expanded'],
+                                                             self._group_note(key)))
+
+    def _reveal_groups(self,config=None):
+        """Open the folded groups that hold non-default values."""
+        for key,group in getattr(self,'groups',{}).items():
+            if group['expanded']:
+                continue
+            if key=='method':
+                chosen=(config or {}).get('method')
+                if chosen and chosen!=self.defaults.get('method'):
+                    self._toggle_group(key,True)
+                continue
+            if any(self._is_changed(field) for field in group.get('fields',[])):
+                self._toggle_group(key,True)
+
     def _build_form(self):
         ttk=self.ttk
         specs={spec[0]:spec for spec in FIELD_SPECS}
@@ -410,7 +509,7 @@ class App:
         ttk.Label(task,text='可选：给这次任务起个名字（如“7E1D 重跑”），任务记录里显示它，'
                             '相同参数、不同数据也能一眼分清。',
                   style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
-        modules=self._section('运行模块（按本机 CCP4 检测结果默认勾选）')
+        modules=self._group('modules','运行模块（按本机 CCP4 检测结果默认勾选）',expanded=True)
         row=ttk.Frame(modules);row.pack(fill='x',pady=2)
         self.module_phase=self.tk.BooleanVar(value=True)
         ttk.Checkbutton(row,text='模块 1 · P+ 定相（必做）',variable=self.module_phase,
@@ -434,18 +533,21 @@ class App:
                   justify='left').pack(fill='x',padx=(2,0),pady=(4,0))
         self._detect_modules(initial=True)
 
-        inputs=self._section('输入文件')
+        inputs=self._group('inputs','输入文件',expanded=True)
         for key in ESSENTIAL_GROUPS[0][1]:
             self._field(inputs,specs[key])
 
-        phase=self._section('① P+ 定相参数')
+        # The method decides which of the other groups matter, so it gets its
+        # own fold; its header always names the current choice.
         self.method=self.tk.StringVar(value=self.defaults.get('method','pplus_bundled'))
+        method=self._group('method','定相方法',expanded=False)
         for key,label in METHODS:
-            ttk.Radiobutton(phase,text=label,value=key,variable=self.method,
+            ttk.Radiobutton(method,text=label,value=key,variable=self.method,
                             command=self._method_changed).pack(anchor='w')
         self.method_hint=self.tk.StringVar(value=METHOD_HINTS.get(self.method.get(),''))
-        ttk.Label(phase,textvariable=self.method_hint,style='Hint.TLabel',wraplength=340,
+        ttk.Label(method,textvariable=self.method_hint,style='Hint.TLabel',wraplength=340,
                   justify='left').pack(fill='x',padx=(2,0),pady=(4,0))
+        phase=self._group('phase','① P+ 定相参数',expanded=False)
         row=ttk.Frame(phase);row.pack(fill='x',pady=(4,0))
         ttk.Label(row,text='P+ 参数方案').pack(side='left')
         self.protocol=self.tk.StringVar(value='')
@@ -454,7 +556,7 @@ class App:
         for key in ESSENTIAL_GROUPS[1][1]:
             self._field(phase,specs[key])
 
-        dm=self._section('② Parrot 密度修饰参数')
+        dm=self._group('dm','② Parrot 密度修饰参数',expanded=False)
         row=ttk.Frame(dm);row.pack(fill='x',pady=2)
         ttk.Label(row,text='密度修饰引擎',width=18,anchor='w').pack(side='left')
         self.dm_engine=self.tk.StringVar(value='parrot')
@@ -467,7 +569,7 @@ class App:
         for key in ESSENTIAL_GROUPS[2][1]:
             self._field(dm,specs[key])
 
-        build=self._section('③ Buccaneer 建模 + REFMAC 精修参数')
+        build=self._group('build','③ Buccaneer 建模 + REFMAC 精修参数',expanded=False)
         row=ttk.Frame(build);row.pack(fill='x',pady=2)
         self.auto_hand=self.tk.BooleanVar(value=True)
         self.auto_hand_box=ttk.Checkbutton(row,text='自动判手（双手试建，不用 R-free）',variable=self.auto_hand)
@@ -496,6 +598,7 @@ class App:
         # The advanced parameters stay out of the way until they are asked for:
         # they are calibrated constants or run resources, not experiment inputs.
         self.advanced_box=ttk.Frame(self.form)
+        self._current_group=None
         for title,keys in ADVANCED_GROUPS:
             group=self._section(title,parent=self.advanced_box)
             for key in keys:
@@ -538,6 +641,9 @@ class App:
         ttk.Label(parent,text=hint,style='Hint.TLabel',wraplength=340,
                   justify='left').pack(fill='x',padx=(2,0))
         self.fields[key]=dict(var=var,kind=kind,title=title,only=only,row=row)
+        group=getattr(self,'_current_group',None)
+        if group and group in self.groups and key not in self.groups[group]['fields']:
+            self.groups[group]['fields'].append(key)
 
     def _browse(self,key,var,kind):
         from tkinter import filedialog
@@ -580,7 +686,38 @@ class App:
         modules=report['modules']
         self.module_parrot.set(modules['parrot']['available'])
         self.module_build.set(modules['build']['available'])
+        self._sync_run_resources()
         self._modules_changed()
+
+    def _sync_run_resources(self):
+        """Keep “密度引擎” and “参考 MTZ” pointing at this runtime's own files.
+
+        ``runtime`` may be a bare CCP4: it supplies Phaser, Parrot, Buccaneer and
+        REFMAC, while P+ itself always runs inside a density/ tree.  The two
+        paths are resolved independently so a user can mix their own CCP4 with a
+        density tree from the portable package.
+        """
+        runtime=self.fields.get('runtime',{}).get('var')
+        runtime=runtime.get().strip() if runtime is not None else ''
+        density=self.fields.get('density_runtime',{}).get('var')
+        if density is not None:
+            automatic=getattr(self,'_density_auto','')
+            current=density.get().strip()
+            # Show the runtime's own tree; never borrow one from elsewhere here,
+            # so a bare CCP4 stays visibly bare and 开始 can offer the switch.
+            # A path the user typed is left alone unless it no longer exists.
+            if not current or current==automatic or not Path(current).is_dir():
+                own=Path(runtime)/'density' if runtime else None
+                if own is not None and self._has_density(own):
+                    density.set(str(own));self._density_auto=str(own)
+                elif current==automatic:
+                    density.set('');self._density_auto=''
+        reference=self.fields.get('reference',{}).get('var')
+        if reference is not None and runtime:
+            candidate=Path(runtime)/'lib/data/reference_structures/reference-1tqw.mtz'
+            current=reference.get().strip()
+            if candidate.is_file() and (not current or not Path(current).is_file()):
+                reference.set(str(candidate))
 
     def _modules_changed(self,*_):
         """Building needs a density-modified map, so module 3 follows module 2."""
@@ -643,8 +780,17 @@ class App:
         else:
             lines.append('未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1。')
             lines.append('模块 1 输出相位、FOM 与 MTZ；已装 CCP4 但不在默认位置时，在上方“CCP4 位置”里填根目录或 ccp4.setup 路径，再点“重新检测”。')
-        if located and not (Path(located)/'density/bin/oasis-density-python').is_file():
-            lines.append('注意：%s 是外部 CCP4 安装，没有包内密度修饰引擎（density/）；P+ 定相与双手判别需要便携包的 runtime，请把“CCP4 位置”指向 …/OASIS4.3-…-portable local/runtime。'%located)
+        if located:
+            own=Path(located)/'density/bin/oasis-density-python'
+            engine=(getattr(self,'fields',{}).get('density_runtime') or {}).get('var')
+            engine=engine.get().strip() if engine is not None else ''
+            if own.is_file():
+                lines.append('包内 P+ 引擎：'+str(own.parent.parent))
+            elif engine:
+                lines.append('包内 P+ 引擎：%s（外部 CCP4 提供 Parrot/Buccaneer/REFMAC，P+ 用这份引擎）'%engine)
+            else:
+                lines.append('缺包内 P+ 引擎（density/bin/oasis-density-python）：只装 CCP4 跑不了 P+ 流程。'
+                             '在“显示高级参数 → 运行资源”里填一份 density/ 目录，或把“CCP4 位置”指向便携包的 runtime。')
         if not self.module_parrot.get():
             lines.append('模块 2 已关闭：跳过密度修饰，直接输出 P+ 相位；模块 3 需要修饰后的图，已一并关闭。')
         elif not self.module_build.get():
@@ -669,6 +815,7 @@ class App:
                 widget.configure(state=state)
             except Exception:
                 pass
+        self._refresh_group_headers()
 
     # --------------------------------------------------------------- values
     def _fill(self,values,strict=True):
@@ -708,6 +855,7 @@ class App:
             field['var'].set('' if value is None else str(value))
         if hasattr(self,'module_hint'):
             self._modules_changed()
+        self._refresh_group_headers()
 
     def collect(self):
         values=dict(self.defaults)
@@ -734,18 +882,32 @@ class App:
             # Blank means "estimate from sequence and cell": None, not ''.
             values['solvent_fraction']=None
         values['method']=self.method.get()
+        bundled=values['method']=='pplus_bundled'
         values['dm_engine']=dict((label,key) for key,label in ENGINES).get(self.dm_engine.get(),'parrot')
         values['building_recipe']=dict((label,key) for key,label in RECIPES).get(self.recipe.get(),'pipeline')
-        values['refinement_prior']=dict((label,key) for key,label in PRIORS).get(self.prior.get(),'dm_phifom')
         values['dm_enabled']=bool(self.module_parrot.get())
         values['build_model']=bool(self.build_model.get()) and values['dm_enabled']
         values['auto_hand']=bool(self.auto_hand.get()) and values['build_model']
         values['allow_unverified_hand']=bool(self.unverified_hand.get()) and values['auto_hand']
-        protocol=dict((label,key) for key,label in PROTOCOLS).get(self.protocol.get(),'')
-        if protocol:
-            values['protocol']=protocol
+        # The calibrated P+ recipe, its DM phase restraints and the trust-region
+        # switches only exist on the bundled route.  Carrying them into another
+        # method makes the run refuse the configuration, so they are dropped
+        # instead of being silently reinterpreted.
+        if bundled:
+            values['refinement_prior']=dict((label,key) for key,label in PRIORS).get(self.prior.get(),'dm_phifom')
+            protocol=dict((label,key) for key,label in PROTOCOLS).get(self.protocol.get(),'')
+            if protocol:
+                values['protocol']=protocol
+            else:
+                values.pop('protocol',None)
         else:
+            values['refinement_prior']='original_sad'
             values.pop('protocol',None)
+            values['auto_hand']=False
+            values['allow_unverified_hand']=False
+            values['trust_wang_radius']=14.
+            for key in ('trust_partial_cleanup','trust_work_weight','trust_stability'):
+                values[key]=False
         return values
 
     # --------------------------------------------------------------- actions
@@ -763,24 +925,30 @@ class App:
         self._warn('\n'.join(plan.get('sample_warnings') or []))
         self._say('配置检查通过',ok=True)
 
-    def _density_runtime_fix(self,config):
-        """Point a bundled-route run at a runtime that carries density/, else ''.
+    @staticmethod
+    def _has_density(path):
+        """True when ``path`` is a density/ tree carrying the P+ engine."""
+        try:
+            return (Path(str(path)).expanduser()/'bin/oasis-density-python').is_file()
+        except (OSError,ValueError):
+            return False
 
-        A record made before the density tree was resolved separately, or a
-        runtime detected as a bare CCP4, names an installation with bin/ but no
-        density/.  Starting it fails before Phasing, so switch the form to the
-        package runtime and say so instead of letting the job die.
+    def _density_runtime_fix(self,config):
+        """Name the package runtime to use when the chosen one has no density/.
+
+        A bare CCP4 supplies Phaser, Parrot, Buccaneer and REFMAC, but not the
+        package's P+ likelihood engine: that one lives in a density/ tree copied
+        from RESOLVE/CCTBX.  Such a run would die in Phaser, so it is moved to
+        the package runtime.  Two cases keep the user's own CCP4: its runtime
+        already carries density/, or “密度引擎” names a tree explicitly (the
+        engines then come from CCP4 and only P+ borrows that tree).
         """
         from . import oasis_workflow
         if config.get('method')!='pplus_bundled':return ''
         runtime=str(config.get('runtime') or '').strip()
-        if not runtime:return ''
-        # Look at this runtime's own tree, not the engine's wider search: the
-        # form should show the installation that actually carries density/.
-        try:
-            if (Path(runtime).expanduser()/'density/bin/oasis-density-python').is_file():return ''
-        except (OSError,ValueError):
-            return ''
+        explicit=str(config.get('density_runtime') or '').strip()
+        if explicit and self._has_density(explicit):return ''
+        if runtime and self._has_density(Path(runtime)/'density'):return ''
         suggested=oasis_workflow.bundled_runtime(self.controller.project)
         if suggested is None or str(suggested)==runtime:return ''
         return str(suggested)
@@ -793,13 +961,40 @@ class App:
         self._location_warning=('“CCP4 位置”已从 %s 改为 %s：前者没有 density/，跑不了包内 P+ 流程。'
                                 %(old or '（空）',path))
         self._refresh_module_hint()
+        # on_start shows this once, next to the start button; setting the red
+        # bar here would be cleared by the fallback notice two lines later.
+        self._pending_warning=self._location_warning
 
     def _apply_density_fix(self,config):
-        """Apply ``_density_runtime_fix`` to the form and return the new config."""
+        """Make sure a bundled-route run has a density/ tree, or say what to do."""
+        from . import bundled_pplus
+        if config.get('method')!='pplus_bundled':return config
+        runtime=str(config.get('runtime') or '').strip()
         fixed=self._density_runtime_fix(config)
-        if not fixed:return config
-        self._use_runtime(fixed,str(config.get('runtime') or ''))
-        return self.collect()
+        if fixed:
+            self._use_runtime(fixed,runtime)
+            return self.collect()
+        found=bundled_pplus.density_root(dict(runtime=runtime or '.',
+                                              density_runtime=str(config.get('density_runtime') or '')))
+        if found is None:
+            raise ValueError(
+                '这次运行缺“包内密度引擎”density/bin/oasis-density-python：%s 里没有，本机也没找到便携包。'
+                'CCP4 自己不含这个引擎（它来自 RESOLVE/CCTBX，我们无权随包分发），所以只装 CCP4 跑不了 P+ 流程。'
+                '三种解决办法：①把“CCP4 位置”指向便携包的 runtime（…/OASIS4.3-…-portable local/runtime）；'
+                '②在“显示高级参数 → 运行资源 → 包内密度引擎”里填一份 density/ 目录，CCP4 仍用你自己的；'
+                '③用 packaging/build_bundled_pplus.py --density-source <你自己的 Phenix 安装> 生成一份 density/。'
+                %(runtime or '（未指定运行时）'))
+        if not str(config.get('density_runtime') or '').strip():
+            # Record the tree that will really be used, so the job can be
+            # re-run from its saved config on a machine that keeps it elsewhere.
+            field=self.fields.get('density_runtime')
+            if field is not None:field['var'].set(str(found))
+            config=dict(config,density_runtime=str(found))
+            self._location_warning=('外部 CCP4 %s 只提供 Phaser/Parrot/Buccaneer/REFMAC；'
+                                    'P+ 定相改用 %s 里的引擎。'%(runtime or '（未指定）',found))
+            self._refresh_module_hint()
+            self._pending_warning=self._location_warning
+        return config
 
     def on_start(self):
         """Start one more run; earlier runs keep going in parallel."""
@@ -811,7 +1006,9 @@ class App:
             self._error(str(error));return
         self.task_name.set('')
         self.job=job
-        self._warn(self.controller.fallback_notice(job.get('config') or {}))
+        notice=self.controller.fallback_notice(job.get('config') or {}) or getattr(self,'_pending_warning','')
+        self._pending_warning=''
+        self._warn(notice)
         self.log_text=''
         self.log.delete('1.0','end')
         self._clear_results()
@@ -851,6 +1048,18 @@ class App:
         if not self.job:
             self._error('还没有结果目录。');return
         path=self.job['output']
+        opener='open' if sys.platform=='darwin' else 'xdg-open'
+        try:
+            subprocess.Popen([opener,path])
+        except OSError as error:
+            self._error(str(error))
+
+    def on_open_logs(self):
+        """Open the folder holding the stage and engine logs shown above."""
+        if not self.job:
+            self._error('还没有结果目录。');return
+        folder=Path(self.job['output'])/'00_sad_to_model'
+        path=str(folder if folder.is_dir() else self.job['output'])
         opener='open' if sys.platform=='darwin' else 'xdg-open'
         try:
             subprocess.Popen([opener,path])
@@ -1007,8 +1216,19 @@ class App:
         return ((text.rstrip()+'\n\n──── 各阶段输出 ────\n\n') if text.strip() else '')+extra
 
     def _show_log(self,text):
+        """Render the log, appending when the text only grew.
+
+        A full run's logs are a few hundred KB and the pane is redrawn on every
+        poll, so rewriting the whole widget each time made the window stutter.
+        Appending the new tail keeps it smooth without hiding anything.
+        """
+        old=getattr(self,'log_text','')
+        if text==old:return
+        if old and text.startswith(old):
+            self.log.insert('end',text[len(old):])
+        else:
+            self.log.delete('1.0','end');self.log.insert('end',text)
         self.log_text=text
-        self.log.delete('1.0','end');self.log.insert('end',text)
         if self.follow.get():
             self.log.see('end')
 
@@ -1060,12 +1280,18 @@ class App:
         self.task_name.set(job.get('name') or '')
         self.fields['output']['var'].set(str(self._fresh_output()))
         self._method_changed()
+        # Folded groups that this record changed are opened, so “沿用参数” shows
+        # what is actually going to run instead of hiding it behind a ▸.
+        self._reveal_groups(config)
         # An older record may name a bare CCP4; show the runtime that can run it
         # rather than repeating a failure the user already saw.
         try:
             config=self._apply_density_fix(self.collect())
         except ValueError:
             pass
+        pending=getattr(self,'_pending_warning','')
+        if pending:self._warn(pending)
+        self._pending_warning=''
         if self._needs_advanced(config):
             self.advanced.set(True);self._toggle_advanced()
         self.job=None

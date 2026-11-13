@@ -10,6 +10,24 @@
 
 所以它不能直接挂到公开仓库或公开 Release 上。已有 CCP4 授权的用户，可以按下面的步骤在本机组装出一模一样的包——**只要本机装了 CCP4 9，就不需要任何额外安装**。
 
+## 为什么 runtime 不能上传 GitHub，那用户怎么用？
+
+这是许可问题，不是技术问题，代码里绕不过去：
+
+- `runtime/` 里是 **CCP4 的二进制**（`phaser`、`cparrot`、`cbuccaneer`、`refmac5`）加上 CCP4 的 `lib/data`（monomer library、`reference-1tqw.mtz` 等）。CCP4 对学术用户免费，但**再分发要单独授权**；`runtime/runtime_manifest.json` 与包内 `bundle.json` 都记着 `"public_redistribution_ready": false`，所以它不能进公开仓库、也不能挂公开 Release。
+- `runtime/density/` 是 **Phenix 派生**的 RESOLVE/CCTBX 树（`oasis-density-python`、`conda_base`、`libtbx_env`、`ext_ref_files`）。Phenix 本身不允许再分发，学术版也要按机构申请，所以这份树同样不能公开。
+- 公开仓库能放的是**源码和组装脚本**（约 5 MB）：`packaging/build_local_runtime.py`、`build_installation_free.py`、`build_bundled_pplus.py`。谁有授权，谁在本机跑一遍就能得到同样的包——这是目前唯一许可干净的分发方式。
+
+于是用户有三条路，按“手上有什么”选：
+
+| 手上有什么 | 怎么做 | 能跑到哪一步 |
+| --- | --- | --- |
+| 只有源码 | 克隆仓库，直接 `./oasis gui`，在「CCP4 位置」填本机 CCP4 | 需要另有一份 `density/` 才能跑 P+（见下）；否则点「开始」会被明确拦下并给出三条途径 |
+| CCP4 + 一份带 `density/` 的完整包 | 「CCP4 位置」填便携包 runtime；或填自己的 CCP4 + 在「包内密度引擎」填那份 `density/` | 完整链（P+ → Parrot → Buccaneer → REFMAC） |
+| 从维护者处拿私有 tarball | 见「方式 B」，解压即用，`./oasis doctor` 自检 | 完整链 |
+
+换句话说：**runtime 不上 GitHub，但“怎么造出 runtime”全部在 GitHub 上。** 界面上也不再假装“检测到 CCP4 就能跑”——只装 CCP4 时它会说明缺的是 `density/bin/oasis-density-python`，并给出「指向便携包 / 填一份 density / 用自己的 Phenix 生成」三个具体动作。
+
 ## 方式 A：自己组装（推荐，许可上最干净）
 
 前提：macOS Intel；一份 Python 3.12（含 numpy / scipy / gemmi）；本机已安装 CCP4 9（提供 `cparrot`、`phaser`、`cbuccaneer`、`refmac5`）。全程只做复制，不安装任何东西，也不改写来源安装。
@@ -78,7 +96,14 @@ python3 packaging/make_macos_app.py --tree dist/OASIS4.3-portable   # 给便携�
 
 ## 方式 A 之后：跑通十案例那套 P+ 协议
 
-组装出来的包只带四个引擎，**没有** `runtime/density/`（RESOLVE/CCTBX，Phenix 派生）。这不影响 P+ 协议，因为该协议用的是 Parrot，而 Parrot 已经取代了整个 RESOLVE/CCTBX 密度修饰；`engine_layout()` 现在只在 `dm_engine` 不是 `parrot` 时才要求 `runtime/density/`。
+组装出来的包只带四个引擎，**没有** `runtime/density/`（RESOLVE/CCTBX，Phenix 派生）。**因此它单独跑不了 `--method pplus_bundled`**：P+ 的似然精修由 `density/bin/oasis-density-python` 驱动，`bundled_pplus.phase()` 一开始就检查这份树，缺了就报 `No such file or directory` 并停在 Phaser 之前。`dm_engine=parrot` 只说明密度修饰用 Parrot 而不是 RESOLVE，它省不掉 P+ 那份树。
+
+想用这个包跑 P+ 协议，先补一份 `density/`，两种办法：
+
+- 本机另有一份带 `density/` 的完整包（dev17 那类）：在「CCP4 位置」填这个只带四引擎的包、在「包内密度引擎」填那份 `density/` 的路径，或用命令行 `--runtime <四引擎包>/runtime --density-runtime <完整包>/runtime/density`；
+- 手头有 Phenix：用 `packaging/build_bundled_pplus.py --density-source <Phenix 安装> …` 从你自己的 Phenix 生成一份 `density/`（受 Phenix 许可约束，只在你的授权范围内使用）。
+
+下面的 7ENM 实测是在**同时有 `density/` 的机器上**做的（`density_root()` 会从应用目录旁找到它）；只有四个引擎的包不补 `density/` 时，同一条命令会在启动阶段就停下。
 
 以 7ENM 为例（输入取自 `cases/7_7enm_3se_P212121`）：
 
@@ -116,12 +141,43 @@ python3 packaging/make_macos_app.py --tree dist/OASIS4.3-portable   # 给便携�
 
 - 找到 `cparrot`：模块 2 默认勾选；找到 `cbuccaneer` **且** `refmac5`：模块 3 默认勾选。
 - 都没找到：两个模块默认关闭、参数组置灰，提示"未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1"。装上 CCP4 或设好 `CCP4`/`CBIN` 后点「重新检测」即可。
-- 装在别处、又没进 `PATH`（双击启动的 GUI 读不到 `.bashrc` 里的 `CCP4`）：在「CCP4 位置」里填安装根目录，或直接把 `ccp4.setup` / `.bashrc` 的路径粘进去；解析出的根目录会写回该栏，检测和运行都用它。这一栏同时是运行目录（子进程按 `<root>/bin/<exe>` 启动，且运行环境会清掉继承的 `CCP4*`），所以填了外部安装就整套改用它——CCP4 自带的 `phaser` 就是 P+ 的前端，一个完整安装能跑完整条链。3O2E 实测：精简版与包内运行时逐位一致（5763 反射、FOM 0.482），完整链的 P+/Parrot/Buccaneer 都从 `/Applications/ccp4-9/bin` 启动并跑通。
+- 装在别处、又没进 `PATH`（双击启动的 GUI 读不到 `.bashrc` 里的 `CCP4`）：在「CCP4 位置」里填安装根目录，或直接把 `ccp4.setup` / `.bashrc` 的路径粘进去；解析出的根目录会写回该栏，检测和运行都用它。这一栏同时是运行目录（子进程按 `<root>/bin/<exe>` 启动，且运行环境会清掉继承的 `CCP4*`）。
+- **但只装 CCP4 跑不了 P+。** CCP4 提供的是 Phaser 前端、Parrot、Buccaneer、REFMAC；P+ 的似然精修在包内的 `density/bin/oasis-density-python` 里（RESOLVE/CCTBX 派生，见下一节），CCP4 里没有这个程序。表单因此把「CCP4 位置」和「包内密度引擎（density/）」分开：
+  - 选的是便携包 runtime（自带 `density/`）：两栏都指向它，直接跑；
+  - 选的是外部 CCP4：P+ 仍要用一份 `density/`。表单会先找运行时自己的 `density/`，找不到就自动改用便携包 runtime 并在提示里写明原因；你也可以在「显示高级参数 → 运行资源 → 包内密度引擎」里填一份 `density/`，这样 CCP4 继续用你自己的，只有 P+ 借用那份树；
+  - 两边都没有：点「开始」会直接报错，说明缺哪个文件、以及三条解决途径，而不是让任务死在 Phaser 之前。
 - 模块 3 依赖模块 2（Buccaneer 从密度修饰后的图开始建）；关掉模块 2 会自动关掉并置灰模块 3。
 
 只勾模块 1 就是精简版：输出 `02_sad/experimental.mtz`（相位/FOM/PPLUS）与 `observations.mtz`，**没有模型、没有 R-free**。3O2E 实测约 2 分钟、5763 反射、mean FOM 0.482、图相关 0.123（三段链是 0.549）。命令行等价写法是 `--lite` 或 `--no-dm-enabled`，详见 `docs/LITE_MODULE_20261112.md`。
 
 注意：免安装包自带的运行时里已经含 Phaser 前端与 Parrot/Buccaneer/REFMAC，所以只要包完整，检测就会通过，不需要目标机器另装 CCP4；`docs/INSTALL_BUNDLE.md` 方式 C（纯源码）才需要本机 CCP4。
+
+## 实测：本机 CCP4 的引擎 + 包内 `density/`（2026-11-13，胰岛素 2.1 Å）
+
+同一条胰岛素任务（`ins_wave2.0_reso2.1A_sad.mtz` + `sg.pdb` + `3INS.pir`，S 边，λ=2.0 Å，`pplus_w8_weight`，Parrot，双手自动判别）跑了三遍：
+
+| 跑法 | 引擎来自 | P+ 来自 | 用时 | 5 轮后 Rwork / Rfree |
+| --- | --- | --- | --- | --- |
+| 全便携包 | 便携包 `runtime` | 便携包 `runtime/density` | 18.1 min | 31.66 / 37.79 |
+| 命令行混搭 | `/Applications/ccp4-9` | dev17 便携包的 `density/` | 11.1 min | 31.66 / 37.79 |
+| 窗口（填 CCP4、密度引擎留空） | 便携包 `runtime`（自动切换） | 便携包 `runtime/density` | 11.9 min | 31.66 / 37.79 |
+
+三次的判手都是 `input_hand` / `I 21 3`，指标逐位相同，因为 `cparrot`、`cbuccaneer`、`refmac5`、`phaser` 四个文件与便携包 `runtime/bin/` 里的 sha256 完全一致——那个便携包就是用这台机器的 CCP4 组装的。换成版本不同的 CCP4，R 会变，但链路照走。
+
+命令行混搭的完整命令（`--density-runtime` 与 `--runtime` 分开给）：
+
+```bash
+./oasis sad-to-model --method pplus_bundled --dm-engine parrot --dm-cycles 40 \
+  --feedback-cycles 2 --trust-wang-radius 8 --dm-solvent 0.5 --auto-hand \
+  --input-columns --elements S --wavelength 2.0 --copies 1 \
+  --sad <insulin sad>.mtz --heavy sg.pdb --sequence 3INS.pir \
+  --runtime /Applications/ccp4-9 \
+  --density-runtime "<便携包>/runtime/density" \
+  --reference /Applications/ccp4-9/lib/data/reference_structures/reference-1tqw.mtz \
+  --output runs/mixed
+```
+
+窗口里的两种走法都验证过：只填 `/Applications/ccp4-9`、密度引擎留空时，点「开始」会把「CCP4 位置」切到便携包 `runtime`，红条写明「前者没有 density/，跑不了包内 P+ 流程」；填了密度引擎路径则保留你的 CCP4，只把 P+ 借过去。
 
 ## 方式 B：从维护者处拿现成构建（私有分发）
 
@@ -207,9 +263,8 @@ python -B package_oasis.py --output /new/path.zip
 - 判断依据与复现命令：`docs/NO_CCP4_REPLACEMENT.md`、`docs/SHELXE_BASELINE.md` §3.3/§3.4。
 - 为什么要留在包里：它们是"能不能不依赖 CCP4"这条线的实测记录，去掉就无法复现结论；但它们**不是**可以替代 Parrot/Buccaneer 的选项。
 
-## 为什么不能直接给一个公开链接
+## 还有两个非许可的障碍
 
-- 第三方引擎的许可不允许把它们的二进制公开再分发；`bundle.json` 的 `public_redistribution_ready: false` 就是这个意思。
 - 即使许可解决，含 RESOLVE/CCTBX 的完整包 3.8 GB，超过单个 Release 附件的 2 GB 上限，需要分卷与校验清单。
 - Linux 目前还没有完整运行时；`docs/LINUX.md` 记录了在 Linux 上准备原生引擎的进展。
 

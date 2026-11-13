@@ -419,6 +419,59 @@ def test_advanced_parameters_stay_hidden_until_asked_for(tmp_path):
         app.root.destroy()
 
 
+def test_parameter_groups_stay_folded_until_clicked(tmp_path):
+    """Three numbered groups are one line each; the experiment inputs stay open."""
+    app=window(tmp_path)
+    try:
+        for key in ('phase','dm','build','method'):
+            assert app.groups[key]['body'].winfo_manager()=='',key
+        assert app.groups['inputs']['body'].winfo_manager()=='pack'
+        assert app.fields['sad']['row'].winfo_ismapped()
+        assert not app.fields['rounds']['row'].winfo_ismapped()
+        app._toggle_group('build')
+        app.root.update_idletasks()
+        assert app.groups['build']['body'].winfo_manager()=='pack'
+        assert app.fields['rounds']['row'].winfo_ismapped()
+        app._toggle_group('build')
+        app.root.update_idletasks()
+        assert app.groups['build']['body'].winfo_manager()==''
+    finally:
+        app.root.destroy()
+
+
+def test_a_folded_group_says_what_is_inside_it(tmp_path):
+    """A folded group must not hide the fact that it differs from the defaults."""
+    app=window(tmp_path)
+    try:
+        header=lambda:app.groups['build']['header'].cget('text')
+        assert header().startswith('▸ ③ Buccaneer')
+        assert '已改' not in header()
+        app.fields['rounds']['var'].set('7')
+        app._refresh_group_headers()
+        assert '已改' in header() and '轮数' in header()
+        app._toggle_group('method')
+        app.root.update_idletasks()
+        assert 'P+ 自带引擎' in app.groups['method']['header'].cget('text')
+        app.method.set('likelihood');app._method_changed()
+        assert '连续 SAD' in app.groups['method']['header'].cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_relaunch_opens_the_groups_the_record_changed(tmp_path):
+    """“沿用参数” must not leave a changed value folded out of sight."""
+    app=window(tmp_path)
+    try:
+        assert app.groups['build']['body'].winfo_manager()==''
+        app._fill(dict(app.defaults,rounds=7),strict=False)
+        app._reveal_groups(dict(app.defaults,rounds=7))
+        app.root.update_idletasks()
+        assert app.groups['build']['body'].winfo_manager()=='pack'
+        assert app.groups['dm']['body'].winfo_manager()==''
+    finally:
+        app.root.destroy()
+
+
 def test_new_task_clears_the_form_and_offers_a_fresh_output(tmp_path):
     """“新建任务” must start from defaults without losing the task history."""
     app=window(tmp_path)
@@ -788,6 +841,115 @@ def test_a_bare_ccp4_runtime_is_switched_to_the_bundled_one(tmp_path,monkeypatch
         app.root.destroy()
 
 
+def test_a_bare_ccp4_keeps_its_engines_and_borrows_a_density_tree(tmp_path,monkeypatch):
+    """The user's own CCP4 is enough for Phaser/Parrot/Buccaneer/REFMAC."""
+    app=window(tmp_path)
+    try:
+        bare=tmp_path/'ccp4-9';bare.mkdir()
+        for name in ('bin/cphaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+            path=bare/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#!/bin/sh\n')
+        tree=tmp_path/'elsewhere/density'
+        engine=tree/'bin/oasis-density-python';engine.parent.mkdir(parents=True);engine.write_text('#!/bin/sh\n')
+        app.fields['runtime']['var'].set(str(bare))
+        app.fields['density_runtime']['var'].set(str(tree))
+        config=app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
+                                           runtime=str(bare),density_runtime=str(tree)))
+        # Nothing is switched: CCP4 supplies the engines, the tree only P+.
+        assert config['runtime']==str(bare)
+        assert config['density_runtime']==str(tree)
+    finally:
+        app.root.destroy()
+
+
+def test_a_run_without_any_density_tree_says_what_to_install(tmp_path,monkeypatch):
+    """Bare CCP4 alone cannot run P+: the message must name the way out."""
+    from phasebuild import bundled_pplus,oasis_workflow
+    monkeypatch.setattr(bundled_pplus,'density_root',lambda cfg:None)
+    monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
+    app=window(tmp_path)
+    try:
+        bare=tmp_path/'ccp4-9';bare.mkdir()
+        app.fields['runtime']['var'].set(str(bare))
+        app.fields['density_runtime']['var'].set('')
+        with pytest.raises(ValueError) as caught:
+            app._apply_density_fix(dict(app.defaults,method='pplus_bundled',
+                                        runtime=str(bare),density_runtime=''))
+        message=str(caught.value)
+        assert 'density/bin/oasis-density-python' in message
+        assert '便携包' in message and 'build_bundled_pplus.py' in message
+    finally:
+        app.root.destroy()
+
+
+def test_the_density_field_shows_the_runtime_own_tree(tmp_path):
+    """A portable runtime carries density/; the form must say which one is used."""
+    app=window(tmp_path)
+    try:
+        runtime=tmp_path/'runtime'
+        engine=runtime/'density/bin/oasis-density-python'
+        engine.parent.mkdir(parents=True);engine.write_text('#!/bin/sh\n')
+        app.fields['runtime']['var'].set(str(runtime))
+        app.fields['density_runtime']['var'].set('')
+        app._sync_run_resources()
+        assert app.fields['density_runtime']['var'].get()==str(runtime/'density')
+        # A bare CCP4 stays visibly bare, so 开始 can offer the switch.
+        bare=tmp_path/'ccp4';bare.mkdir()
+        app.fields['runtime']['var'].set(str(bare))
+        app._sync_run_resources()
+        assert app.fields['density_runtime']['var'].get()==''
+        assert '缺包内 P+ 引擎' in app.module_hint.get()
+    finally:
+        app.root.destroy()
+
+
+def test_starting_after_the_runtime_switch_says_so(tmp_path,monkeypatch):
+    """Switching the runtime is a real change; the red bar must name it."""
+    from phasebuild import oasis_workflow
+    app=window(tmp_path)
+    try:
+        bare=tmp_path/'ccp4-9';bare.mkdir()
+        bundle=tmp_path/'dist/OASIS4.3-portable local/runtime'
+        for name in ('density/bin/oasis-density-python','bin/cbuccaneer','bin/refmac5',
+                     'bin/cparrot','bin/phaser'):
+            path=bundle/name;path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text('#!/bin/sh\n');path.chmod(0o755)
+        for key,value in [('sad','sad.mtz'),('heavy','heavy.pdb'),('sequence','seq.pir')]:
+            app.fields[key]['var'].set(str(tmp_path/value))
+        app.fields['wavelength']['var'].set('2.0')
+        app.fields['output']['var'].set(str(tmp_path/'out'))
+        app.fields['runtime']['var'].set(str(bare))
+        app._detect_modules()
+        started={}
+        def fake_start(config,name=''):
+            started.update(config)
+            return dict(id='job1',name=name,output=config['output'],config=config,status='running')
+        monkeypatch.setattr(app.controller,'start',fake_start)
+        monkeypatch.setattr(app.controller,'fallback_notice',lambda config:'')
+        app.on_start()
+        assert started['runtime']==str(bundle)
+        assert '改为' in app.warning.cget('text')
+        assert str(bundle) in app.warning.cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_another_method_drops_the_bundled_recipe(tmp_path):
+    """The calibrated P+ recipe is not legal input for the other methods."""
+    app=window(tmp_path)
+    try:
+        app.fields['wavelength']['var'].set('2.0')
+        app.method.set('likelihood')
+        app._method_changed()
+        config=app.collect()
+        assert 'protocol' not in config
+        assert config['refinement_prior']=='original_sad'
+        assert config['trust_partial_cleanup'] is False
+        assert config['trust_work_weight'] is False
+        assert config['auto_hand'] is False
+    finally:
+        app.root.destroy()
+
+
 def test_default_runtime_prefers_the_one_with_the_density_engine(tmp_path,monkeypatch):
     """A bare CCP4 can run Phaser but not the bundled P+ route."""
     from phasebuild import oasis_workflow
@@ -822,15 +984,32 @@ def test_the_log_pane_shows_each_stage_not_only_the_headers(tmp_path):
     assert desktop.stage_log_text(tmp_path)==''
 
 
-def test_a_long_stage_log_keeps_its_tail_and_says_so(tmp_path):
-    """The newest lines matter most, and the cut must be visible, not silent."""
+def test_a_long_stage_log_is_shown_whole(tmp_path):
+    """A failure in the middle of a run is only findable if nothing is cut."""
     folder=tmp_path/'run/00_sad_to_model';folder.mkdir(parents=True)
     (folder/'pipeline_report.json').write_text(json.dumps(dict(completed=[dict(id='dm',name='密度修饰')])))
     (folder/'dm.log').write_text('\n'.join('line %d'%number for number in range(200)))
-    text=desktop.stage_log_text(tmp_path/'run',per_stage=10)
-    assert 'line 199' in text and 'line 190' in text
-    assert '\nline 5\n' not in text
-    assert '省略' in text
+    text=desktop.stage_log_text(tmp_path/'run')
+    assert 'line 0' in text and 'line 199' in text
+    assert '省略' not in text
+
+
+def test_engine_sub_logs_are_shown_under_their_stage(tmp_path):
+    """Parrot/REFMAC/trace logs live one or two folders deeper; they are the story."""
+    folder=tmp_path/'run/00_sad_to_model';folder.mkdir(parents=True)
+    (folder/'pipeline_report.json').write_text(json.dumps(dict(completed=[
+        dict(id='dm',name='密度修饰'),dict(id='build',name='Buccaneer 构建')])))
+    (folder/'dm.log').write_text('dm summary\n')
+    cycle=folder/'03_dm/cycle_02';cycle.mkdir(parents=True)
+    (cycle/'parrot.log').write_text('parrot cycle 2: contrast 0.71\n')
+    refmac=folder/'05_build/cycle_01';refmac.mkdir(parents=True)
+    (refmac/'refmac.log').write_text('Rwork 0.2834 Rfree 0.3147\n')
+    (folder/'build.log').write_text('build summary\n')
+    text=desktop.stage_log_text(tmp_path/'run')
+    assert text.index('dm summary') < text.index('parrot cycle 2') < text.index('build summary')
+    assert text.index('build summary') < text.index('Rwork 0.2834')
+    assert 'cycle_02/parrot.log' in text and 'cycle_01/refmac.log' in text
+    assert text.count('parrot cycle 2')==1        # each file appears once
 
 
 @pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')

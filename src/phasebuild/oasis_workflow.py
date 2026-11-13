@@ -70,6 +70,9 @@ def defaults(project):
     # 终点组合默认留空：等价于单终点，由 --feedback-cycles 决定；填写后按工作集 R 选终点。
     cfg.update(feedback_endpoints='',dm_solvents='')
     cfg.update(sad='',native='',sequence='',heavy='',fpp='',runtime=runtime,
+               # 包内 P+ 引擎（density/）可以来自另一个目录：外部 CCP4 只提供
+               # Phaser/Parrot/Buccaneer/REFMAC，P+ 似然精修始终由 density/ 驱动。
+               density_runtime='',
                reference=str(Path(runtime)/'lib/data/reference_structures/reference-1tqw.mtz') if runtime else '',
                output=str(project/'runs/oasis_run'),mode='sad_to_model',
                explore=False,explore_workers=2,protocol='pplus_w8_weight',elements='',auto_fpp=True,input_columns=True,native_labels='',auto_hand=True,building_recipe='pipeline',refinement_prior='dm_phifom',

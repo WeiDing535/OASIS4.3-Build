@@ -27,6 +27,8 @@ def build_parser():
     p.add_argument('--elements',default='',help='Heavy-atom element symbols, e.g. Se or Se,S; computes theoretical factors offline from explicit wavelength')
     p.add_argument('--auto-fpp',action=argparse.BooleanOptionalAction,default=False)
     p.add_argument('--reference',default='');p.add_argument('--runtime');p.add_argument('--labels',default='')
+    p.add_argument('--density-runtime',default='',
+                   help='Directory holding the package density/ tree (P+ likelihood engine); may differ from --runtime, which only supplies Phaser/Parrot/Buccaneer/REFMAC')
     p.add_argument('--build-model',action=argparse.BooleanOptionalAction,default=True,
                    help='Enable Buccaneer/REFMAC (default); --no-build-model stops after DM without external engines')
     p.add_argument('--dm-enabled',action=argparse.BooleanOptionalAction,default=True,
