@@ -152,6 +152,13 @@ def phase(cfg,output):
     if cfg.get('auto_hand'):
         from .hand_selection import resolve
         selected=resolve(cfg,out,front,work)
+        # The hand decision is the run's first real result: say it out loud so
+        # the stage log (and the GUI log pane) shows more than a stage header.
+        for row in (json.loads((out/'hand_selection.json').read_text()).get('candidates') or []):
+            print('hand %s: %s, %s uniquely sequenced residues'
+                  %(row.get('hand'),row.get('status'),row.get('unique')),flush=True)
+        print('hand selection: %s (%s)'%(selected.get('selected_hand'),
+              'verified' if selected.get('hand_verified',True) else 'unverified'),flush=True)
         scattering={'mode':'legacy_explicit','fpp_argument':cfg['fpp']}
         if cfg.get('auto_fpp'):
             from .anomalous_scattering import calculate

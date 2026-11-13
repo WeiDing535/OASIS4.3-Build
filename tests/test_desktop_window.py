@@ -799,3 +799,59 @@ def test_default_runtime_prefers_the_one_with_the_density_engine(tmp_path,monkey
     assert oasis_workflow.bundled_runtime(tmp_path)==bundle
     assert oasis_workflow.defaults(tmp_path)['runtime']==str(bundle)
     assert oasis_workflow.bundled_runtime(tmp_path/'dist') is None
+
+
+def test_the_log_pane_shows_each_stage_not_only_the_headers(tmp_path):
+    """gui.log holds stage headers only; the pane must add each stage's own lines."""
+    run=tmp_path/'run';folder=run/'00_sad_to_model';folder.mkdir(parents=True)
+    (folder/'pipeline_report.json').write_text(json.dumps(dict(
+        completed=[dict(id='sad',name='P+ 定相'),dict(id='dm',name='密度修饰')],
+        current='build',current_name='Buccaneer 构建')))
+    (folder/'sad.log').write_text('hand input_hand: selected, 12 uniquely sequenced residues\n')
+    (folder/'dm.log').write_text('feedback cycle 1: 58 residues in 5 fragments\n')
+    (folder/'bridge.log').write_text('')
+    (folder/'build.log').write_text('\n'.join('build cycle %d/5: 90 residues'%cycle for cycle in range(1,6)))
+    text=desktop.stage_log_text(run)
+    assert text.index('P+ 定相') < text.index('密度修饰') < text.index('Buccaneer 构建')
+    assert '12 uniquely sequenced residues' in text
+    assert 'feedback cycle 1' in text
+    assert 'build cycle 5/5' in text
+    assert 'bridge' not in text          # an empty stage log adds no empty heading
+    assert desktop.stage_log_text(tmp_path/'missing')==''
+    assert desktop.stage_log_text(None)==''
+    assert desktop.stage_log_text(tmp_path)==''
+
+
+def test_a_long_stage_log_keeps_its_tail_and_says_so(tmp_path):
+    """The newest lines matter most, and the cut must be visible, not silent."""
+    folder=tmp_path/'run/00_sad_to_model';folder.mkdir(parents=True)
+    (folder/'pipeline_report.json').write_text(json.dumps(dict(completed=[dict(id='dm',name='密度修饰')])))
+    (folder/'dm.log').write_text('\n'.join('line %d'%number for number in range(200)))
+    text=desktop.stage_log_text(tmp_path/'run',per_stage=10)
+    assert 'line 199' in text and 'line 190' in text
+    assert '\nline 5\n' not in text
+    assert '省略' in text
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_a_finished_job_clears_the_progress_bar(tmp_path):
+    """A full bar after completion reads as 'still running' until the user switches rows."""
+    app=window(tmp_path)
+    try:
+        controller=app.controller
+        job=dict(id='one',created=100,updated=110,status='running',output=str(tmp_path/'out'),
+                 completed=1,total=1,error=None,method='pplus_bundled',label='a.mtz')
+        controller.running=lambda:['one']
+        controller.state=lambda identifier:dict(job,log='working',
+                                                pipeline_progress={'total':5,'completed':2})
+        app.job=dict(job)
+        app._refresh()
+        assert float(str(app.progress['value']))>0
+        job.update(status='success')
+        controller.state=lambda identifier:dict(job,log='done',
+                                                pipeline_progress={'total':5,'completed':5})
+        controller.results=lambda identifier:{}
+        app._refresh()
+        assert float(str(app.progress['value']))==0
+    finally:
+        app.root.destroy()

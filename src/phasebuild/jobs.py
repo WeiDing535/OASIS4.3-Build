@@ -214,7 +214,10 @@ class Jobs:
             state=Path(job['output'])/'00_sad_to_model/pipeline_report.json'
             if state.is_file():
                 saved=json.loads(state.read_text())
-                job['pipeline_progress']={'completed':len(saved.get('completed',[])), 'total':5,
+                # Count the plan's own stages: a fixed total of five would show a
+                # full bar while the last stage was still running.
+                total=len((job.get('plan') or {}).get('stages') or []) or 5
+                job['pipeline_progress']={'completed':len(saved.get('completed',[])), 'total':total,
                                           'current':saved.get('current_name','')}
         return self.workflow.enrich_job(job) if self.workflow else job
 

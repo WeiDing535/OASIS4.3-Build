@@ -198,6 +198,10 @@ def run(native, phase_map, sequence, runtime, output, *, cycles=5, free_value=0,
             raise RuntimeError('REFMAC failed in cycle %d; see %s'%(cycle,rlog))
         stats=_refmac_final(rlog)
         rows.append(dict(cycle=cycle,**stats))
+        # One line per cycle: without it a five-cycle build is silent for minutes
+        # and the GUI log looks empty.
+        print('build cycle %d/%d: %d residues, Rwork %.4f, Rfree %.4f'
+              %(cycle,cycles,_residues(refine_pdb),stats['r_work'],stats['r_free']),flush=True)
         current=refine_mtz;previous=refine_pdb
     model=Path(previous)
     structure=gemmi.read_structure(str(model))
@@ -223,6 +227,13 @@ def _has_atoms(pdb):
     try:lines=Path(pdb).read_text(errors='ignore').splitlines()
     except OSError:return False
     return any(line.startswith(('ATOM','HETATM')) for line in lines)
+
+
+def _residues(pdb):
+    """Residue count of a built model, for the per-cycle progress line."""
+    try:structure=gemmi.read_structure(str(pdb))
+    except Exception:return 0
+    return sum(1 for chain in structure[0] for residue in chain if residue.name!='HOH')
 
 
 def _refmac_final(log):

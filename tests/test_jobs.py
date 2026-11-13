@@ -126,3 +126,24 @@ def test_history_is_newest_first_and_import_is_read_only(monkeypatch,tmp_path):
     wait_for(lambda:jobs.active is None)
     assert [item['id'] for item in jobs.history()]==[job['id']]
     assert jobs.history()[0]['status']=='success'
+
+
+def test_progress_counts_the_plans_own_stages(monkeypatch,tmp_path):
+    """A fixed total of five showed a full bar while the sixth stage still ran."""
+    out=tmp_path/'output'
+    steps=[dict(name='pipeline',command=[sys.executable,'-c','pass'],output=str(out),kind='build')]
+    class Workflow:
+        def make_plan(self,config,project):
+            return {'output':str(out),'mode':'sad_to_model','sad':str(tmp_path/'a.mtz')},steps
+        def describe_plan(self,cfg):
+            return {'stages':[dict(id=name) for name in ('prepare','sad','dm','bridge','build','finish')]}
+        def enrich_job(self,job):return job
+    jobs=runner.Jobs(tmp_path,workflow=Workflow());job=jobs.start({})
+    wait_for(lambda:jobs.active is None)
+    report=Path(job['output'])/'00_sad_to_model/pipeline_report.json'
+    report.parent.mkdir(parents=True,exist_ok=True)
+    report.write_text(json.dumps({'completed':[{'id':'prepare'},{'id':'sad'}],'current':'dm',
+                                  'current_name':'密度修饰'}))
+    progress=jobs.get(job['id'])['pipeline_progress']
+    assert progress['total']==6 and progress['completed']==2
+    assert progress['current']=='密度修饰'

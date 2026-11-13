@@ -188,6 +188,34 @@ def _stamp():
     return time.strftime('%Y%m%d_%H%M%S')
 
 
+def stage_log_text(output,per_stage=60):
+    """Per-stage narration for a SAD→model run, in pipeline order.
+
+    ``gui.log`` only carries the stage headers and the final report: every stage
+    writes its own progress lines to ``<pipeline dir>/<stage id>.log`` (P+ sites,
+    Parrot feedback cycles, Buccaneer/REFMAC cycles, hand decision).  Reading
+    those back is what makes the log pane show what the run actually did.
+    """
+    report=Path(str(output or ''))/'00_sad_to_model/pipeline_report.json'
+    if not report.is_file():return ''
+    try:data=json.loads(report.read_text())
+    except (OSError,ValueError):return ''
+    folder=report.parent
+    order=[(item.get('id'),item.get('name')) for item in data.get('completed') or [] if item.get('id')]
+    current=data.get('current')
+    if current and current not in {identifier for identifier,_ in order}:
+        order.append((current,data.get('current_name') or current))
+    blocks=[]
+    for identifier,name in order:
+        try:lines=[line for line in (folder/(identifier+'.log')).read_text(errors='replace').splitlines() if line.strip()]
+        except OSError:continue
+        if not lines:continue
+        hidden=len(lines)-per_stage
+        if hidden>0:lines=['…（前面 %d 行省略）'%hidden]+lines[-per_stage:]
+        blocks.append('── %s ──\n%s'%(name or identifier,'\n'.join(lines)))
+    return '\n\n'.join(blocks)
+
+
 class App:
     """Tk window; created only when a display is available."""
 
@@ -950,13 +978,14 @@ class App:
             self.progress.configure(value=100*min(1,done/total))
         label=progress.get('current') or job.get('current') or ''
         self._say_status('%s %s'%(STATUS_NAMES.get(status,status),label))
-        log=job.get('log') or ('（导入的既有结果没有运行日志）' if status=='imported' else '')
+        log=self._log_view(job)
         if log!=self.log_text:
             self._show_log(log)
         if status in ('success','failed','cancelled','interrupted'):
             self.finished.add(identifier)
             self.stop_button.configure(state='disabled')
-            self.progress.configure(value=100 if status=='success' else 0)
+            # A filled bar reads as "still running": clear it when the job ends.
+            self.progress.configure(value=0)
             if status=='success':
                 self._show_results(select=False)
             elif status=='failed':
@@ -965,6 +994,17 @@ class App:
                 self.tabs.select(1)
             if self.exit_on_finish and not self.controller.running():
                 self.root.after(200,self.on_close)
+
+    def _log_view(self,job):
+        """Log pane content: the run's own log plus the per-stage narration.
+
+        The stage logs are where the engines narrate their progress, so showing
+        them turns a three-line ``gui.log`` into the run's actual story.
+        """
+        text=job.get('log') or ('（导入的既有结果没有运行日志）' if job.get('status')=='imported' else '')
+        extra=stage_log_text(job.get('output'))
+        if not extra:return text
+        return ((text.rstrip()+'\n\n──── 各阶段输出 ────\n\n') if text.strip() else '')+extra
 
     def _show_log(self,text):
         self.log_text=text
@@ -1102,7 +1142,7 @@ class App:
             return
         self.job=job
         status=job.get('status')
-        self._show_log(job.get('log') or ('（导入的既有结果没有运行日志）' if status=='imported' else ''))
+        self._show_log(self._log_view(job))
         self.stop_button.configure(state='normal' if status in ('queued','running','stopping') else 'disabled')
         self.progress.configure(value=0)
         self._show_plan_for(job)
