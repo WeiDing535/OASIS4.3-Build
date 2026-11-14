@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""handdm v2 -- unbiased phase recombination by reflection-omit error estimation
+"""oasis-dm v2 -- unbiased phase recombination by reflection-omit error estimation
 and free-set driven early stopping.
 
 Why v2 exists
@@ -36,7 +36,7 @@ from dataclasses import dataclass, asdict
 import numpy as np
 from scipy import ndimage
 
-from handdm import (Config, DensityModifier, hl_centroid, wrap180,
+from oasis_dm_core import (Config, DensityModifier, hl_centroid, wrap180,
                     build_parser)
 
 
@@ -341,7 +341,7 @@ class DensityModifierV2(DensityModifier):
 
 def build_parser_v2():
     p = build_parser()
-    p.description = 'handdm v2: omit-based unbiased SigmaQ + free-set early stop'
+    p.description = 'oasis-dm v2: omit-based unbiased SigmaQ + free-set early stop'
     p.add_argument('--sigmaq-source', choices=['omit', 'work', 'blend'],
                    default='blend',
                    help='which reflections fit SigmaQ (default blend = '

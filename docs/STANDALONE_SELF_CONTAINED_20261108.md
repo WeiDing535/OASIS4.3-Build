@@ -2,12 +2,12 @@
 
 > **历史记录。** 本文写作时密度修饰由一个外部引擎完成；该引擎已于 2026-11-14
 > 从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），密度修饰
-> 现在固定由树内 handdm v2 完成。文中的数字保留作当时记录，按本文命令重跑
+> 现在固定由树内 oasis-dm v2 完成。文中的数字保留作当时记录，按本文命令重跑
 > 会得到不同数值；`--dm-mask-radius`、`--dm-anisotropy` 等旧引擎专属选项也
 > 已删除。
-> **另注（2026-11-14 之后）。** 界面现在只有两个模块，密度修饰是 P+ 的必做部分（树内 `handdm v2`），没有引擎选择；本文这类旧引擎时代的数字只作记录，不能再逐点复现。当前行为见 `docs/HANDDM_V2_REPLACEMENT_20261114.md`、`docs/INSTALL_BUNDLE.md`。
+> **另注（2026-11-14 之后）。** 界面现在只有两个模块，密度修饰是 P+ 的必做部分（树内 `oasis-dm v2`），没有引擎选择；本文这类旧引擎时代的数字只作记录，不能再逐点复现。当前行为见 `docs/OASIS_DM_REPLACEMENT_20261114.md`、`docs/INSTALL_BUNDLE.md`。
 
-> 补充：下表的「密度修饰」一行已过时——`handdm v2` 现在直接编译进 Python 包（`phasebuild/vendor/handdm/`），不需要任何外部密度修饰可执行文件。
+> 补充：下表的「密度修饰」一行已过时——`oasis-dm v2` 现在直接编译进 Python 包（`phasebuild/vendor/oasis_dm/`），不需要任何外部密度修饰可执行文件。
 
 ## 结论
 
@@ -86,7 +86,7 @@ cd OASIS4.3-standalone-20261108
 ## 用独立包复跑十套案例（2026-11-08）
 
 从 `dist/OASIS4.3-standalone-20261108` 出发、在 `env -i`（仅 PATH/HOME）下逐套运行同一固定协议
-（`--dm-engine handdm --dm-solvent 0.5 --building-recipe pipeline`，feedback 1/2 两个终点，按工作集 R 选取）：
+（`--dm-engine oasis-dm --dm-solvent 0.5 --building-recipe pipeline`，feedback 1/2 两个终点，按工作集 R 选取）：
 
 | 案例 | SHELXE 对照 | 包内 R-free | 差值 |
 |---|---:|---:|---:|

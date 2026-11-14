@@ -1,13 +1,13 @@
-"""Density modification with the in-tree handdm v2 engine.
+"""Density modification with the in-tree oasis-dm v2 engine.
 
-The engine itself is 丁玮's ``handdm_v2.py``, vendored byte-identically under
-``phasebuild/vendor/handdm``.  It is a self-contained maximum-likelihood/HL
+The engine itself is 丁玮's ``oasis_dm_v2.py``, vendored byte-identically under
+``phasebuild/vendor/oasis_dm``.  It is a self-contained maximum-likelihood/HL
 density modifier: it never calls an external density-modification program, and
 the only files it reads are the staged MTZ and a density-histogram library.
 
 Two properties matter for the pipeline contract:
 
-* **The crystallographic free set is never touched.**  handdm v2 needs a
+* **The crystallographic free set is never touched.**  oasis-dm v2 needs a
   held-out reflection set for its SigmaQ/D estimate and for its early stopping.
   We give it a deterministic random subset of *work* reflections
   (``--holdout``, default 5%), so ``free_reflections_in_map`` stays 0 and
@@ -29,12 +29,12 @@ from pathlib import Path
 import gemmi
 import numpy as np
 
-#: Deterministic holdout fraction of WORK reflections used as handdm's
+#: Deterministic holdout fraction of WORK reflections used as oasis-dm's
 #: cross-validation set.  Never the crystallographic free set.
 DEFAULT_HOLDOUT = 0.05
 #: Candidate recombination weights for ``cmbwt='auto'``.
 CMBWT_CANDIDATES = (0.3, 0.4, 0.5, 0.6, 0.8)
-#: handdm runs at most this many cycles regardless of the requested count; its
+#: oasis-dm runs at most this many cycles regardless of the requested count; its
 #: own free-set early stopping normally stops well before.
 MAX_CYCLES = 20
 #: Cycles used per candidate during a ``cmbwt='auto'`` calibration sweep.
@@ -47,7 +47,7 @@ _IMPORT_PROBE = {}
 
 
 def _vendor_dir():
-    return Path(__file__).resolve().parent / 'vendor' / 'handdm'
+    return Path(__file__).resolve().parent / 'vendor' / 'oasis_dm'
 
 
 def _probe(python):
@@ -64,29 +64,29 @@ def _probe(python):
 
 
 def locate(script=None, runtime=None):
-    """Return ``(python, script)`` for the vendored handdm v2, else raise.
+    """Return ``(python, script)`` for the vendored oasis-dm v2, else raise.
 
-    Resolution order: an explicit script, ``PHASEBUILD_HANDDM``, the vendored
+    Resolution order: an explicit script, ``PHASEBUILD_OASIS-DM``, the vendored
     copy.  The interpreter is the one running the pipeline when it can import
-    gemmi/numpy/scipy, else ``PHASEBUILD_HANDDM_PYTHON``, else
+    gemmi/numpy/scipy, else ``PHASEBUILD_OASIS_DM_PYTHON``, else
     ``<runtime>/bin/python``.
     """
     if script:
         path = Path(script).expanduser()
         if not path.is_file():
-            raise ValueError('Configured handdm script does not exist: ' + str(path))
+            raise ValueError('Configured oasis-dm script does not exist: ' + str(path))
     else:
-        override = os.environ.get('PHASEBUILD_HANDDM')
+        override = os.environ.get('PHASEBUILD_OASIS-DM')
         if override:
             path = Path(override).expanduser()
             if not path.is_file():
-                raise ValueError('PHASEBUILD_HANDDM does not point at a file: ' + str(path))
+                raise ValueError('PHASEBUILD_OASIS-DM does not point at a file: ' + str(path))
         else:
-            path = _vendor_dir() / 'handdm_v2.py'
+            path = _vendor_dir() / 'oasis_dm_v2.py'
             if not path.is_file():
-                raise ValueError('The vendored handdm engine is missing: ' + str(path))
+                raise ValueError('The vendored oasis-dm engine is missing: ' + str(path))
     candidates = []
-    override_python = os.environ.get('PHASEBUILD_HANDDM_PYTHON')
+    override_python = os.environ.get('PHASEBUILD_OASIS_DM_PYTHON')
     if override_python:
         candidates.append(override_python)
     candidates.append(sys.executable)
@@ -95,12 +95,12 @@ def locate(script=None, runtime=None):
     for candidate in candidates:
         if candidate and Path(candidate).is_file() and _probe(candidate):
             return str(candidate), str(path)
-    raise ValueError('No Python interpreter with gemmi/numpy/scipy was found for the handdm engine; '
-                     'set PHASEBUILD_HANDDM_PYTHON or point --dm-executable at a handdm_v2.py')
+    raise ValueError('No Python interpreter with gemmi/numpy/scipy was found for the oasis-dm engine; '
+                     'set PHASEBUILD_OASIS_DM_PYTHON or point --dm-executable at a oasis_dm_v2.py')
 
 
 def hist_library(explicit=None):
-    """CCP4 density-histogram library used as handdm's histogram-match target."""
+    """CCP4 density-histogram library used as oasis-dm's histogram-match target."""
     for candidate in (explicit, os.environ.get('PHASEBUILD_HIST_LIB'),
                       Path(__file__).resolve().parents[2] / 'lib' / 'data' / 'hist.lib',
                       '/Applications/ccp4-9/lib/data/hist.lib'):
@@ -147,7 +147,7 @@ def _holdout_flags(keys, fraction, seed):
 
 
 def stage_input(work_mtz, hl_mtz, destination, *, holdout=DEFAULT_HOLDOUT, seed=20261023):
-    """Write FP/SIGFP + HLA..HLD + DM_HOLDOUT for one handdm pass.
+    """Write FP/SIGFP + HLA..HLD + DM_HOLDOUT for one oasis-dm pass.
 
     Only work reflections are staged: ``work_mtz`` is the merged work-only file
     the trace-feedback stage builds, so the crystallographic free set cannot
@@ -180,7 +180,7 @@ def stage_input(work_mtz, hl_mtz, destination, *, holdout=DEFAULT_HOLDOUT, seed=
     m = gemmi.Mtz(with_base=True)
     m.spacegroup = work.spacegroup
     m.set_cell_for_all(work.cell)
-    m.add_dataset('handdm_work')
+    m.add_dataset('oasis_dm_work')
     phase, fom = phi_fom(data[:, 3:7])
     m.add_column('FP', 'F')
     m.add_column('SIGFP', 'Q')
@@ -206,11 +206,11 @@ def combine_model_hl(staged, model_pdb, destination, *, phenix_bin=None, runtime
                      fcalc='fc_all', x_max=12.0, n_shells=10):
     """Add a work-only partial model's Fcalc to the experimental HL quartet.
 
-    handdm has no option for an external Fcalc, so the equivalent likelihood is
+    oasis-dm has no option for an external Fcalc, so the equivalent likelihood is
     built here: per resolution shell
     the least-squares scale ``D = <Fo Fc>/<Fc^2>`` gives the Sim weight
     ``X = 2 Fo D Fc / (1 - D^2 Fc^2/Fo^2)``.  ``X`` is in observed-amplitude
-    units while the quartet handdm consumes is normalised, so each shell's
+    units while the quartet oasis-dm consumes is normalised, so each shell's
     contribution is rescaled to the local experimental ``|HL|`` and multiplied
     by the fraction of scattered intensity the partial model explains
     (``<Fc^2>/<Fo^2>``, 0 for an empty trace, ~1 for a complete model).  Without
@@ -264,7 +264,7 @@ def combine_model_hl(staged, model_pdb, destination, *, phenix_bin=None, runtime
     out = gemmi.Mtz(with_base=True)
     out.spacegroup = m.spacegroup
     out.set_cell_for_all(m.cell)
-    out.add_dataset('handdm_work')
+    out.add_dataset('oasis_dm_work')
     keep = ['FP', 'SIGFP', 'PHIB', 'FOM', 'HLA', 'HLB', 'HLC', 'HLD', 'DM_HOLDOUT']
     kinds = {'FP': 'F', 'SIGFP': 'Q', 'PHIB': 'P', 'FOM': 'W', 'HLA': 'A', 'HLB': 'A',
              'HLC': 'A', 'HLD': 'A', 'DM_HOLDOUT': 'I'}
@@ -282,20 +282,20 @@ def combine_model_hl(staged, model_pdb, destination, *, phenix_bin=None, runtime
 
 
 def write_schema(dm_mtz, destination):
-    """Rename handdm's DM_* columns to the pipeline's 03_dm schema."""
+    """Rename oasis-dm's DM_* columns to the pipeline's 03_dm schema."""
     m = gemmi.read_mtz_file(str(dm_mtz))
     labels = m.column_labels()
     data = np.array(m, copy=True)
     quartet = ['DM_HLADM', 'DM_HLBDM', 'DM_HLCDM', 'DM_HLDDM']
     missing = [c for c in quartet + ['DM_FWT', 'DM_PHWT', 'DM_PHIDM', 'DM_FOMDM'] if c not in labels]
     if missing:
-        raise ValueError('handdm output is missing columns: ' + ', '.join(missing))
+        raise ValueError('oasis-dm output is missing columns: ' + ', '.join(missing))
     fp = 'FP' if 'FP' in labels else 'F'
     sig = 'SIGFP' if 'SIGFP' in labels else 'SIGF'
     out = gemmi.Mtz(with_base=True)
     out.spacegroup = m.spacegroup
     out.set_cell_for_all(m.cell)
-    out.add_dataset('handdm_dm')
+    out.add_dataset('oasis_dm')
     for label, kind in [('F', 'F'), ('SIGF', 'Q'), ('FWT', 'F'), ('PHWT', 'P'),
                         ('PHIB', 'P'), ('FOM', 'W'), ('HLA', 'A'), ('HLB', 'A'),
                         ('HLC', 'A'), ('HLD', 'A')]:
@@ -334,7 +334,7 @@ def _invoke(python, script, staged, destination, *, solvent_fraction, cycles,
         done = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
                               stdin=subprocess.DEVNULL, timeout=timeout)
     if done.returncode or not Path(destination).is_file():
-        raise RuntimeError('handdm failed with exit %s; see %s' % (done.returncode, log_path))
+        raise RuntimeError('oasis-dm failed with exit %s; see %s' % (done.returncode, log_path))
     payload = {}
     if stats.is_file():
         try:
@@ -365,7 +365,7 @@ def calibrate_cmbwt(work_mtz, hl_mtz, workdir, solvent_fraction, *,
     python, script = locate(executable, runtime)
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
-    staged = workdir / 'handdm_cal_input.mtz'
+    staged = workdir / 'oasis_dm_cal_input.mtz'
     stage_input(work_mtz, hl_mtz, staged, holdout=holdout, seed=CALIBRATION_SEED)
     return _calibrate_staged(python, script, staged, workdir, solvent_fraction=solvent_fraction,
                              hist_lib=hist_library(hist_lib),
@@ -425,7 +425,7 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20,
         scratch=None, timeout=3600, phenix_bin=None, fcalc='fc_all',
         cmbwt=0.4, holdout=DEFAULT_HOLDOUT, holdout_seed=20261023, hist_lib=None,
         progress=None):
-    """Run handdm v2 on the work-only data and write the pipeline map schema.
+    """Run oasis-dm v2 on the work-only data and write the pipeline map schema.
 
     ``work_mtz`` must contain FP/SIGFP and FreeR_flag; free reflections are never
     staged.  ``model_pdb`` is an optional work-only partial model whose Fcalc is
@@ -436,13 +436,13 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20,
     python, script = locate(executable, runtime)
     out = Path(output_mtz)
     out.parent.mkdir(parents=True, exist_ok=True)
-    staged = out.parent / 'handdm_input.mtz'
+    staged = out.parent / 'oasis_dm_input.mtz'
     staged_info = stage_input(work_mtz, hl_mtz, staged, holdout=holdout, seed=holdout_seed)
     model_info = None
     if model_pdb is not None:
         if not Path(model_pdb).is_file():
             raise ValueError('Feedback model is missing')
-        combined = out.parent / 'handdm_with_model.mtz'
+        combined = out.parent / 'oasis_dm_with_model.mtz'
         model_info = combine_model_hl(staged, model_pdb, combined, phenix_bin=phenix_bin,
                                       runtime=runtime, fcalc=fcalc)
         staged = combined
@@ -455,13 +455,13 @@ def run(work_mtz, hl_mtz, output_mtz, solvent_fraction, *, cycles=20,
             python, script, staged, out.parent / 'cmbwt_calibration',
             solvent_fraction=solvent_fraction, hist_lib=hist,
             log=progress or (lambda message: None))
-    raw = out.parent / 'handdm_raw.mtz'
+    raw = out.parent / 'oasis_dm_raw.mtz'
     payload = _invoke(python, script, staged, raw, solvent_fraction=solvent_fraction,
                       cycles=budget, cmbwt=weight,
-                      hist_lib=hist, log_path=out.parent / 'handdm.log', timeout=timeout)
+                      hist_lib=hist, log_path=out.parent / 'oasis_dm.log', timeout=timeout)
     info = write_schema(raw, out)
     final = payload.get('final', {})
-    return {'engine': 'handdm v2 (in-tree)', 'executable': script, 'interpreter': python,
+    return {'engine': 'oasis-dm v2 (in-tree)', 'executable': script, 'interpreter': python,
             'solvent_fraction': float(solvent_fraction),
             'cycles_requested': int(cycles), 'cycles_run': int(final.get('n_cycles_run', 0)),
             'best_cycle': int(final.get('best_cycle', 0)),

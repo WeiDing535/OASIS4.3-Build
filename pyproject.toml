@@ -41,6 +41,6 @@ version = "4.3.0.dev13"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-testpaths = ["tests", "vendor/oasis43/tests"]
+testpaths = ["tests"]
 addopts = "-m 'not reference_data'"
 markers = ["reference_data: requires separately provisioned upstream reference data"]

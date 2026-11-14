@@ -160,21 +160,21 @@ def density_modify(cfg,phase,dm,native,solvent):
 
     The hand pilot used to go through the bundled RESOLVE/CCTBX tree, which made
     the two-hand decision the only part of the pipeline that needed a 2.4 GB
-    Phenix copy.  It now runs the in-tree handdm v2, exactly like the production
+    Phenix copy.  It now runs the in-tree oasis-dm v2, exactly like the production
     chain, so a stock CCP4 (or no CCP4 at all) is enough and both hands are
     scored with precisely the modification the chosen hand will get downstream.
     """
-    from . import handdm_dm,trace_feedback
+    from . import oasis_dm,trace_feedback
     dm=Path(dm)
-    name='handdm'
+    name='oasis-dm'
     nested=dm/name;nested.mkdir(exist_ok=True)
-    info=handdm_dm.run(str(native),str(Path(phase)/'observations.mtz'),nested/'dm.mtz',float(solvent),
+    info=oasis_dm.run(str(native),str(Path(phase)/'observations.mtz'),nested/'dm.mtz',float(solvent),
         cycles=int(cfg.get('dm_cycles',12)),runtime=cfg.get('runtime'),
         scratch=nested/'scratch',metadata={'hand_pilot':True},
         cmbwt=float(cfg.get('dm_cmbwt',0.4) or 0.4),holdout=float(cfg.get('dm_holdout',0.05)),
         hist_lib=cfg.get('dm_hist_lib') or None,executable=cfg.get('dm_executable') or None)
     merged=trace_feedback.merge_phase_map(str(native),str(nested/'dm.mtz'),dm/'map_phases.mtz',free_value=cfg['free_value'])
-    dump(dm/'map_phases.json',{'dm_engine':'handdm v2',
+    dump(dm/'map_phases.json',{'dm_engine':'oasis-dm v2',
         'dm_computed_during_hand_selection':True,name:info,'work_only':merged,'free_reflections_in_map':0})
     return info
 
@@ -238,5 +238,5 @@ def copy_selected_dm(cfg,out):
         shutil.copy2(row['path'],out/Path(row['path']).name)
     meta=json.loads((out/'map_phases.json').read_text())
     # dm_engine comes from the copied hand-pilot map_phases.json, i.e. whatever
-    # engine actually ran (handdm v2 by default), not a hard-coded name.
+    # engine actually ran (oasis-dm v2 by default), not a hard-coded name.
     meta.update(auto_hand=report['selected_hand'],selected_spacegroup=report['selected_spacegroup'],hand_selection=fingerprint(phase/'hand_selection.json'),dm_computed_during_hand_selection=True);dump(out/'map_phases.json',meta)

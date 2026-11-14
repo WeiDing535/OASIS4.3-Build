@@ -1,6 +1,6 @@
 # Unified SAD to model-building development version
 
-The native desktop window (`run_desktop.py`, Tk — part of the Python runtime) now includes **SAD 定相到模型**. It replaces the earlier browser front end: no web server, no port, no browser. The independent phasing and building entry points remain available. The upstream `oasis_py` numerical source is preserved without edits; source hashes, revision and license materials are recorded in `vendor/oasis43/UPSTREAM.json` and its documentation. The optional original Qt GUI is not required by the desktop window and is installed separately with `python -m pip install ".[gui]"`.
+The native desktop window (`run_desktop.py`, Tk — part of the Python runtime) now includes **SAD 定相到模型**. It replaces the earlier browser front end: no web server, no port, no browser. The independent phasing and building entry points remain available. The upstream `oasis_py` numerical source is preserved without edits; source hashes, revision and license materials were recorded in the `vendor/oasis43/` snapshot, which was removed on 2026-11-14; the numerical source itself is unchanged. The optional original Qt GUI is not required by the desktop window and is installed separately with `python -m pip install ".[gui]"`.
 
 ## Environment
 
@@ -40,6 +40,6 @@ Upstream SAD and DM exclude the original free reflections. Later model-derived m
 
 Combined local conda regression: 366 passed, no failures/errors; one explicitly reference-data-dependent case was deselected. The suite includes actual OASIS SAD and DM on synthetic observations feeding a test construction substitute, plus exact-HKL flag/map tests, resume/tamper/resource checks, origin-choice rejection and real process-group cancellation cleanup. External model-building/refinement algorithms retain their existing component tests; no new real-data end-to-end success is claimed.
 
-A real plan preflight with synthetic inputs and original free value 7 passed without starting calculations or creating the requested output directory. Upstream source/resource hashes (31 files) match the preserved OASIS commit. One downstream test-only numerical reproducibility adjustment is documented in `vendor/oasis43/TEST_PATCHES.md`; numerical engine files are unchanged.
+A real plan preflight with synthetic inputs and original free value 7 passed without starting calculations or creating the requested output directory. Upstream source/resource hashes (31 files) matched the preserved OASIS commit; that snapshot, including its test-only portability note, was removed on 2026-11-14. Numerical engine files are unchanged.
 
 Version 4.3.0.dev2 changes only the focused refinement-prior handoff, not the upstream SAD/DM numerical source. A diagnostic matched-model comparison established that the former continuous posterior prior aggravated divergence. Old checkpoints remain tied to their old source hashes and cannot be upgraded in place.

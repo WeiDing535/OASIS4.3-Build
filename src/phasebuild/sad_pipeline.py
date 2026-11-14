@@ -20,10 +20,10 @@ DEFAULTS = dict(copies='auto', phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
                 triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=48, build_model=True, dm_enabled=True,
                 observation_prior='', composition_sequence='', phenix_bin='', trust_kl=.0005, trust_cleanup=True, trust_stability=False, trust_partial_cleanup=False, trust_work_weight=False, trust_wang_radius=14., wavelength=None,
-                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, allow_unverified_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='handdm',dm_solvent=None,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all',dm_cmbwt=0.4,dm_holdout=0.05,dm_hist_lib='')
+                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, allow_unverified_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='oasis-dm',dm_solvent=None,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc_all',dm_cmbwt=0.4,dm_holdout=0.05,dm_hist_lib='')
 
 FALLBACK_NOTICE=('密度修饰引擎已回退到内置 MLHL（原因：%s）。'
-                 'trace/Fcalc 反馈已关闭；本次结果不能与 handdm 协议（十案例流程）直接比较。')
+                 'trace/Fcalc 反馈已关闭；本次结果不能与 oasis-dm 协议（十案例流程）直接比较。')
 
 
 def fallback_notice(cfg):
@@ -41,11 +41,11 @@ def validate(config, inspect=True):
     if not isinstance(cfg['allow_unverified_hand'],bool):raise ValueError('allow_unverified_hand must be boolean')
     if cfg['allow_unverified_hand'] and not cfg['auto_hand']:raise ValueError('证据不足继续只用于自动判手：请同时开启自动判手（auto_hand）')
     if cfg['refinement_prior'] not in ('original_sad','dm_phifom'):raise ValueError('Unknown refinement phase source')
-    # The DM restraint is written by handdm and consumed by REFMAC, so it is not
+    # The DM restraint is written by oasis-dm and consumed by REFMAC, so it is not
     # tied to the Phaser front end: the internal P+ route gets the same protocol
-    # because it runs the same density modifier (dm_engine='handdm').
+    # because it runs the same density modifier (dm_engine='oasis-dm').
     if cfg['refinement_prior']=='dm_phifom' and cfg['method'] not in ('pplus_bundled','pplus_internal'):raise ValueError('DM phase restraints require a P+ phasing route')
-    if cfg['refinement_prior']=='dm_phifom' and cfg['method']=='pplus_internal' and cfg.get('dm_engine')=='internal':raise ValueError('内部 P+ 的 DM 相位约束需要 --dm-engine handdm')
+    if cfg['refinement_prior']=='dm_phifom' and cfg['method']=='pplus_internal' and cfg.get('dm_engine')=='internal':raise ValueError('内部 P+ 的 DM 相位约束需要 --dm-engine oasis-dm')
     if not isinstance(cfg['canonical_dm_seed'],bool):raise ValueError('Canonical DM seed must be boolean')
     if cfg['canonical_dm_seed'] and cfg['method'] not in ('pplus_trust','pplus_bundled'):raise ValueError('Canonical DM seed requires original-likelihood P+ density modification')
     if not isinstance(cfg['per_round_cleanup'],bool):raise ValueError('Per-round cleanup must be boolean')
@@ -81,9 +81,9 @@ def validate(config, inspect=True):
     trusted=cfg['method']=='pplus_trust'
     optimized=cfg['method'] in ('pplus_trust','pplus_internal','pplus_bundled')
     # 免安装包禁止调用 Phenix。pplus_trust 只在用外部 RESOLVE/CCTBX 做密度修饰时才需要
-    # Phenix；换成树内 handdm 后这条路线不接触 Phenix（见下方 trusted 分支），因此四引擎包
-    # 可以跑它，十套标定里 7TFQ 的终点正是 pplus_trust + handdm。
-    if os.environ.get('OASIS_INSTALLATION_FREE')=='1' and trusted and cfg.get('dm_engine')!='handdm':
+    # Phenix；换成树内 oasis-dm 后这条路线不接触 Phenix（见下方 trusted 分支），因此四引擎包
+    # 可以跑它，十套标定里 7TFQ 的终点正是 pplus_trust + oasis-dm。
+    if os.environ.get('OASIS_INSTALLATION_FREE')=='1' and trusted and cfg.get('dm_engine')!='oasis-dm':
         raise ValueError('免安装版禁止调用 Phenix；请选择内部 P+、连续 SAD 或旧 P+')
     if cfg['method']=='pplus_internal':
         cfg.update(phenix_bin='',phase_cycles=100)
@@ -92,10 +92,10 @@ def validate(config, inspect=True):
         # 标定终点：12 轮密度修饰 + 2 轮 trace/Fcalc 反馈。显式给出的非默认值应当被
         # 尊重——静默忽略 --dm-cycles/--feedback-cycles 是缺陷。
         auto_cycles=int(cfg.get('dm_cycles',0))==int(DEFAULTS['dm_cycles'])
-        # handdm v2 自己带早停，12 轮即引擎默认上限。
+        # oasis-dm v2 自己带早停，12 轮即引擎默认上限。
         if auto_cycles:cfg['dm_cycles']=12
         # 反馈轮数是本方法的核心步骤；2 轮是十套标定主要终点，未显式给出时启用。
-        if cfg['dm_enabled'] and cfg.get('dm_engine')=='handdm' and int(cfg.get('feedback_cycles',0))==int(DEFAULTS['feedback_cycles']):
+        if cfg['dm_enabled'] and cfg.get('dm_engine')=='oasis-dm' and int(cfg.get('feedback_cycles',0))==int(DEFAULTS['feedback_cycles']):
             cfg['feedback_cycles']=2
         cfg['_auto_dm_cycles']=auto_cycles
         cfg.update(phenix_bin='',phase_cycles=100)
@@ -107,7 +107,7 @@ def validate(config, inspect=True):
         engine_layout(cfg['runtime'],cfg.get('dm_engine'))
     if trusted:
         # The P+ trust-region phase stage never needs Phenix, and density
-        # modification is handdm's job, so no Phenix bin directory is required.
+        # modification is oasis-dm's job, so no Phenix bin directory is required.
         cfg['phenix_bin']=''
         cfg.update(phase_cycles=100,dm_cycles=12)
     for flag in ['trust_stability','trust_partial_cleanup','trust_work_weight']:
@@ -118,19 +118,19 @@ def validate(config, inspect=True):
     if radius!=14 and not (trusted or bundled):raise ValueError('Wang radius is active only for original-likelihood P+')
     if cfg['trust_work_weight'] and (not cfg['build_model'] or not cfg['trust_cleanup']):raise ValueError('Work-only weight calibration requires model building and cleanup enabled')
     if cfg['trust_partial_cleanup'] and (not cfg['build_model'] or not cfg['trust_cleanup']):raise ValueError('Partial cleanup requires model building and cleanup enabled')
-    # 'handdm' is the in-tree handdm v2 engine and the default for every route;
+    # 'oasis-dm' is the in-tree oasis-dm v2 engine and the default for every route;
     # 'internal' is the in-tree MLHL/legacy kernel used by 连续 SAD, 旧版 P+ and
     # 内部 P+.  Every external density modifier has been removed from the program,
     # so any other value is rejected outright.
-    if cfg['dm_engine'] not in ('handdm','internal'):
+    if cfg['dm_engine'] not in ('oasis-dm','internal'):
         raise ValueError('Unknown density-modification engine: '+str(cfg['dm_engine'])
-                         +'（程序只带树内 handdm v2；可选 handdm / internal）')
+                         +'（程序只带树内 oasis-dm v2；可选 oasis-dm / internal）')
     if cfg['dm_engine']=='internal' and cfg['method'] in ('pplus_trust','pplus_bundled'):
-        raise ValueError('P+ 两条流程的密度修饰只能用 handdm；内部 MLHL 只用于连续 SAD、旧版 P+ 与内部 P+')
-    # handdm only consumes the standard FP/PHIB/FOM + HL quartet, which every
+        raise ValueError('P+ 两条流程的密度修饰只能用 oasis-dm；内部 MLHL 只用于连续 SAD、旧版 P+ 与内部 P+')
+    # oasis-dm only consumes the standard FP/PHIB/FOM + HL quartet, which every
     # phasing method writes, so it also serves the continuous-SAD and legacy P+
     # routes (this is the SHELXE-equivalent step of the SHELXC/D/E chain).
-    if cfg['dm_engine']=='handdm' and cfg['method'] not in ('likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'):
+    if cfg['dm_engine']=='oasis-dm' and cfg['method'] not in ('likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'):
         raise ValueError('The density-modification engine requires a phasing method that writes an observation likelihood')
     if cfg['dm_solvent']=='auto':
         # 显式要求按序列估算：不要被标定的 0.50 常数覆盖。
@@ -153,23 +153,23 @@ def validate(config, inspect=True):
         value=cfg['trace_resolution']
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not 0.5<=value<=10:
             raise ValueError('trace_resolution must be 0.5-10 Angstrom')
-    if cfg['dm_engine']=='handdm':
-        from . import handdm_dm
+    if cfg['dm_engine']=='oasis-dm':
+        from . import oasis_dm
         try:
-            cfg['dm_executable']=handdm_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime') or None)[1]
+            cfg['dm_executable']=oasis_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime') or None)[1]
         except ValueError as error:
             if cfg['method'] in ('likelihood','pplus','pplus_internal'):
-                cfg['dm_engine_requested']='handdm'
+                cfg['dm_engine_requested']='oasis-dm'
                 cfg['dm_engine']='internal'
                 cfg['dm_engine_fallback']=str(error)
                 cfg['feedback_cycles']=0
             else:
-                raise ValueError('P+ 流程的密度修饰需要包内 handdm 引擎，但无法启动：'+str(error))
-    if cfg['dm_engine']=='handdm' and not cfg['build_model']:
+                raise ValueError('P+ 流程的密度修饰需要包内 oasis-dm 引擎，但无法启动：'+str(error))
+    if cfg['dm_engine']=='oasis-dm' and not cfg['build_model']:
         # Phases-only runs stop after the DM map: nothing to trace or feed back.
         cfg['feedback_cycles']=0
     if cfg['feedback_cycles'] and cfg['dm_engine']=='internal':
-        raise ValueError('Trace feedback requires the handdm density-modification engine')
+        raise ValueError('Trace feedback requires the oasis-dm density-modification engine')
     if optimized:
         if isinstance(cfg['trust_kl'],bool) or not isinstance(cfg['trust_kl'],(int,float)) or not math.isfinite(cfg['trust_kl']) or not 0<cfg['trust_kl']<=.05:
             raise ValueError('P+ KL 上限须大于 0 且不超过 0.05')
@@ -234,7 +234,7 @@ def validate(config, inspect=True):
                 raise ValueError('External construction reference unavailable')
     if cfg['auto_hand'] and cfg['method']!='pplus_bundled':
         # The non-bundled hands are preselected by the bundled Phaser frontend,
-        # which needs its own Phaser; density modification stays handdm.
+        # which needs its own Phaser; density modification stays oasis-dm.
         from .bundled_pplus import engine_layout
         engine_layout(cfg['runtime'],cfg.get('dm_engine'))
         if cfg.get('wavelength') is None:raise ValueError('Automatic hands require experimental SAD wavelength')
@@ -348,8 +348,8 @@ def stage_plan(cfg, python=None):
                      '--sequence',str(prepare/'building.fasta'),'--runtime',cfg['runtime'],
                      '--rounds',str(cfg['rounds']),'--free-value',str(cfg['free_value']),'--output',str(build)],
             outputs=[str(build/'primary_model.cif'),str(build/'hybrid_report.json')])
-    if cfg.get('dm_engine')=='handdm':
-        label='handdm v2'
+    if cfg.get('dm_engine')=='oasis-dm':
+        label='oasis-dm v2'
         by_id['dm'].update(name=(label+' 溶剂掩膜密度修饰（工作集）' if not cfg.get('feedback_cycles')
                                else label+' 密度修饰 + %d 轮工作集 trace/Fcalc 反馈'%cfg['feedback_cycles']),
             command=[python,'-u',str(root/'run_trace_feedback.py'),'--config',str(out/'pipeline_report.json'),'--output',str(dm)],

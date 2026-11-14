@@ -26,9 +26,9 @@ P+ 的可选研究模块、四组消融试验及补充先验对照见 [P+ 优化
 
 专用精简源码包由 `python -B package_oasis.py --output /new/path.zip` 生成；只收录此流程所需代码与资源，排除旧产品入口、旧界面、训练脚本和训练模型。源码包不包含 Buccaneer/REFMAC 运行时，当前也不是新的完整安装包。
 
-密度修饰现在默认由仓库内的 handdm v2 完成（`--dm-engine handdm`），不需要任何外部密度修饰程序，也不再需要 CCP4 的 `hist.lib`：直方图匹配库已随仓库放在 `lib/data/hist.lib`，可用 `--dm-hist-lib` 或环境变量 `PHASEBUILD_HIST_LIB` 覆盖。旧的密度修饰引擎已从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），只剩 `handdm` 与供研究对照的 `internal`。handdm 找不到可用的 Python（需要 gemmi/numpy/scipy）时，命令行把回退原因写到标准错误，界面显示红字警告，`pipeline_report.json` 里保留 `dm_engine_requested`、`dm_engine_fallback` 两个字段；两条 P+ 流程不允许回退到旧内部引擎，会直接报错。
+密度修饰现在默认由仓库内的 oasis-dm v2 完成（`--dm-engine oasis-dm`），不需要任何外部密度修饰程序，也不再需要 CCP4 的 `hist.lib`：直方图匹配库已随仓库放在 `lib/data/hist.lib`，可用 `--dm-hist-lib` 或环境变量 `PHASEBUILD_HIST_LIB` 覆盖。旧的密度修饰引擎已从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），只剩 `oasis-dm` 与供研究对照的 `internal`。oasis-dm 找不到可用的 Python（需要 gemmi/numpy/scipy）时，命令行把回退原因写到标准错误，界面显示红字警告，`pipeline_report.json` 里保留 `dm_engine_requested`、`dm_engine_fallback` 两个字段；两条 P+ 流程不允许回退到旧内部引擎，会直接报错。
 
-“免安装”指的是**完整包**：`OASIS4.3-dev17-portable` 内自带 `runtime/`（Phaser、Buccaneer、REFMAC 与 OASIS 密度修饰），双击即用，不需要另装 CCP4 或 Phenix。源码树不含这些二进制，从源码运行时要由本机提供：macOS 上可指向已安装的 CCP4 9（`/Applications/ccp4-9`），或把完整包的 `runtime/` 放到源码树旁并用 `--runtime` 指定；Linux 目前还没有完整运行时。本仓库记录的十案例基准是用已删除的旧外部引擎跑出的，只能作为历史记录；换成默认的 handdm v2 后属于不同引擎，数值不能逐点对比，但整条链不再依赖任何外部密度修饰程序。
+“免安装”指的是**完整包**：`OASIS4.3-dev17-portable` 内自带 `runtime/`（Phaser、Buccaneer、REFMAC 与 OASIS 密度修饰），双击即用，不需要另装 CCP4 或 Phenix。源码树不含这些二进制，从源码运行时要由本机提供：macOS 上可指向已安装的 CCP4 9（`/Applications/ccp4-9`），或把完整包的 `runtime/` 放到源码树旁并用 `--runtime` 指定；Linux 目前还没有完整运行时。本仓库记录的十案例基准是用已删除的旧外部引擎跑出的，只能作为历史记录；换成默认的 oasis-dm v2 后属于不同引擎，数值不能逐点对比，但整条链不再依赖任何外部密度修饰程序。
 
 完整包目前没有公开下载地址（第三方引擎许可）；怎样用本机已有的 CCP4 组装出等价的私有免安装包、以及跑通十案例协议的完整命令，见 [免安装包获取说明](docs/INSTALL_BUNDLE.md)。
 

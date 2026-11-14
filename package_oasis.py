@@ -48,8 +48,7 @@ def source_files(root=ROOT):
                     if alias.name.split('.')[0] in ('phasebuild','oasis_py'):include(alias.name)
     paths.add(src/'phasebuild/resolve_driver.py')
     paths.update(p for p in (src/'oasis_py/resources').rglob('*') if p.is_file())
-    paths.update(root/p for p in ['OASIS4.3.command','environment.yml','LICENSE','AUTHORS.md','CITATION.cff','docs/OASIS4.3.md','docs/VERSIONING.md','docs/INSULIN_DIAGNOSIS_20261023.md','docs/NSF_D2_IMPROVEMENT_20261026.md','docs/PORTFOLIO_20261027.md','docs/GUI_PORTFOLIO_RELEASE_20261027.md','docs/DEFAULT_W8_AUTO_FPP_20261027.md','docs/MTZ_INPUT_SELECTION_20261027.md','docs/DUAL_HAND_AND_PHASE_RESTRAINTS_20261028.md','docs/FOUR_MODES_20261028.md','docs/METHOD_SELECTION_20261028.md','docs/PHASE_CONFIDENCE_DIAGNOSTIC_20261028.md','docs/ITERATIVE_CLEANUP_NSF_20261028.md','docs/AUTO_HAND_ALL_METHODS_20261028.md','docs/STATUS_20261112.md','docs/LITE_MODULE_20261112.md','docs/INSTALL_BUNDLE.md','docs/NO_CCP4_REPLACEMENT.md','docs/SHELXE_BASELINE.md',
-                   'vendor/oasis43/LICENSE','vendor/oasis43/UPSTREAM.json','vendor/oasis43/TEST_PATCHES.md'])
+    paths.update(root/p for p in ['OASIS4.3.command','environment.yml','LICENSE','AUTHORS.md','CITATION.cff','docs/OASIS4.3.md','docs/VERSIONING.md','docs/INSULIN_DIAGNOSIS_20261023.md','docs/NSF_D2_IMPROVEMENT_20261026.md','docs/PORTFOLIO_20261027.md','docs/GUI_PORTFOLIO_RELEASE_20261027.md','docs/DEFAULT_W8_AUTO_FPP_20261027.md','docs/MTZ_INPUT_SELECTION_20261027.md','docs/DUAL_HAND_AND_PHASE_RESTRAINTS_20261028.md','docs/FOUR_MODES_20261028.md','docs/METHOD_SELECTION_20261028.md','docs/PHASE_CONFIDENCE_DIAGNOSTIC_20261028.md','docs/ITERATIVE_CLEANUP_NSF_20261028.md','docs/AUTO_HAND_ALL_METHODS_20261028.md','docs/STATUS_20261112.md','docs/LITE_MODULE_20261112.md','docs/INSTALL_BUNDLE.md','docs/NO_CCP4_REPLACEMENT.md','docs/SHELXE_BASELINE.md'])
     return sorted(paths)
 
 

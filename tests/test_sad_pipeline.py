@@ -87,7 +87,7 @@ def test_stage_failure_reports_what_the_stage_log_said(inputs):
 def test_unverified_hand_continuation_is_an_explicit_auto_hand_option(tmp_path,inputs,monkeypatch):
     from phasebuild import bundled_pplus
     monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None:None)
-    base={**inputs,'method':'pplus_bundled','auto_hand':True,'wavelength':2.0,'dm_engine':'handdm'}
+    base={**inputs,'method':'pplus_bundled','auto_hand':True,'wavelength':2.0,'dm_engine':'oasis-dm'}
     cfg=pipeline.validate(base,inspect=False)
     assert cfg['allow_unverified_hand'] is False          # marginal data still fails closed by default
     cfg=pipeline.validate({**base,'allow_unverified_hand':True},inspect=False)
@@ -99,22 +99,22 @@ def test_unverified_hand_continuation_is_an_explicit_auto_hand_option(tmp_path,i
 
 
 def test_p_plus_runs_on_a_stock_ccp4(inputs,monkeypatch):
-    """P+ needs only Phaser, Buccaneer and REFMAC: handdm ships inside the program."""
+    """P+ needs only Phaser, Buccaneer and REFMAC: oasis-dm ships inside the program."""
     from phasebuild import bundled_pplus
     monkeypatch.setattr(bundled_pplus,'engine_layout',lambda runtime,dm_engine=None:None)
-    base={**inputs,'method':'pplus_bundled','wavelength':2.0,'dm_engine':'handdm','auto_hand':False}
+    base={**inputs,'method':'pplus_bundled','wavelength':2.0,'dm_engine':'oasis-dm','auto_hand':False}
     cfg=pipeline.validate(base,inspect=False)
-    assert cfg['dm_engine']=='handdm' and 'density_runtime' not in cfg
+    assert cfg['dm_engine']=='oasis-dm' and 'density_runtime' not in cfg
     # The removed external backends cannot come back through an old config.
     for gone in ('resolve',):
         with pytest.raises(ValueError,match='Unknown density-modification engine'):
             pipeline.validate({**base,'dm_engine':gone},inspect=False)
-    # P+ hands its map to handdm, so the adapter must not run a DM of its own.
-    with pytest.raises(ValueError,match='handdm v2'):
+    # P+ hands its map to oasis-dm, so the adapter must not run a DM of its own.
+    with pytest.raises(ValueError,match='oasis-dm v2'):
         bundled_pplus.dm({**base,'output':inputs['output']},Path(inputs['output'])/'03_dm')
-    # Two-hand selection runs handdm per hand, so it needs no density/ either.
+    # Two-hand selection runs oasis-dm per hand, so it needs no density/ either.
     cfg=pipeline.validate({**base,'auto_hand':True},inspect=False)
-    assert cfg['auto_hand'] is True and cfg['dm_engine']=='handdm'
+    assert cfg['auto_hand'] is True and cfg['dm_engine']=='oasis-dm'
 
 
 @pytest.mark.parametrize('method',['pplus_internal','likelihood','pplus'])
@@ -217,17 +217,17 @@ def test_dm_enabled_keeps_the_full_plan(tmp_path,inputs):
     assert [stage['id'] for stage in pipeline.stage_plan(cfg)]==['prepare','sad','dm','bridge','build']
 
 
-def test_dm_restraint_protocol_belongs_to_handdm_not_to_phaser(tmp_path,inputs,monkeypatch):
-    """REFMAC reads the restraint, handdm writes the map: the internal P+ route qualifies."""
+def test_dm_restraint_protocol_belongs_to_oasis_dm_not_to_phaser(tmp_path,inputs,monkeypatch):
+    """REFMAC reads the restraint, oasis-dm writes the map: the internal P+ route qualifies."""
     from phasebuild import internal_pplus
     monkeypatch.setattr(internal_pplus,'preflight',lambda cfg: None)
     base=dict(inputs,output=str(tmp_path/'protocol'),build_model=False,refinement_prior='dm_phifom')
-    cfg=pipeline.validate(dict(base,method='pplus_internal',dm_engine='handdm'))
+    cfg=pipeline.validate(dict(base,method='pplus_internal',dm_engine='oasis-dm'))
     assert cfg['refinement_prior']=='dm_phifom'
-    with pytest.raises(ValueError,match='--dm-engine handdm'):
+    with pytest.raises(ValueError,match='--dm-engine oasis-dm'):
         pipeline.validate(dict(base,method='pplus_internal',dm_engine='internal'))
     with pytest.raises(ValueError,match='P\\+ phasing route'):
-        pipeline.validate(dict(base,method='likelihood',dm_engine='handdm'))
+        pipeline.validate(dict(base,method='likelihood',dm_engine='oasis-dm'))
 
 
 def test_conflicting_original_flags_fail_before_output(tmp_path,inputs):

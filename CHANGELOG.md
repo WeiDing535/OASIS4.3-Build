@@ -3,19 +3,19 @@
 ## Unreleased
 
 - **Density modification is no longer a module or a choice.** The desktop form
-  now shows two modules: 「模块 1 · P+ 定相 + handdm 密度修饰（必做）」, fixed and
+  now shows two modules: 「模块 1 · P+ 定相 + oasis-dm 密度修饰（必做）」, fixed and
   greyed out, and 「模块 2 · Buccaneer 建模 + REFMAC 精修」. The old
   density-modifier checkbox is gone, the `dm_engine` combobox is gone, and the
   density-modification parameter fold is never greyed out because there is
-  nothing to switch off: `handdm v2` runs inside the P+ chain on every method.
-  `collect()` always reports `dm_engine='handdm'`/`dm_enabled=True`; module
+  nothing to switch off: `oasis-dm v2` runs inside the P+ chain on every method.
+  `collect()` always reports `dm_engine='oasis-dm'`/`dm_enabled=True`; module
   detection only looks for `cbuccaneer`/`refmac5` and reports the in-tree `dm`
   stage as always available.
 - **The old density-modification engine is deleted outright**, not hidden: its
   adapter module, its CLI subcommand, `--dm-engine`'s third choice, the
   `density/` lookup, the packaging labels and every test that assumed a
   `density/` directory are gone. `--dm-engine` accepts only
-  `handdm` (default) and `internal`; anything else raises
+  `oasis-dm` (default) and `internal`; anything else raises
   「Unknown density-modification engine」. The 2026-11-12 ten-case table in
   `docs/STATUS_20261112.md` was measured with the deleted engine and is kept as
   a historical record only — it can no longer be reproduced. The sweep goes
@@ -23,18 +23,33 @@
   carries a 「历史记录」 banner and calls it 旧引擎, its old-engine-era run
   directories under `runs/` and its experiment scripts/logs under `work/` were
   deleted, and the stale `.gui-oasis/jobs/` records that named it were removed.
-  Only `vendor/oasis43/` still says the word, because that directory is a
-  hash-locked upstream snapshot (`UPSTREAM.json`); editing it would break its
-  provenance check.
-- Density modification now defaults to the in-tree **handdm v2** engine
-  (`src/phasebuild/handdm_dm.py`, vendored `src/phasebuild/vendor/handdm/`),
+  The hash-locked upstream snapshot `vendor/oasis43/` was deleted too, so no
+  file in the repository mentions the retired engine any more.
+- **The engine is named `oasis-dm` everywhere.** It was written under the
+  working name handdm; inside OASIS4.3 the module is `src/phasebuild/oasis_dm.py`,
+  the vendored pair is `vendor/oasis_dm/oasis_dm_core.py` +
+  `oasis_dm_v2.py`, the engine id and `--dm-engine` value is `oasis-dm`, the
+  staged files are `oasis_dm_input.mtz` / `oasis_dm_with_model.mtz` /
+  `oasis_dm.log`, the override is `PHASEBUILD_OASIS_DM_PYTHON`, and every GUI
+  label, doc and test uses the new name (`docs/OASIS_DM_REPLACEMENT_20261114.md`).
+  `vendor/oasis_dm/PROVENANCE.md` keeps the upstream paths and hashes and states
+  the single executable-line change the rename required
+  (`from oasis_dm_core import ...`); no numerical statement was touched.
+- **The hash-locked `vendor/oasis43/` snapshot is deleted.** Its eight
+  referencing sites were updated: the CI pytest command, `testpaths` in
+  `pyproject.toml`, the source packager's file list, the bundle assembler's
+  provenance copy, `AUTHORS.md`, `docs/PROVENANCE.md`, `docs/INTEGRATION.md` and
+  `README_EN.md`. The suite drops from 864 to 707 passed because that snapshot's
+  own 157 tests no longer exist; the remaining 707 are green.
+- Density modification now defaults to the in-tree **oasis-dm v2** engine
+  (`src/phasebuild/oasis_dm.py`, vendored `src/phasebuild/vendor/oasis_dm/`),
   replacing the old external engine for every method: `--dm-engine` accepts
-  `handdm` (default) / `internal`, and the two P+ routes refuse `internal`
+  `oasis-dm` (default) / `internal`, and the two P+ routes refuse `internal`
   outright. No external density modifier is needed for a run, nor is CCP4's
   `hist.lib` — the histogram library ships as `lib/data/hist.lib`
   (`--dm-hist-lib`, `PHASEBUILD_HIST_LIB`).
 - End-to-end check of that swap on the insulin 2.1 A SAD case, same
-  `pplus_internal` command, only `--dm-engine` differs: handdm v2 gives
+  `pplus_internal` command, only `--dm-engine` differs: oasis-dm v2 gives
   Rwork/Rfree **0.2131 / 0.2662** (52 CA, 51/51 truth CAs within 1 A, RMSD
   0.12 A) against **0.2758 / 0.3181** for the previous engine. The trace/Fcalc feedback
   loop needed one fix to get there: the merged model likelihood is now rescaled
@@ -44,15 +59,15 @@
   fragment outweigh the experimental term 7x and the map collapsed
   (holdout CC 0.844 -> 0.700 -> 0.528, Buccaneer built 0 residues).
   New flags: `--dm-cmbwt`, `--dm-holdout`, `--dm-hist-lib`. Defaults:
-  `dm_engine=handdm`, `dm_cycles=12`, `dm_cmbwt=0.4`, `dm_holdout=0.05`.
-- handdm v2 is not just a stand-in: on insulin 2.1 Å it lifts the DM map from
+  `dm_engine=oasis-dm`, `dm_cycles=12`, `dm_cmbwt=0.4`, `dm_holdout=0.05`.
+- oasis-dm v2 is not just a stand-in: on insulin 2.1 Å it lifts the DM map from
   CC 0.3646 to 0.7856–0.8049 and wMPE from 55.4° to 36.0–37.1°, and the
   downstream build is statistically indistinguishable from the previous
   engine's (R-free 0.3295 vs 0.3131 for its best length; engine means over
   ten variants 0.3599 ± 0.043 vs 0.3449 ± 0.030, difference 0.015 against a
   combined standard error of 0.019). The previous engine still won on phase accuracy
   (CC 0.8456 vs 0.8049, wMPE 34.29° vs 35.98°). See
-  `docs/HANDDM_V2_REPLACEMENT_20261114.md`.
+  `docs/OASIS_DM_REPLACEMENT_20261114.md`.
 - `--dm-cmbwt auto` runs a short holdout-scored sweep over
   {0.3, 0.4, 0.5, 0.6, 0.8} before the production pass. It refuses to override
   the calibrated 0.4 unless the sweep separates the candidates by at least
@@ -72,7 +87,7 @@
   `experimental.mtz` at CC 0.981 (4508 reflections, within45 0.999), against
   0.893 for the internal likelihood on the same sites. `bp3` is not wired into
   the pipeline yet.
-- `--dm-engine handdm` with `--refinement-prior dm_phifom` is accepted for
+- `--dm-engine oasis-dm` with `--refinement-prior dm_phifom` is accepted for
   `--method pplus_internal`. The restraint is applied by REFMAC and written by
   the density-modification stage, so nothing about it belonged to Phaser; only
   the bundled route used to be allowed because that was the only route that had
@@ -86,7 +101,7 @@
   unexposed "increase budget".
 - Deletes `density/` (2.4 GB of Phenix-derived RESOLVE/CCTBX). It only backed
   the two-hand Wang8 pilot and the old RESOLVE density-modification backend;
-  both now run on the in-tree handdm engine. P+ needs `phaser` + `cbuccaneer` +
+  both now run on the in-tree oasis-dm engine. P+ needs `phaser` + `cbuccaneer` +
   `refmac5` and nothing else. On insulin 2.1 Å this gives Rwork 0.3166 / Rfree
   0.3779 with 48 residues in 17 min, byte-identical (`02_sad/experimental.mtz`
   and `03_dm/map_phases.mtz` sha256) to the portable-package P+ run that used
@@ -97,17 +112,17 @@
   work-set sequence evidence. Ambiguous evidence still fails loudly;
   `--allow-unverified-hand` stays an explicit opt-in that records
   `hand_verified=false`. (`hand_selection.density_modify` dispatches on
-  `--dm-engine` and runs the in-tree `handdm v2` by default, so the two-hand
+  `--dm-engine` and runs the in-tree `oasis-dm v2` by default, so the two-hand
   test needs no external density modifier either.)
-- `--dm-engine` is now `internal|handdm`. `resolve` is gone and raises
-  「Unknown density-modification engine」, P+ routes pin `handdm` (the GUI greys
+- `--dm-engine` is now `internal|oasis-dm`. `resolve` is gone and raises
+  「Unknown density-modification engine」, P+ routes pin `oasis-dm` (the GUI greys
   the box out), and `internal` is accepted only for `连续 SAD`, `旧版直接法 P+`
-  and `内部 P+`. A missing `handdm` falls back to `internal` on those three and
+  and `内部 P+`. A missing `oasis-dm` falls back to `internal` on those three and
   fails loudly on P+.
 - Removes `density_root()`, `require_density()`, `bundled_pplus.DENSITY_ENGINE`,
   `trust_workflow.dm()`, `--density-runtime` and the 「包内密度引擎」 form field;
   `run_pplus_trust_stage.py dm` now refuses with a pointer to `--dm-engine
-  handdm`.
+  oasis-dm`.
 - Packaging drops the tree too: `build_bundled_pplus.py` no longer takes
   `--density-source`, `prune_bundle.py` no longer prunes `runtime/density/`,
   `package_standalone.py` no longer checks RESOLVE segment files, and bundle

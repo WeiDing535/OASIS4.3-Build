@@ -1,6 +1,6 @@
 """Configuration and stage-plan tests for the density-modification engines.
 
-There are two engines and both are in-tree: handdm v2 (the default, and the only
+There are two engines and both are in-tree: oasis-dm v2 (the default, and the only
 one the P+ routes use) and the MLHL kernel used by 连续 SAD / 旧版 P+ / 内部 P+.
 Every external density modifier -- the copied RESOLVE/CCTBX tree and CCP4
 The external density-modification engine -- has been removed from the program,
@@ -44,8 +44,8 @@ def _inputs(tmp_path):
                 reference=str(tmp_path/'reference'),output=str(tmp_path/'out'))
 
 
-def test_defaults_use_the_in_tree_handdm_engine():
-    assert DEFAULTS['dm_engine']=='handdm'
+def test_defaults_use_the_in_tree_oasis_dm_engine():
+    assert DEFAULTS['dm_engine']=='oasis-dm'
     assert DEFAULTS['dm_cmbwt']==0.4 and DEFAULTS['dm_holdout']==0.05
     assert DEFAULTS['dm_hist_lib']==''
     assert DEFAULTS['feedback_cycles']==0
@@ -54,7 +54,7 @@ def test_defaults_use_the_in_tree_handdm_engine():
     assert 'dm_mask_radius' not in DEFAULTS and 'dm_anisotropy' not in DEFAULTS
 
 
-@pytest.mark.parametrize('engine',['resolve','handdm_v2',''])
+@pytest.mark.parametrize('engine',['resolve','oasis_dm_v2',''])
 def test_only_the_two_in_tree_engines_are_accepted(engine):
     with pytest.raises(ValueError,match='Unknown density-modification engine'):
         _validate(dm_engine=engine)
@@ -63,11 +63,11 @@ def test_only_the_two_in_tree_engines_are_accepted(engine):
 @pytest.mark.parametrize('weight',[-0.1,0.0,2.5,float('nan'),True,'strong'])
 def test_cmbwt_must_be_a_positive_weight_or_auto(weight):
     with pytest.raises(ValueError,match='dm_cmbwt'):
-        _validate(dm_engine='handdm',dm_cmbwt=weight)
+        _validate(dm_engine='oasis-dm',dm_cmbwt=weight)
 
 
 def test_cmbwt_auto_is_accepted(tmp_path):
-    cfg=_validate(method='likelihood',dm_engine='handdm',dm_cmbwt='auto',
+    cfg=_validate(method='likelihood',dm_engine='oasis-dm',dm_cmbwt='auto',
                   **_inputs(tmp_path))
     assert cfg['dm_cmbwt']=='auto'
 
@@ -75,76 +75,76 @@ def test_cmbwt_auto_is_accepted(tmp_path):
 @pytest.mark.parametrize('fraction',[-0.1,0.6,True,'five'])
 def test_holdout_must_be_a_small_fraction(fraction):
     with pytest.raises(ValueError,match='dm_holdout'):
-        _validate(dm_engine='handdm',dm_holdout=fraction)
+        _validate(dm_engine='oasis-dm',dm_holdout=fraction)
 
 
 @pytest.mark.parametrize('method',['pplus_trust','pplus_bundled'])
 def test_the_two_p_plus_routes_refuse_the_internal_engine(method):
-    with pytest.raises(ValueError,match='只能用 handdm'):
+    with pytest.raises(ValueError,match='只能用 oasis-dm'):
         _validate(method=method,dm_engine='internal')
 
 
-@pytest.mark.parametrize('engine',['handdm','internal'])
+@pytest.mark.parametrize('engine',['oasis-dm','internal'])
 @pytest.mark.parametrize('method',['likelihood','pplus','pplus_internal'])
 def test_each_dm_engine_fits_the_continuous_routes(method,engine,tmp_path,monkeypatch):
     """Both in-tree engines serve every route that writes an observation likelihood."""
-    from phasebuild import handdm_dm
-    monkeypatch.setattr(handdm_dm,'locate',lambda *a,**k:(sys.executable,'/vendor/handdm_v2.py'))
+    from phasebuild import oasis_dm
+    monkeypatch.setattr(oasis_dm,'locate',lambda *a,**k:(sys.executable,'/vendor/oasis_dm_v2.py'))
     cfg=_validate(method=method,dm_engine=engine,**_inputs(tmp_path))
     assert cfg['dm_engine']==engine
     assert 'dm_engine_fallback' not in cfg and 'dm_engine_requested' not in cfg
 
 
-def test_handdm_serves_both_p_plus_routes(tmp_path,monkeypatch):
-    from phasebuild import bundled_pplus, handdm_dm
+def test_oasis_dm_serves_both_p_plus_routes(tmp_path,monkeypatch):
+    from phasebuild import bundled_pplus, oasis_dm
     runtime=_ccp4(tmp_path)
-    monkeypatch.setattr(handdm_dm,'locate',lambda *a,**k:(sys.executable,'/vendor/handdm_v2.py'))
+    monkeypatch.setattr(oasis_dm,'locate',lambda *a,**k:(sys.executable,'/vendor/oasis_dm_v2.py'))
     monkeypatch.setattr(bundled_pplus,'engine_layout',lambda value,dm_engine=None:Path(value))
     (tmp_path/'prior').write_text('placeholder')
     for method in ('pplus_trust','pplus_bundled'):
         extra={'observation_prior':str(tmp_path/'prior')} if method=='pplus_trust' else {}
-        cfg=_validate(method=method,dm_engine='handdm',runtime=str(runtime),
+        cfg=_validate(method=method,dm_engine='oasis-dm',runtime=str(runtime),
                       **extra,**_inputs(tmp_path))
-        assert cfg['dm_engine']=='handdm' and 'dm_engine_fallback' not in cfg
+        assert cfg['dm_engine']=='oasis-dm' and 'dm_engine_fallback' not in cfg
 
 
-def test_missing_handdm_falls_back_for_the_continuous_routes(tmp_path,monkeypatch):
+def test_missing_oasis_dm_falls_back_for_the_continuous_routes(tmp_path,monkeypatch):
     """A runtime without numpy/gemmi must not stop 连续 SAD, but must be visible."""
-    from phasebuild import handdm_dm
-    monkeypatch.setattr(handdm_dm,'locate',lambda *a,**k: (_ for _ in ()).throw(
-        ValueError('handdm v2 needs a Python with numpy, scipy and gemmi')))
-    cfg=_validate(method='likelihood',dm_engine='handdm',**_inputs(tmp_path))
-    assert cfg['dm_engine']=='internal' and cfg['dm_engine_requested']=='handdm'
+    from phasebuild import oasis_dm
+    monkeypatch.setattr(oasis_dm,'locate',lambda *a,**k: (_ for _ in ()).throw(
+        ValueError('oasis-dm v2 needs a Python with numpy, scipy and gemmi')))
+    cfg=_validate(method='likelihood',dm_engine='oasis-dm',**_inputs(tmp_path))
+    assert cfg['dm_engine']=='internal' and cfg['dm_engine_requested']=='oasis-dm'
     assert cfg['feedback_cycles']==0
     notice=fallback_notice(cfg)
-    assert 'handdm' in notice
+    assert 'oasis-dm' in notice
     dm=[s for s in stage_plan(cfg) if s['id']=='dm'][0]
     assert 'run_oasis_stage.py' in ' '.join(dm['command'])
 
 
-def test_missing_handdm_is_fatal_for_the_p_plus_routes(tmp_path,monkeypatch):
-    from phasebuild import handdm_dm
-    monkeypatch.setattr(handdm_dm,'locate',lambda *a,**k: (_ for _ in ()).throw(
-        ValueError('handdm v2 needs a Python with numpy, scipy and gemmi')))
-    with pytest.raises(ValueError,match='handdm'):
-        _validate(method='pplus_trust',dm_engine='handdm',
+def test_missing_oasis_dm_is_fatal_for_the_p_plus_routes(tmp_path,monkeypatch):
+    from phasebuild import oasis_dm
+    monkeypatch.setattr(oasis_dm,'locate',lambda *a,**k: (_ for _ in ()).throw(
+        ValueError('oasis-dm v2 needs a Python with numpy, scipy and gemmi')))
+    with pytest.raises(ValueError,match='oasis-dm'):
+        _validate(method='pplus_trust',dm_engine='oasis-dm',
                   observation_prior=str(tmp_path/'prior'),**_inputs(tmp_path))
 
 
 @pytest.mark.parametrize('solvent',[0.0,1.0,-0.1,1.5,float('nan')])
 def test_solvent_override_must_be_a_fraction(solvent):
     with pytest.raises(ValueError):
-        _validate(dm_engine='handdm',dm_solvent=solvent)
+        _validate(dm_engine='oasis-dm',dm_solvent=solvent)
 
 
 @pytest.mark.parametrize('cycles',[-1,9,True])
 def test_feedback_cycle_bounds(cycles):
     with pytest.raises(ValueError):
-        _validate(dm_engine='handdm',feedback_cycles=cycles)
+        _validate(dm_engine='oasis-dm',feedback_cycles=cycles)
 
 
-def test_feedback_requires_handdm_engine():
-    with pytest.raises(ValueError,match='handdm density-modification engine'):
+def test_feedback_requires_oasis_dm_engine():
+    with pytest.raises(ValueError,match='oasis-dm density-modification engine'):
         _validate(method='likelihood',dm_engine='internal',feedback_cycles=1)
 
 
@@ -153,18 +153,18 @@ def test_unknown_building_recipe_is_rejected():
         _validate(building_recipe='pipeline2')
 
 
-def test_handdm_dm_stage_runs_the_trace_feedback_driver(tmp_path,monkeypatch):
-    from phasebuild import bundled_pplus, handdm_dm
+def test_oasis_dm_stage_runs_the_trace_feedback_driver(tmp_path,monkeypatch):
+    from phasebuild import bundled_pplus, oasis_dm
     runtime=_ccp4(tmp_path)
-    monkeypatch.setattr(handdm_dm,'locate',lambda *a,**k:(sys.executable,'/vendor/handdm_v2.py'))
+    monkeypatch.setattr(oasis_dm,'locate',lambda *a,**k:(sys.executable,'/vendor/oasis_dm_v2.py'))
     monkeypatch.setattr(bundled_pplus,'engine_layout',lambda value,dm_engine=None:Path(value))
-    cfg=_validate(method='pplus_bundled',build_model=True,dm_engine='handdm',
+    cfg=_validate(method='pplus_bundled',build_model=True,dm_engine='oasis-dm',
                   feedback_cycles=2,dm_solvent=.5,dm_cmbwt='auto',runtime=str(runtime),
                   **_inputs(tmp_path))
     assert cfg['dm_cycles']==12
     dm=[s for s in stage_plan(cfg) if s['id']=='dm'][0]
     assert 'run_trace_feedback.py' in ' '.join(dm['command'])
-    assert 'handdm v2' in dm['name'] and 'trace/Fcalc' in dm['name']
+    assert 'oasis-dm v2' in dm['name'] and 'trace/Fcalc' in dm['name']
 
 
 def test_internal_mlhl_stage_stays_on_the_oasis_driver(tmp_path):
@@ -173,38 +173,38 @@ def test_internal_mlhl_stage_stays_on_the_oasis_driver(tmp_path):
     assert 'run_oasis_stage.py' in ' '.join(dm['command']) and 'run_trace_feedback.py' not in ' '.join(dm['command'])
 
 
-def test_phases_only_keeps_handdm_but_drops_the_feedback(tmp_path,monkeypatch):
-    """No tracer means no Fcalc feedback; the DM map itself is still handdm's."""
-    from phasebuild import bundled_pplus, handdm_dm
+def test_phases_only_keeps_oasis_dm_but_drops_the_feedback(tmp_path,monkeypatch):
+    """No tracer means no Fcalc feedback; the DM map itself is still oasis-dm's."""
+    from phasebuild import bundled_pplus, oasis_dm
     runtime=_ccp4(tmp_path)
-    monkeypatch.setattr(handdm_dm,'locate',lambda *a,**k:(sys.executable,'/vendor/handdm_v2.py'))
+    monkeypatch.setattr(oasis_dm,'locate',lambda *a,**k:(sys.executable,'/vendor/oasis_dm_v2.py'))
     monkeypatch.setattr(bundled_pplus,'engine_layout',lambda value,dm_engine=None:Path(value))
-    cfg=_validate(method='likelihood',build_model=False,dm_engine='handdm',feedback_cycles=2,
+    cfg=_validate(method='likelihood',build_model=False,dm_engine='oasis-dm',feedback_cycles=2,
                   runtime=str(runtime),**_inputs(tmp_path))
-    assert cfg['dm_engine']=='handdm' and cfg['feedback_cycles']==0
+    assert cfg['dm_engine']=='oasis-dm' and cfg['feedback_cycles']==0
     dm=[s for s in stage_plan(cfg) if s['id']=='dm'][0]
     assert 'run_trace_feedback.py' in ' '.join(dm['command'])
-    assert 'handdm v2' in dm['name']
+    assert 'oasis-dm v2' in dm['name']
 
 
 def test_engine_layout_needs_phaser_but_no_density_tree(tmp_path):
     from phasebuild import bundled_pplus
     runtime=_ccp4(tmp_path,names=('phaser',))
-    assert bundled_pplus.engine_layout(runtime,'handdm')==runtime.resolve()
+    assert bundled_pplus.engine_layout(runtime,'oasis-dm')==runtime.resolve()
     assert bundled_pplus.engine_layout(runtime,'internal')==runtime.resolve()
     assert bundled_pplus.engine_layout(runtime) == runtime.resolve()
     for gone in ('resolve',):
         with pytest.raises(ValueError,match='未知密度修饰引擎'):
             bundled_pplus.engine_layout(runtime,gone)
     with pytest.raises(ValueError,match='P\\+ 引擎缺失'):
-        bundled_pplus.engine_layout(tmp_path/'empty','handdm')
+        bundled_pplus.engine_layout(tmp_path/'empty','oasis-dm')
 
 
 def test_feedback_model_hl_is_merged_into_the_experimental_quartet(tmp_path, monkeypatch):
     """The second feedback cycle feeds a model back; that merge must import cleanly."""
     import numpy as np
     import gemmi
-    from phasebuild import handdm_dm
+    from phasebuild import oasis_dm
 
     rng = np.random.default_rng(5)
     hkl = np.array([(h, k, l) for h in range(6) for k in range(6) for l in range(6)][:200],
@@ -242,7 +242,7 @@ def test_feedback_model_hl_is_merged_into_the_experimental_quartet(tmp_path, mon
     model = tmp_path / 'model.pdb'
     model.write_text('ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 20.00           C\nEND\n')
     out = tmp_path / 'combined.mtz'
-    info = handdm_dm.combine_model_hl(staged, model, out, phenix_bin=None, runtime=None,
+    info = oasis_dm.combine_model_hl(staged, model, out, phenix_bin=None, runtime=None,
                                       fcalc='fc_all')
     # The model term is normalised to the experimental quartet, so a complete
     # model (FC == FP here) may at most double |HL| -- it must never swamp it.

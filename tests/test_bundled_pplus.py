@@ -17,7 +17,7 @@ def bundled(trusted,tmp_path):
  return cfg
 
 def test_bundle_plan_and_explicit_experimental_wavelength(bundled):
- # The bundled profile picks a cycle budget (12 for handdm v2), but an explicit
+ # The bundled profile picks a cycle budget (12 for oasis-dm v2), but an explicit
  # request must survive (a silently ignored CLI flag is a defect).
  cfg=pipeline.validate({k:v for k,v in bundled.items() if k!='dm_cycles'});plan=pipeline.stage_plan(cfg)
  assert cfg['phenix_bin']=='' and cfg['dm_cycles']==12

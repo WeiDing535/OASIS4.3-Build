@@ -62,7 +62,7 @@ def main():
         progress=lambda m:print(m,flush=True))
     report.update(solvent_source='user' if cfg.get('dm_solvent') is not None else 'sequence_estimate',
         original_prior=fingerprint(prior),
-        map_formula='FWT=|FP|*FOM, PHWT=PHIB from the final handdm v2 HL quartet; work reflections only',
+        map_formula='FWT=|FP|*FOM, PHWT=PHIB from the final oasis-dm v2 HL quartet; work reflections only',
         free_reflections_in_map=0)
     (out/'map_phases.json').write_text(json.dumps(report,indent=2)+'\n')
 

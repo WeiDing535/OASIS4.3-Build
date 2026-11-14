@@ -2,7 +2,7 @@
 
 The density-modification feedback needs Fcalc/PHIC for a work-only partial
 model without moving a single atom.  ``attach_fc`` writes those two columns onto
-the staged MTZ so the next handdm cycle can build the combined likelihood:
+the staged MTZ so the next oasis-dm cycle can build the combined likelihood:
 a bundled REFMAC pass with zero refinement cycles (the default), or Phenix
 ``fmodel`` when an explicit binary directory is supplied.
 """

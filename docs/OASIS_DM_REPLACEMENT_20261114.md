@@ -1,8 +1,8 @@
-# handdm v2 替换旧密度修饰引擎:接入方式、验收数据与 `--cmbwt` 评估
+# oasis-dm v2 替换旧密度修饰引擎:接入方式、验收数据与 `--cmbwt` 评估
 
 日期:2026-11-14。范围:OASIS4.3 全部密度修饰路径。结论先行:
 
-1. **替换已完成**。`--dm-engine handdm` 是默认值,旧的外部密度修饰引擎
+1. **替换已完成**。`--dm-engine oasis-dm` 是默认值,旧的外部密度修饰引擎
    已从程序中彻底删除(模块、命令行选项、打包标签、测试全部移除)。整条链
    不再需要任何外部密度修饰程序,也不再需要 CCP4 的 `hist.lib`。
 2. **效果**:胰岛素 2.1 Å 上,DM 图从 CC 0.3646 / wMPE 55.4° 提升到
@@ -20,32 +20,32 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `src/phasebuild/vendor/handdm/handdm.py` | 上游 v1(未改动),提供 `Config`/`DensityModifier`/`hl_centroid` |
-| `src/phasebuild/vendor/handdm/handdm_v2.py` | 上游 v2(未改动),`DensityModifierV2` |
-| `src/phasebuild/vendor/handdm/PROVENANCE.md` | 上游路径、sha256、`hist.lib` 许可说明、覆盖方式 |
-| `src/phasebuild/handdm_dm.py` | **全部 OASIS 适配都在这里**:定位 Python、暂存输入、合并模型 HL、写 `03_dm` 列、cmbwt 标定 |
-| `lib/data/hist.lib` | CCP4 直方图库副本(13373 字节),handdm 不再依赖 CCP4 安装目录 |
+| `src/phasebuild/vendor/oasis_dm/oasis_dm_core.py` | 上游 v1(未改动),提供 `Config`/`DensityModifier`/`hl_centroid` |
+| `src/phasebuild/vendor/oasis_dm/oasis_dm_v2.py` | 上游 v2(未改动),`DensityModifierV2` |
+| `src/phasebuild/vendor/oasis_dm/PROVENANCE.md` | 上游路径、sha256、`hist.lib` 许可说明、覆盖方式 |
+| `src/phasebuild/oasis_dm.py` | **全部 OASIS 适配都在这里**:定位 Python、暂存输入、合并模型 HL、写 `03_dm` 列、cmbwt 标定 |
+| `lib/data/hist.lib` | CCP4 直方图库副本(13373 字节),oasis-dm 不再依赖 CCP4 安装目录 |
 
-两个上游文件的 sha256 与丁玮工作目录中的副本一致(`handdm.py`
-`6647fce3…fdd6c`,`handdm_v2.py` `3588a1cf…83e8`),`PROVENANCE.md` 里可逐字复核。
+两个上游文件的 sha256 与丁玮工作目录中的副本一致(`oasis_dm_core.py`
+`6647fce3…fdd6c`,`oasis_dm_v2.py` `3588a1cf…83e8`),`PROVENANCE.md` 里可逐字复核。
 
 ### 1.2 默认值与开关
 
 | 参数 | 旧 | 新 |
 | --- | --- | --- |
-| `dm_engine`(profile / P+) | 外部引擎 | `handdm` |
-| `dm_cycles` | 40(仅外部引擎) | 12(handdm 自停) |
+| `dm_engine`(profile / P+) | 外部引擎 | `oasis-dm` |
+| `dm_cycles` | 40(仅外部引擎) | 12(oasis-dm 自停) |
 | `dm_cmbwt` | — | `0.4`(数值,或 `auto`) |
 | `dm_holdout` | — | `0.05` |
 | `dm_hist_lib` | 硬编码 `/Applications/ccp4-9/lib/data/hist.lib` | 仓库 `lib/data/hist.lib`,可覆盖 |
 
-`--dm-engine` 二选一:`handdm`(默认)、`internal`;其它取值一律报
+`--dm-engine` 二选一:`oasis-dm`(默认)、`internal`;其它取值一律报
 「Unknown density-modification engine」。两条 P+ 流程(`pplus_bundled`、
-`pplus_internal`)只接受 `handdm`,给 `internal` 直接报错 —— 旧的内部 MLHL
+`pplus_internal`)只接受 `oasis-dm`,给 `internal` 直接报错 —— 旧的内部 MLHL
 密度修饰只作为 `likelihood`/`pplus` 的回退,不再冒充 P+ 的密度修饰。
 
-回退规则:handdm 需要 gemmi/numpy/scipy 的 Python,`handdm_dm.locate()` 依次
-尝试 `PHASEBUILD_HANDDM_PYTHON`、当前解释器、`<runtime>/bin/python`。
+回退规则:oasis-dm 需要 gemmi/numpy/scipy 的 Python,`oasis_dm.locate()` 依次
+尝试 `PHASEBUILD_OASIS_DM_PYTHON`、当前解释器、`<runtime>/bin/python`。
 `likelihood`/`pplus`/`pplus_internal` 找不到时回退到 `internal` 并在
 `pipeline_report.json` 写 `dm_engine_requested` / `dm_engine_fallback`;
 P+ 两条流程找不到时直接失败,不静默降级。
@@ -53,7 +53,7 @@ P+ 两条流程找不到时直接失败,不静默降级。
 ### 1.3 调用链
 
 `sad_pipeline` → `run_trace_feedback.py` → `trace_feedback.run(dm_engine=…)` →
-`handdm_dm.run(...)`。`handdm_dm.run` 的签名与旧的外部适配器对齐,所以
+`oasis_dm.run(...)`。`oasis_dm.run` 的签名与旧的外部适配器对齐,所以
 trace/Fcalc 反馈循环一行没改:每轮 DM 之后 trace 出模型,下一轮把模型
 `Fc/φc` 并入 HL 再修饰。并入时有一个单位问题必须处理:实验 HL 四元组是
 归一化量(`|HL|` 约 1–2),而 Sim 权重 `X = 2 Fo D Fc/(1-D²Fc²/Fo²)` 是观测振幅
@@ -62,7 +62,7 @@ trace/Fcalc 反馈循环一行没改:每轮 DM 之后 trace 出模型,下一轮�
 缩放到实验 `|HL|` 的量级,再乘以模型解释的散射强度比例
 `<Fc²>/<Fo²>`(空模型 0,完整模型约 1)。修正后同一轮模型只贡献 0.30,实验
 HL 是 1.64。`merge_phase_map` 仍然要求 DM 输出里是裸
-`HLA..HLD`,handdm 写的 `DM_HLADM..DM_HLDDM` 由 `handdm_dm.write_schema`
+`HLA..HLD`,oasis-dm 写的 `DM_HLADM..DM_HLDDM` 由 `oasis_dm.write_schema`
 改名并按 `hypot(A,B)` 重算 FOM。
 
 ---
@@ -77,35 +77,35 @@ HL 是 1.64。`merge_phase_map` 仍然要求 DM 输出里是裸
 | 变体 | wMPE | mean cosΔφ | σA C | 图 CC(全胞) | 图 CC(高密度) | 平均 FOM |
 | --- | --- | --- | --- | --- | --- | --- |
 | 初始 HL | 55.43° | 0.4791 | 0.5582 | 0.3646 | 0.3949 | 0.3214 |
-| handdm v2 默认 | 37.15° | 0.6987 | 0.7992 | 0.7856 | 0.7841 | 0.7738 |
-| handdm v2 cmbwt 0.3 | 36.80° | 0.7040 | 0.8049 | 0.7948 | 0.7938 | 0.7339 |
-| handdm v2 cmbwt 0.5 | **35.98°** | **0.7116** | **0.8107** | **0.8049** | **0.8016** | 0.8213 |
+| oasis-dm v2 默认 | 37.15° | 0.6987 | 0.7992 | 0.7856 | 0.7841 | 0.7738 |
+| oasis-dm v2 cmbwt 0.3 | 36.80° | 0.7040 | 0.8049 | 0.7948 | 0.7938 | 0.7339 |
+| oasis-dm v2 cmbwt 0.5 | **35.98°** | **0.7116** | **0.8107** | **0.8049** | **0.8016** | 0.8213 |
 | 旧引擎 20 周期 | 34.29° | 0.7302 | 0.8498 | 0.8456 | 0.8534 | — |
 | 旧引擎 40 周期 | 34.32° | 0.7301 | 0.8439 | 0.8435 | 0.8529 | — |
 | 旧引擎 80 周期 | 34.23° | 0.7300 | 0.8435 | 0.8461 | 0.8569 | — |
 
 旧引擎的相位仍然更好(CC 0.8456 vs 最好 0.8049,wMPE 差 1.7°),10 个壳层
-里赢 8 个,最大差距在 2.6–2.8 Å(5–6.5°)。**handdm 的价值是独立与自包含,
+里赢 8 个,最大差距在 2.6–2.8 Å(5–6.5°)。**oasis-dm 的价值是独立与自包含,
 不是精度更高。**
 
 ### 2.2 下游建库
 
 | 变体 | R_work / R_free | 残基 | CA<1 Å | CA RMSD |
 | --- | --- | --- | --- | --- |
-| handdm 默认(0.4) | 0.2888 / 0.3295 | 52 | 50/51 | 0.21 Å |
-| handdm cmbwt 0.3 | **0.2634 / 0.3012** | 52 | 50/51 | 0.21 Å |
-| handdm cmbwt 0.5 | 0.4006 / 0.4217 | — | — | — |
+| oasis-dm 默认(0.4) | 0.2888 / 0.3295 | 52 | 50/51 | 0.21 Å |
+| oasis-dm cmbwt 0.3 | **0.2634 / 0.3012** | 52 | 50/51 | 0.21 Å |
+| oasis-dm cmbwt 0.5 | 0.4006 / 0.4217 | — | — | — |
 | 旧引擎 20 周期 | **0.2433 / 0.3131** | 53 | 50/51 | 0.17 Å |
 | 旧引擎 40 周期 | 0.3781 / 0.3896 | — | — | — |
 | 生产链(3 轮旧引擎 + 2 轮反馈) | 0.2758 / 0.3181 | 50 | 48/51 | 0.22 Å |
-| 生产链(3 轮 handdm + 2 轮反馈,`--dm-engine handdm`) | **0.2131 / 0.2662** | 52 | 51/51 | 0.12 Å |
+| 生产链(3 轮 oasis-dm + 2 轮反馈,`--dm-engine oasis-dm`) | **0.2131 / 0.2662** | 52 | 51/51 | 0.12 Å |
 
 最后一行的两组生产数字来自**同一条 `pplus_internal` 命令、同一套输入**,只差
-密度修饰引擎。handdm 的 R_free 比旧引擎低 5.2 个百分点,建出 52 个 CA(51 个
+密度修饰引擎。oasis-dm 的 R_free 比旧引擎低 5.2 个百分点,建出 52 个 CA(51 个
 真值内)。这与上表的结论不矛盾:生产链多了 trace/Fcalc 反馈与固定观测先验,
 单次建库的 R 不能当引擎排序依据(见本节末与 §4.3)。
 
-引擎层面的统计(10 个 handdm 变体 vs 5 个旧引擎变体):R_free
+引擎层面的统计(10 个 oasis-dm 变体 vs 5 个旧引擎变体):R_free
 0.3599 ± 0.043 vs 0.3449 ± 0.030,差值 0.015,合并标准误约 0.019 —— **不可区分**。
 单次建库的 R 因子不能用来给引擎排序:同一张图换随机种子,中位相位差 0.027°
 就能让 R_free 摆动 3 个百分点(见 §4.3)。
@@ -114,7 +114,7 @@ HL 是 1.64。`merge_phase_map` 仍然要求 DM 输出里是裸
 
 ## 3. `--cmbwt` 是什么
 
-`handdm_v2.py:259-260`:
+`oasis_dm_v2.py:259-260`:
 
 ```python
 HL_mod = column_stack([cmbwt * X * cos(phi_mod),
@@ -135,7 +135,7 @@ HL_mod = column_stack([cmbwt * X * cos(phi_mod),
 
 ### 4.1 试过的方案:留出集 CC 标定扫描
 
-`handdm_dm.calibrate_cmbwt()` 对 {0.3, 0.4, 0.5, 0.6, 0.8} 各跑 3 轮,
+`oasis_dm.calibrate_cmbwt()` 对 {0.3, 0.4, 0.5, 0.6, 0.8} 各跑 3 轮,
 用**标定专用种子 7717** 重新划留出集(与生产运行的 20261023 不同,避免在
 同一批反射上调参),按留出集振幅 CC 打分:
 
@@ -213,7 +213,7 @@ cmbwt sweep is flat (0.7963..0.8009, spread 0.0046 < 0.01); keeping 0.40
 - **不要**用 `auto` 当作“自动调参”卖点:它的判据只在地图确实被 cmbwt 影响时
   才有分辨力,而那不是当前引擎的行为。真正的选法只有两种:固定 0.4,或者
   用端到端建库做多次重复扫描(每次约 1 分钟 DM + 1 分钟建库,至少 4 个种子)。
-- 若以后要让 `auto` 真正有效,需要给 `handdm_dm` 加一个**相位敏感**的留出集
+- 若以后要让 `auto` 真正有效,需要给 `oasis_dm` 加一个**相位敏感**的留出集
   判据,例如:留出集上 `Fc_omit` 与观测的振幅拟合只给出 ΣQ,拿不到相位误差;
   可行方向是把留出集反射从 DM 中彻底剔除后,用两套独立起始相位各跑一次,
   比较留出集上的相位一致性(半集一致性)。这属于新研究项,不在本次范围内。
@@ -232,7 +232,7 @@ REF=$PWD/validation/unified_verified_tmp/synthetic-reference0/reference-1tqw.mtz
   --sad $INS/ins_wave2.0_reso2.1A_sad.mtz --native $INS/ins_wave2.0_reso2.1A_sad.mtz \
   --sequence $INS/3INS.pir --heavy /private/tmp/bp3/bp3out-1.pdb \
   --reference $REF --fpp S=1.0 \
-  --output /tmp/prod_hdm --method pplus_internal --dm-engine handdm \
+  --output /tmp/prod_hdm --method pplus_internal --dm-engine oasis-dm \
   --dm-cycles 3 --feedback-cycles 2 --dm-solvent 0.5 \
   --input-columns --no-auto-hand --build-model --dm-cmbwt 0.4
 ```
@@ -242,13 +242,13 @@ REF=$PWD/validation/unified_verified_tmp/synthetic-reference0/reference-1tqw.mtz
 (sha256 `3913681a…`),R 也相同。
 
 
-### 5.1 单个案例(默认 handdm)
+### 5.1 单个案例(默认 oasis-dm)
 
 ```bash
 ./.conda-unified/bin/python run_sad_to_model.py \
   --sad SAD.mtz --native NATIVE.mtz --sequence SEQ.pir --heavy SITES.pdb \
   --reference REFERENCE.mtz --fpp S=1.0 \
-  --method pplus_internal --dm-engine handdm \
+  --method pplus_internal --dm-engine oasis-dm \
   --dm-cycles 3 --feedback-cycles 2 --dm-solvent 0.5 \
   --input-columns --no-auto-hand --build-model --output OUT
 ```
@@ -256,14 +256,14 @@ REF=$PWD/validation/unified_verified_tmp/synthetic-reference0/reference-1tqw.mtz
 ### 5.2 关于旧十案例表
 
 `docs/STATUS_20261112.md` 那张十案例表是用已删除的旧引擎跑出的历史记录,
-**不能再逐点复现**;现在的 `--dm-engine` 只接受 `handdm`/`internal`,换引擎
-后数值属于不同引擎。要重跑十案例,按 §5.1 的 handdm 命令并重新标定终点。
+**不能再逐点复现**;现在的 `--dm-engine` 只接受 `oasis-dm`/`internal`,换引擎
+后数值属于不同引擎。要重跑十案例,按 §5.1 的 oasis-dm 命令并重新标定终点。
 
 ### 5.3 只跑 DM 并看标定表
 
 ```bash
 ./.conda-unified/bin/python -c "
-from phasebuild.handdm_dm import calibrate_cmbwt
+from phasebuild.oasis_dm import calibrate_cmbwt
 w, table = calibrate_cmbwt('work.mtz', 'hl.mtz', 'cal', 0.5)
 print(w, table)"
 ```
@@ -279,13 +279,13 @@ PYTHONPATH=src:tests ./.conda-unified/bin/python -m pytest -p no:randomly -q
 
 ## 6. 已知限制
 
-- 手写引擎没有各向异性校正(上游 handdm 没有这个功能),`--dm-anisotropy`
+- 手写引擎没有各向异性校正(上游 oasis-dm 没有这个功能),`--dm-anisotropy`
   对它无效,`dm_info['anisotropy_correction']` 恒为 `False`。
 - `--sigmaq-source omit` 在留出集少于 `min_free=500` 时会自动退回 `blend`
   并把 cmbwt 压回 0.4;胰岛素只有 218–225 个留出反射,所以该开关在本案例
   上是惰性的(与默认逐字节相同)。
 - `--no-auto-stop` 会忽略 `--max-cycles`/`--min-cycles`,实际按上游
-  `Config.cycles=5` 跑。这是上游 CLI 的不一致,已在 `handdm_dm` 外层记录,
+  `Config.cycles=5` 跑。这是上游 CLI 的不一致,已在 `oasis_dm` 外层记录,
   但没有改上游代码。
-- 十案例表是用已删除的旧引擎跑出的;换成 handdm 后属于不同引擎,数值不能逐点对比。
-  目前只完成了胰岛素一个案例的 A/B,十案例的 handdm 全量对照尚未做。
+- 十案例表是用已删除的旧引擎跑出的;换成 oasis-dm 后属于不同引擎,数值不能逐点对比。
+  目前只完成了胰岛素一个案例的 A/B,十案例的 oasis-dm 全量对照尚未做。

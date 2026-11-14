@@ -1,4 +1,4 @@
-"""Self-contained engine adapter: native Phaser -> genuine P+ -> handdm v2.
+"""Self-contained engine adapter: native Phaser -> genuine P+ -> oasis-dm v2.
 
 Independence means no separately installed suites. Phaser is part of
 the CCP4 that also supplies cbuccaneer/refmac5, so one CCP4 install runs the whole
@@ -17,9 +17,9 @@ from .trust_workflow import dump,launch,sample_info
 
 
 def engine_layout(runtime,dm_engine=None):
-    """Check the bundled engine; density modification is the in-tree handdm's job."""
+    """Check the bundled engine; density modification is the in-tree oasis-dm's job."""
     runtime=Path(runtime).expanduser().resolve()
-    if dm_engine not in (None,'handdm','internal'):raise ValueError('未知密度修饰引擎：'+str(dm_engine))
+    if dm_engine not in (None,'oasis-dm','internal'):raise ValueError('未知密度修饰引擎：'+str(dm_engine))
     phaser=runtime/'bin/phaser'
     if not phaser.is_file() or not os.access(phaser,os.X_OK):
         raise ValueError('P+ 引擎缺失：'+str(phaser)+'。若“CCP4 位置”填的是外部安装，请确认它有 bin/phaser，或清空该栏改用包内运行时')
@@ -88,7 +88,7 @@ def phase(cfg,output):
     from . import trust_workflow
     out=Path(output)
     # Everything here comes from the runtime: Phaser for the frontend, the
-    # in-tree P+ likelihood refinement, and handdm v2 for density
+    # in-tree P+ likelihood refinement, and oasis-dm v2 for density
     # modification.  No separately copied Phenix tree is involved any more.
     runtime=engine_layout(cfg['runtime'],cfg.get('dm_engine'));front=out/'phaser';front.mkdir()
     work=stage_work(cfg,front/'work.mtz');shutil.copyfile(cfg['sequence'],front/'sequence.fasta')
@@ -158,5 +158,5 @@ def dm(cfg,output):
     if cfg.get('auto_hand'):
         from .hand_selection import copy_selected_dm
         return copy_selected_dm(cfg,output)
-    raise ValueError('P+ 自带引擎的密度修饰统一由 handdm v2 完成（--dm-engine handdm）；'
+    raise ValueError('P+ 自带引擎的密度修饰统一由 oasis-dm v2 完成（--dm-engine oasis-dm）；'
                      '外部密度修饰后端（RESOLVE/CCTBX、CCP4 dm）已全部移除')

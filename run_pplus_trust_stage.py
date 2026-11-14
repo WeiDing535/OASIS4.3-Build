@@ -30,9 +30,9 @@ def main():
         from phasebuild import bundled_pplus
         module=bundled_pplus
     if a.stage=='dm' and module is trust_workflow:
-        # P+ density-modifies with the in-tree handdm v2, which sad_pipeline runs
+        # P+ density-modifies with the in-tree oasis-dm v2, which sad_pipeline runs
         # through run_trace_feedback.py instead.
-        raise ValueError('P+ 两条流程的密度修饰由树内 handdm v2 完成（--dm-engine handdm），'
+        raise ValueError('P+ 两条流程的密度修饰由树内 oasis-dm v2 完成（--dm-engine oasis-dm），'
                          '没有可单独调用的内置 dm 阶段')
     getattr(module,a.stage)(cfg,out)
 

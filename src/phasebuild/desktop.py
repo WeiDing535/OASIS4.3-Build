@@ -24,29 +24,29 @@ from .jobs import Jobs
 STATUS_NAMES={'queued':'等待运行','running':'正在运行','stopping':'正在停止','cancelled':'已停止',
               'failed':'失败','success':'已完成','imported':'已导入（仅查看）','interrupted':'界面曾中断'}
 IMPORTED_NOTE='导入的既有结果：只读目录，不会重新运行；可查看曲线/表格、导出结果、保存模型。'
-METHODS=[('pplus_bundled','P+ 自带引擎（Phaser + handdm，推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
+METHODS=[('pplus_bundled','P+ 自带引擎（Phaser + oasis-dm，推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
          ('pplus_internal','内部 P+（实验性，不用于正式解析）'),
          ('likelihood','连续 SAD（只需 CCP4）'),('pplus','旧版直接法 P+（只需 CCP4）')]
 METHOD_NAMES=dict(METHODS)
 # Shown under the method radios; the internal chain is the one that must not be
 # mistaken for a validated route (see docs/NO_CCP4_REPLACEMENT.md).
 METHOD_HINTS={
- 'pplus_bundled':'标定配方：P+ 定相 + handdm v2 密度修饰 + Buccaneer/REFMAC，十案例 R-free 落在对照 ±5 点内。',
+ 'pplus_bundled':'标定配方：P+ 定相 + oasis-dm v2 密度修饰 + Buccaneer/REFMAC，十案例 R-free 落在对照 ±5 点内。',
  'pplus_trust':'外部对照：Phaser 做 SAD，P+ 只接密度修饰之后的相位。',
- 'pplus_internal':'不用 Phaser：SAD 似然在程序内部算，密度修饰用内置 handdm、建模与推荐配方相同。'
+ 'pplus_internal':'不用 Phaser：SAD 似然在程序内部算，密度修饰用内置 oasis-dm、建模与推荐配方相同。'
                   '代价是重原子不做精修：位点已是精修后的，两个最差案例只落后 Phaser 前端 0.3/1.9 点 R-free；'
                   '位点是原始 SHELXD 输出时要差 4 点以上。标为实验性，默认仍走推荐配方。',
- 'likelihood':'连续 SAD：不经过 P+，直接用似然法定相；密度修饰用内置 handdm，建模用 CCP4 的 Buccaneer/REFMAC，'
+ 'likelihood':'连续 SAD：不经过 P+，直接用似然法定相；密度修饰用内置 oasis-dm，建模用 CCP4 的 Buccaneer/REFMAC，'
                '所以只装一份 CCP4 就能跑完整条链（对标 SHELXC/D/E）。',
  'pplus':'旧版直接法 P+：保留用于复现历史结果，同样只需要 CCP4。'}
 PROTOCOLS=[('','不使用参数方案'),('pplus_w8_weight','P+ · Wang8＋精修权重搜索（标定配方）'),
            ('pplus_w8','P+ · Wang8'),('pplus_w14','P+ · Wang14'),('stable_w14','稳定化 P+ · Wang14')]
 RECIPES=[('pipeline','自带 Buccaneer/REFMAC'),('ccp4','外部 CCP4 流程'),('legacy','旧版逐轮流程')]
-# Density modification is not a user choice: handdm v2 is part of P+, and the
+# Density modification is not a user choice: oasis-dm v2 is part of P+, and the
 # window runs it unconditionally.  The tuple stays so saved records and tests can
 # still map a label to the one engine that exists.
-ENGINES=[('handdm','handdm v2（内置，随 P+ 运行）')]
-DM_ENGINE='handdm'
+ENGINES=[('oasis-dm','oasis-dm v2（内置，随 P+ 运行）')]
+DM_ENGINE='oasis-dm'
 PRIORS=[('dm_phifom','密度修饰相位 + 模型振幅'),('original_sad','原始 SAD 相位')]
 
 # key, title, kind, hint, options, only-methods
@@ -84,7 +84,7 @@ FIELD_SPECS=[
 # resources and the rare overrides wait behind “显示高级参数”.
 ESSENTIAL_GROUPS=[('输入文件',('sad','heavy','sequence','elements','wavelength','copies','output')),
                   ('P+ 定相',('phase_cycles','trust_kl','max_per_target')),
-                  ('handdm 密度修饰',('solvent_fraction','dm_cycles','feedback_cycles')),
+                  ('oasis-dm 密度修饰',('solvent_fraction','dm_cycles','feedback_cycles')),
                   ('Buccaneer / REFMAC',('rounds','cycles'))]
 # Fields that live in the 「运行模块」 box rather than under a parameter group.
 MODULE_FIELDS=('runtime',)
@@ -113,7 +113,7 @@ class Controller:
         return self.workflow.describe_plan(config)
 
     def fallback_notice(self, config):
-        """Red-line text for a run that fell back from handdm, else ''."""
+        """Red-line text for a run that fell back from oasis-dm, else ''."""
         from .sad_pipeline import fallback_notice
         return fallback_notice(config or {})
 
@@ -198,7 +198,7 @@ def stage_log_text(output):
 
     ``gui.log`` only carries the stage headers and the final report: every stage
     writes its own progress lines to ``<pipeline dir>/<stage id>.log`` and its
-    engines write deeper ones (``03_dm/cycle_02/handdm.log``,
+    engines write deeper ones (``03_dm/cycle_02/oasis_dm.log``,
     ``02_sad/hands/input_hand/pilot/buccaneer.log``, ...).  The log pane is
     where a run gets debugged, so it shows all of them, untruncated.
     """
@@ -288,7 +288,7 @@ class App:
         tk,ttk=self.tk,self.ttk
         bar=ttk.Frame(self.root,padding=(10,8));bar.pack(side='top',fill='x')
         ttk.Label(bar,text='OASIS4.3',font=('Helvetica',16,'bold')).pack(side='left')
-        ttk.Label(bar,text='单波长异常散射 → P+ 定相 + handdm 密度修饰 → Buccaneer / REFMAC（可选）',
+        ttk.Label(bar,text='单波长异常散射 → P+ 定相 + oasis-dm 密度修饰 → Buccaneer / REFMAC（可选）',
                   style='Hint.TLabel').pack(side='left',padx=(10,0),pady=(4,0))
         self.status=ttk.Label(bar,text='就绪',style='Status.TLabel')
         self.status.pack(side='right')
@@ -515,9 +515,9 @@ class App:
         modules=self._group('modules','运行模块（按本机 CCP4 检测结果默认勾选）',expanded=True)
         row=ttk.Frame(modules);row.pack(fill='x',pady=2)
         self.module_phase=self.tk.BooleanVar(value=True)
-        ttk.Checkbutton(row,text='模块 1 · P+ 定相 + handdm 密度修饰（必做）',variable=self.module_phase,
+        ttk.Checkbutton(row,text='模块 1 · P+ 定相 + oasis-dm 密度修饰（必做）',variable=self.module_phase,
                         state='disabled').pack(side='left')
-        # Density modification is part of P+, not an add-on: handdm v2 ships with
+        # Density modification is part of P+, not an add-on: oasis-dm v2 ships with
         # the program, so there is no switch and no engine choice to make.
         row=ttk.Frame(modules);row.pack(fill='x',pady=(2,0))
         self.module_build=self.tk.BooleanVar(value=True)
@@ -556,8 +556,8 @@ class App:
         for key in ESSENTIAL_GROUPS[1][1]:
             self._field(phase,specs[key])
 
-        dm=self._group('dm','② handdm 密度修饰参数（P+ 的一部分，必做）',expanded=False)
-        ttk.Label(dm,text='密度修饰引擎：handdm v2（内置，随 P+ 一起运行，不可关闭）。'
+        dm=self._group('dm','② oasis-dm 密度修饰参数（P+ 的一部分，必做）',expanded=False)
+        ttk.Label(dm,text='密度修饰引擎：oasis-dm v2（内置，随 P+ 一起运行，不可关闭）。'
                           '直方图库随程序提供，不需要 CCP4 的任何数据文件。',
                   style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0),pady=(2,0))
         for key in ESSENTIAL_GROUPS[2][1]:
@@ -572,7 +572,7 @@ class App:
         self.unverified_hand=self.tk.BooleanVar(value=False)
         self.unverified_hand_box=ttk.Checkbutton(row,text='证据不足也按输入手继续（结果标注未验证）',variable=self.unverified_hand)
         self.unverified_hand_box.pack(side='left')
-        ttk.Label(build,text='双手性：勾选时 Phaser 按输入手与反向手各定一次相、各做一轮 handdm 密度修饰与'
+        ttk.Label(build,text='双手性：勾选时 Phaser 按输入手与反向手各定一次相、各做一轮 oasis-dm 密度修饰与'
                              '测序试建，按工作集唯一测序残基数选手（不看 R-free）；不勾只算输入重原子文件'
                              '给出的手性，时间省一半。',
                   style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
@@ -690,10 +690,10 @@ class App:
         self._modules_changed()
         if initial and self.method.get()=='pplus_bundled' and not self._p_plus_ready(resolved or typed):
             # Say it before the user presses 开始: P+ needs phaser (and, when the
-            # model stage is on, cbuccaneer + refmac5).  handdm ships in-tree.
+            # model stage is on, cbuccaneer + refmac5).  oasis-dm ships in-tree.
             located=resolved or typed or '默认运行时'
             self._warn('这台机器（%s）缺 P+ 需要的程序（phaser / cbuccaneer / refmac5 之一）。'
-                       '点“开始”会自动改用“连续 SAD + handdm + Buccaneer/REFMAC”，'
+                       '点“开始”会自动改用“连续 SAD + oasis-dm + Buccaneer/REFMAC”，'
                        '只依赖 CCP4 自带程序。'%located)
 
     def _sync_run_resources(self):
@@ -763,16 +763,16 @@ class App:
             if located:lines.append('CCP4：'+located)
         else:
             lines.append('未检测到 CCP4（cbuccaneer、refmac5），模块 2 保持关闭。')
-            lines.append('模块 1 仍会输出相位、FOM 与密度修饰后的 MTZ（handdm 内置）；'
+            lines.append('模块 1 仍会输出相位、FOM 与密度修饰后的 MTZ（oasis-dm 内置）；'
                          '已装 CCP4 但不在默认位置时，在上方“CCP4 位置”里填根目录或 ccp4.setup 路径，再点“重新检测”。')
         if located:
             if self._p_plus_ready(located):
-                lines.append('P+ 全链可用：Phaser 定相 + handdm 密度修饰 + cbuccaneer/refmac5 建模。')
+                lines.append('P+ 全链可用：Phaser 定相 + oasis-dm 密度修饰 + cbuccaneer/refmac5 建模。')
             else:
                 lines.append('这台机器缺 P+ 需要的程序（phaser / cbuccaneer / refmac5 之一）：'
-                             '点“开始”会自动改用“连续 SAD + handdm + Buccaneer/REFMAC”。')
+                             '点“开始”会自动改用“连续 SAD + oasis-dm + Buccaneer/REFMAC”。')
         if not self.module_build.get():
-            lines.append('模块 2 已关闭：停在 handdm 密度修饰后的相位与地图。')
+            lines.append('模块 2 已关闭：停在 oasis-dm 密度修饰后的相位与地图。')
         self.module_hint.set('\n'.join(lines))
 
     def _method_changed(self,*_):
@@ -783,7 +783,7 @@ class App:
         hint=getattr(self,'method_hint',None)
         if hint is not None:
             hint.set(METHOD_HINTS.get(method,''))
-        # Density modification is always handdm; there is no engine to pin.
+        # Density modification is always oasis-dm; there is no engine to pin.
         # 双手性 is a P+ frontend feature (Phaser phases both enantiomorphs); the
         # other routes take the hand from the input heavy-atom file, so the box
         # is disabled there instead of being silently ignored by collect().
@@ -824,7 +824,7 @@ class App:
         prior=dict(self.prior_values).get(values.get('refinement_prior'),None)
         if prior:
             self.prior.set(prior)
-        # Density modification is always handdm; old records naming another
+        # Density modification is always oasis-dm; old records naming another
         # engine simply map onto it.
 
         # Module 2/3 start from what this machine has; a reused record keeps its
@@ -934,7 +934,7 @@ class App:
 
     def _p_plus_ready(self,runtime):
         """True when this runtime has what P+ needs: Phaser, plus the builder when
-        the model stage is on.  Density modification is handdm and ships in-tree,
+        the model stage is on.  Density modification is oasis-dm and ships in-tree,
         so no CCP4 program is involved there."""
         if not runtime:return False
         needed=['phaser']
@@ -949,7 +949,7 @@ class App:
         """Fall back to the route a bare CCP4 can run, or None if it cannot.
 
         Continuous SAD writes the same observation likelihood the bundled route
-        does, so Phaser is not needed at all: handdm (in-tree) modifies the
+        does, so Phaser is not needed at all: oasis-dm (in-tree) modifies the
         density and Buccaneer/REFMAC build the model.  This is the
         SHELXC/D/E-equivalent chain and it needs nothing outside a stock CCP4.
         """
@@ -963,7 +963,7 @@ class App:
         engine=DM_ENGINE
         self.method.set('likelihood');self._method_changed()
         self._location_warning=('这台机器（%s）缺 P+ 需要的 phaser，P+ 定相跑不了；'
-                                '本次改用“连续 SAD + handdm 密度修饰 + Buccaneer/REFMAC”。'%runtime)
+                                '本次改用“连续 SAD + oasis-dm 密度修饰 + Buccaneer/REFMAC”。'%runtime)
         self._refresh_module_hint()
         self._pending_warning=self._location_warning
         # Patch the collected config instead of re-reading the form: the caller
@@ -980,7 +980,7 @@ class App:
         P+ needs phaser from CCP4 (plus cbuccaneer/refmac5 when the model stage
         is on); when one is missing the run switches to 连续 SAD (Phaser is not
         needed there) and the red bar names the switch.  Density modification is
-        handdm and always on, so an old record naming another engine is
+        oasis-dm and always on, so an old record naming another engine is
         corrected here rather than failing after Phasing.
         """
         if config.get('method') in ('pplus_trust','pplus_bundled') and config.get('dm_engine')!=DM_ENGINE:

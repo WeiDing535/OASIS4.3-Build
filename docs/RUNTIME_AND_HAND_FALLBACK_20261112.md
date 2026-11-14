@@ -2,16 +2,16 @@
 
 > **历史记录。** 本文写作时密度修饰由一个外部引擎完成；该引擎已于 2026-11-14
 > 从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），密度修饰
-> 现在固定由树内 handdm v2 完成。文中的数字保留作当时记录，按本文命令重跑
+> 现在固定由树内 oasis-dm v2 完成。文中的数字保留作当时记录，按本文命令重跑
 > 会得到不同数值；`--dm-mask-radius`、`--dm-anisotropy` 等旧引擎专属选项也
 > 已删除。
 > **历史记录，部分内容已被取代（2026-11-13）。** 本文提到的
 > `bundled_pplus.density_root()/require_density()`、`PHASEBUILD_DENSITY`、
 > `desktop._density_runtime_fix()/_apply_density_fix()` 与「包内密度引擎」
 > 表单字段都随 `density/` 一起删除。密度修饰随后先统一交给 CCP4 的外部引擎（已删除），
-> **2026-11-14 起又换成随程序提供的 `handdm v2`**（P+ 的必做部分，界面无开关、
+> **2026-11-14 起又换成随程序提供的 `oasis-dm v2`**（P+ 的必做部分，界面无开关、
 > 无引擎选择，也不需要 `hist.lib`）；双手性判别也不再依赖它。
-> 见 `CHANGELOG.md` 的 Unreleased、`docs/HANDDM_V2_REPLACEMENT_20261114.md` 与
+> 见 `CHANGELOG.md` 的 Unreleased、`docs/OASIS_DM_REPLACEMENT_20261114.md` 与
 > `docs/INSTALL_BUNDLE.md`。下文保留当时的失败分析与实测数字。
 
 本轮起因：GUI 提交的一个作业（`runs/oasis_run`，旧引擎时代的作业记录，目录已随引擎一起清理）报

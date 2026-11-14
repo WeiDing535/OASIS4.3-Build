@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-handdm -- a from-scratch implementation of macromolecular density modification
+oasis-dm -- a from-scratch implementation of macromolecular density modification
           (phase improvement), functionally close to CCP4 ``dm``.
 
 What is implemented here (all the density-modification logic is our own code):
@@ -27,7 +27,7 @@ References that drove the design are collected in research/theory.md and
 research/ccp4_local.md.  This program deliberately calls no external program.
 
 Usage:
-  /opt/miniconda3/bin/python src/handdm.py --mtzin CASE.mtz --mtzout OUT.mtz \
+  /opt/miniconda3/bin/python src/oasis_dm_core.py --mtzin CASE.mtz --mtzout OUT.mtz \
       --fo FOBS --phib PHIB --fom FOM --free FreeR --solc 0.5 --cycles 5 \
       --stats results/case_stats.json
 """
@@ -379,7 +379,7 @@ class DensityModifier:
         m = gemmi.Mtz(with_base=True)
         m.spacegroup = self.sg
         m.cell = self.cell
-        m.add_dataset('handdm')
+        m.add_dataset('oasis-dm')
         m.add_column('FBEST', 'F')
         m.add_column('PHIBEST', 'P')
         data = np.column_stack([self.hkl.astype(np.float64),
@@ -684,7 +684,7 @@ class DensityModifier:
             out = gemmi.Mtz(with_base=True)
             out.spacegroup = self.sg
             out.cell = self.cell
-            out.add_dataset('handdm')
+            out.add_dataset('oasis-dm')
             for c in self.mtz.columns[3:]:
                 out.add_column(c.label, c.type)
             for label, typ in OUT_COLUMNS:
@@ -731,7 +731,7 @@ class DensityModifier:
 
 def build_parser():
     p = argparse.ArgumentParser(
-        description='handdm: from-scratch density modification (dm-like)')
+        description='oasis-dm: from-scratch density modification (dm-like)')
     p.add_argument('--mtzin', required=True)
     p.add_argument('--mtzout', required=True)
     p.add_argument('--fo', default='FOBS')

@@ -23,7 +23,7 @@ def main():
   if dst.exists():
    if sha(src)!=sha(dst):raise ValueError('Conflicting native library: '+name)
   else:dst.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,dst)
- # No density/ tree: P+ density-modifies with the in-tree handdm v2 engine, so
+ # No density/ tree: P+ density-modifies with the in-tree oasis-dm v2 engine, so
  # the bundle holds no Phenix-derived or external density-modification component.
  programs={name:(runtime/'bin'/name).is_file() for name in ('phaser','cbuccaneer','refmac5')}
  if not all(programs.values()):raise RuntimeError('Runtime is missing P+ programs: '+', '.join(sorted(k for k,v in programs.items() if not v)))
@@ -37,9 +37,9 @@ def main():
  run=subprocess.run([str(out/'oasis'),'doctor'],capture_output=True,text=True,timeout=120)
  (out/'DOCTOR.json').write_text(run.stdout)
  if run.returncode:raise RuntimeError('Bundle doctor failed: '+run.stderr)
- report=json.loads((out/'bundle.json').read_text());report.update(default_method='pplus_bundled',default_execution='pplus_w8_weight',GUI_portfolio=False,automatic_fpp=True,explicit_wavelength_required=True,Phenix_bundled=False,Phenix_derived_components_bundled=False,full_Phenix_suite_bundled=False,bundled_external_engines=['Phaser','Buccaneer','REFMAC'],ccp4_programs=programs,scientific_scope='Bundled P+ with in-tree handdm v2 density modification, sequence cleanup and work-only geometry weight search; theoretical fpp from elements and explicit mandatory wavelength',engine_manifest_SHA256=sha(runtime/'runtime_manifest.json'),doctor=json.loads(run.stdout))
+ report=json.loads((out/'bundle.json').read_text());report.update(default_method='pplus_bundled',default_execution='pplus_w8_weight',GUI_portfolio=False,automatic_fpp=True,explicit_wavelength_required=True,Phenix_bundled=False,Phenix_derived_components_bundled=False,full_Phenix_suite_bundled=False,bundled_external_engines=['Phaser','Buccaneer','REFMAC'],ccp4_programs=programs,scientific_scope='Bundled P+ with in-tree oasis-dm v2 density modification, sequence cleanup and work-only geometry weight search; theoretical fpp from elements and explicit mandatory wavelength',engine_manifest_SHA256=sha(runtime/'runtime_manifest.json'),doctor=json.loads(run.stdout))
  (out/'bundle.json').write_text(json.dumps(report,indent=2)+'\n')
- (out/'使用说明.txt').write_text('OASIS4.3 '+report['version']+' 本机授权评估包（macOS Intel）\n双击 OASIS4.3.command，保持目录完整。无需另装 Python、Phenix 或 CCP4。\n包含第三方 Phaser、Buccaneer、REFMAC 及其运行库，并非全部算法由 OASIS 原创。密度修饰由随程序的 handdm v2 完成，包内不含 Phenix、Phenix 派生组件或外部密度修饰程序。\n新建 GUI 任务仅运行固定 P+ Wang8＋工作集精修权重搜索；填写元素和必填实验波长，程序自动计算理论 f″。\n请填写实验波长，输入原始工作/自由集、序列和重原子子结构。不会自动猜测波长或输入目标蛋白模型。\n仅供本机授权研究评估，公开再分发条件尚未落实。单个开发案例成功不保证其他样品均达到相同 Rfree。\n')
+ (out/'使用说明.txt').write_text('OASIS4.3 '+report['version']+' 本机授权评估包（macOS Intel）\n双击 OASIS4.3.command，保持目录完整。无需另装 Python、Phenix 或 CCP4。\n包含第三方 Phaser、Buccaneer、REFMAC 及其运行库，并非全部算法由 OASIS 原创。密度修饰由随程序的 oasis-dm v2 完成，包内不含 Phenix、Phenix 派生组件或外部密度修饰程序。\n新建 GUI 任务仅运行固定 P+ Wang8＋工作集精修权重搜索；填写元素和必填实验波长，程序自动计算理论 f″。\n请填写实验波长，输入原始工作/自由集、序列和重原子子结构。不会自动猜测波长或输入目标蛋白模型。\n仅供本机授权研究评估，公开再分发条件尚未落实。单个开发案例成功不保证其他样品均达到相同 Rfree。\n')
  app=out/'app';(app/'app_manifest.json').write_text(json.dumps({'files':[r for r in manifest(app) if r['relative_path']!='app_manifest.json']},indent=2)+'\n')
  print(json.dumps({'status':'assembled','bundle':str(out)},indent=2))
 if __name__=='__main__':main()

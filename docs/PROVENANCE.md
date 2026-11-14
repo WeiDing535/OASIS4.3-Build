@@ -8,4 +8,4 @@ The source GUI is a loopback web application. Python packages (Gemmi, NumPy, Sci
 
 The earlier OASIS4.3-GUI source and v0.1 release remain in their original repository. OASIS4.3-Build is published separately and retains PhaseBuild as its internal package identity.
 
-The subsequent unified development integration adds an unchanged `oasis_py` numerical-source snapshot and new orchestration/UI adapters. The original source-copy equivalence statement above refers to the first publication baseline, not later interface additions. Upstream hashes and one explicitly documented test-only portability patch are in `vendor/oasis43`.
+The subsequent unified development integration adds an unchanged `oasis_py` numerical-source snapshot and new orchestration/UI adapters. The original source-copy equivalence statement above refers to the first publication baseline, not later interface additions. The hash-locked upstream snapshot that used to record those hashes (`vendor/oasis43/`) was removed on 2026-11-14 along with the retired density-modification engine; the numerical source it described is unchanged.

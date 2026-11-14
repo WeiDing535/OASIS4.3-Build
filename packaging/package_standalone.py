@@ -2,7 +2,7 @@
 
 The result runs without any separately installed CCP4 or Phenix: the bundled
 runtime carries Phaser, Buccaneer and REFMAC, density modification is the
-in-tree handdm v2, and the bundled Python carries NumPy, SciPy and Gemmi. Sources are never modified and the destination
+in-tree oasis-dm v2, and the bundled Python carries NumPy, SciPy and Gemmi. Sources are never modified and the destination
 must be a new path.
 """
 import argparse
@@ -19,7 +19,7 @@ import zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-# Density modification is handdm v2 and ships in-tree, so the runtime needs no
+# Density modification is oasis-dm v2 and ships in-tree, so the runtime needs no
 # external density-modification program at all.
 ENGINES=('phaser','cbuccaneer','refmac5')
 HASH_CHUNK=1<<20
@@ -95,7 +95,7 @@ USAGE='''OASIS4.3 独立安装包
 推荐的单波长反常散射（SAD）全流程：
   ./OASIS4.3.command run_sad_to_model.py --sad SAD.mtz --native NATIVE.mtz \\
      --sequence SEQ.fasta --heavy HEAVY.pdb --wavelength 0.97918 --elements Se \\
-     --method pplus_bundled --dm-engine handdm --feedback-cycles 2 \\
+     --method pplus_bundled --dm-engine oasis-dm --feedback-cycles 2 \\
      --dm-solvent 0.5 --building-recipe pipeline --output NEW_DIR
 
 ASU 拷贝数默认自动判定（--copies auto）：先读 RCSB FASTA 头里的 Chains A, B, C，
@@ -105,7 +105,7 @@ ASU 拷贝数默认自动判定（--copies auto）：先读 RCSB FASTA 头里的
 - 输出总是写入新目录，不覆盖已有结果。
 - 每个案例的关系上限（--max-per-target）过大时程序会提示内存预算不足，按提示调小即可。
 - 结果取舍只使用工作集指标（工作集 R 因子）；R-free 仅用于最终独立评估。
-- 密度修饰由随程序提供的 handdm v2 完成，包内不需要任何外部密度修饰程序。
+- 密度修饰由随程序提供的 oasis-dm v2 完成，包内不需要任何外部密度修饰程序。
 - 这是本机评估包：外部引擎 Buccaneer/REFMAC/Phaser 的公开再分发条件尚未落实，
   不代表可以公开发布。详见 runtime/THIRD_PARTY_NOTICES.md 与 runtime/share/licenses。
 '''
@@ -155,15 +155,15 @@ def verify_bundle(output):
         str(output/'app/src'),str(output)],cwd=str(output),env=env,capture_output=True,text=True,timeout=120)
     report['desktop_project']=project_check.returncode==0
     if not report['desktop_project']:raise RuntimeError('Bundled desktop cannot locate its scripts: '+(project_check.stderr or project_check.stdout)[:800])
-    # Density modification must resolve to the in-tree handdm, never a host copy.
+    # Density modification must resolve to the in-tree oasis-dm, never a host copy.
     locate=subprocess.run([str(python),'-c',
-        "import sys;sys.path.insert(0,sys.argv[1]);from phasebuild import handdm_dm;"
-        "print(handdm_dm.locate())",
+        "import sys;sys.path.insert(0,sys.argv[1]);from phasebuild import oasis_dm;"
+        "print(oasis_dm.locate())",
         str(output/'app'/'src')],env=env,capture_output=True,text=True,timeout=120)
     resolved=locate.stdout.strip()
-    report['handdm_resolved']=resolved
+    report['oasis_dm_resolved']=resolved
     if not resolved or not Path(resolved).is_file():
-        raise RuntimeError('Bundled handdm did not resolve: '+(resolved or locate.stderr[:400]))
+        raise RuntimeError('Bundled oasis-dm did not resolve: '+(resolved or locate.stderr[:400]))
     return report
 
 

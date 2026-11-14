@@ -2,10 +2,10 @@
 
 > **历史记录。** 本文写作时密度修饰由一个外部引擎完成；该引擎已于 2026-11-14
 > 从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），密度修饰
-> 现在固定由树内 handdm v2 完成。文中的数字保留作当时记录，按本文命令重跑
+> 现在固定由树内 oasis-dm v2 完成。文中的数字保留作当时记录，按本文命令重跑
 > 会得到不同数值；`--dm-mask-radius`、`--dm-anisotropy` 等旧引擎专属选项也
 > 已删除。
-> **另注（2026-11-14 之后）。** 界面现在只有两个模块，密度修饰是 P+ 的必做部分（树内 `handdm v2`），没有引擎选择；本文这类旧引擎时代的数字只作记录，不能再逐点复现。当前行为见 `docs/HANDDM_V2_REPLACEMENT_20261114.md`、`docs/INSTALL_BUNDLE.md`。
+> **另注（2026-11-14 之后）。** 界面现在只有两个模块，密度修饰是 P+ 的必做部分（树内 `oasis-dm v2`），没有引擎选择；本文这类旧引擎时代的数字只作记录，不能再逐点复现。当前行为见 `docs/OASIS_DM_REPLACEMENT_20261114.md`、`docs/INSTALL_BUNDLE.md`。
 
 ## 1. 问题定位
 
@@ -56,7 +56,7 @@ Buccaneer 从这张图能建出的残基数由旧流程的 56 个增加到 147�
 
 ## 3. 十套案例结果
 
-### 3.1 产品流水线端到端结果（单条命令，`--dm-engine handdm --building-recipe pipeline`）
+### 3.1 产品流水线端到端结果（单条命令，`--dm-engine oasis-dm --building-recipe pipeline`）
 
 固定协议：工作集关系上限按案例固定（5HHK 13、6HF7 24、其余 48），溶剂 0.50，掩膜半径 3.0，
 各向异性校正。每套跑 feedback=1 与 feedback=2 两个固定终点，按**预先固定的工作集 R 因子**
@@ -106,7 +106,7 @@ Buccaneer 从这张图能建出的残基数由旧流程的 56 个增加到 147�
 ```
 run_sad_to_model.py --sad ... --native ... --sequence ... --heavy ... \
   --method pplus_bundled --input-columns --wavelength 0.97918 --elements Se \
-  --dm-engine handdm --feedback-cycles 2 --dm-solvent 0.5 \
+  --dm-engine oasis-dm --feedback-cycles 2 --dm-solvent 0.5 \
   --trust-wang-radius 8 --max-per-target 48 --building-recipe pipeline
 ```
 

@@ -119,10 +119,10 @@ def main(argv=None):
                      for k,v in doctor.get('paths',{}).items()}
     (out/'DOCTOR.json').write_text(json.dumps(doctor,indent=2)+'\n')
     engines=bundled_engines(out)
-    # Density modification is the in-tree handdm v2 engine, so a P+ bundle only
+    # Density modification is the in-tree oasis-dm v2 engine, so a P+ bundle only
     # needs Phaser plus the model-building programs.
     pplus='phaser' in engines
-    scope=('Bundled Phaser SAD -> P+ -> handdm v2 density modification -> Buccaneer/REFMAC. '
+    scope=('Bundled Phaser SAD -> P+ -> oasis-dm v2 density modification -> Buccaneer/REFMAC. '
         'No external density-modification program is part of this assembly.') if pplus else \
         'Internal approximate likelihood and DM. External-branch SEC17 Rfree27.42% is not claimed for this route.'
     report={'version':tomllib.loads((ROOT/'pyproject.toml').read_text())['tool']['oasis43']['version'],'platform':'macOS Intel x86_64','status':'assembled',
@@ -136,7 +136,7 @@ def main(argv=None):
         'scientific_scope':scope}
     (out/'bundle.json').write_text(json.dumps(report,indent=2)+'\n')
     engine_text='、'.join(ENGINE_LABELS[n] for n in ENGINE_LABELS if n in engines)
-    dm_text='handdm v2 密度修饰' if pplus else '内置 MLHL 密度修饰'
+    dm_text='oasis-dm v2 密度修饰' if pplus else '内置 MLHL 密度修饰'
     (out/'使用说明.txt').write_text('OASIS4.3 本机免安装套件评估包（macOS Intel）\n\n双击 OASIS4.3.command；保持整个目录完整。无需另装 Python、Phenix 或整套 CCP4。\n随包引擎：'+engine_text+'；密度修饰：'+dm_text+'。内部 SAD/P+ 使用随包 NumPy/SciPy/Gemmi。不是全部算法由 OASIS 原创。\nPhenix 对照模式在此包中禁止调用。数据文件由用户提供；运行写入新目录。\n这是由本机已有授权组件构建的本机评估包；公开再分发条件尚未落实，不是公开发行包。\n')
     print(json.dumps({'bundle':str(out),'status':report['status'],'doctor':'passed'},indent=2))
 

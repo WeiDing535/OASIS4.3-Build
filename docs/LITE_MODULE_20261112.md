@@ -1,10 +1,10 @@
-# 精简版：只做模块 1（P+ 定相 + handdm 密度修饰）
+# 精简版：只做模块 1（P+ 定相 + oasis-dm 密度修饰）
 
 > **2026-11-14 起界面只有两个模块，且旧密度修饰引擎已从程序中删除。** 密度修饰
-> 不再是可勾选的独立模块，而是 P+ 内置的 `handdm v2`，属于模块 1、必做、没有
+> 不再是可勾选的独立模块，而是 P+ 内置的 `oasis-dm v2`，属于模块 1、必做、没有
 > 开关也没有引擎下拉框；模块 2 现在是 Buccaneer/REFMAC。本文保留 11-12 那天的
 > 模块编号、旧引擎数字与检测顺序作为历史记录（文中那条旧复现命令已不能运行），凡与当前界面冲突处以本节说明为准；当前行为见
-> `docs/INSTALL_BUNDLE.md`、`docs/HANDDM_V2_REPLACEMENT_20261114.md`。
+> `docs/INSTALL_BUNDLE.md`、`docs/OASIS_DM_REPLACEMENT_20261114.md`。
 
 这一页回答两个问题：**十案例是不是模块 1 单独跑出来的**，以及**精简版（只留模块 1）能交付什么**。界面怎么排、CCP4 怎么检测，也写在同一页。
 
@@ -36,7 +36,7 @@
 
 | 模块 | 程序 | 依赖 | 可关闭 |
 | --- | --- | --- | --- |
-| ① P+ 定相 + handdm 密度修饰 | 包内 Phaser 前端 + P+ 信任域更新 + 树内 `handdm v2` | 只要包内运行时 | 否（必做） |
+| ① P+ 定相 + oasis-dm 密度修饰 | 包内 Phaser 前端 + P+ 信任域更新 + 树内 `oasis-dm v2` | 只要包内运行时 | 否（必做） |
 | ② Buccaneer 建模 + REFMAC 精修 | `cbuccaneer` + `refmac5` | 本机 CCP4 | 是 |
 
 - 关掉 ②：流程在 `03_dm` 结束，输出 `02_sad/experimental.mtz`（`H K L PHIB FOM PPLUS`）、`observations.mtz` 和密度修饰后的 `03_dm/map_phases.mtz`（`FWT/PHWT/HL*`），报告里 `completed` 到 `dm` 为止。密度修饰本身关不掉。
@@ -46,7 +46,7 @@
 命令行写法：
 
 ```
-python run_sad_to_model.py --no-build-model ...  # 界面上的「只跑模块 1」：P+ + handdm
+python run_sad_to_model.py --no-build-model ...  # 界面上的「只跑模块 1」：P+ + oasis-dm
 python run_sad_to_model.py --lite ...            # 诊断：连密度修饰也跳过，只到 P+ 定相
 python run_sad_to_model.py --no-dm-enabled ...   # 同 --lite 的密度修饰部分，显式写出来
 ```
@@ -58,10 +58,10 @@ python run_sad_to_model.py --no-dm-enabled ...   # 同 --lite 的密度修饰部
 表单自上而下：
 
 1. **任务名称**
-2. **运行模块（按本机 CCP4 检测结果默认勾选）**：模块 1（P+ 定相 + handdm 密度修饰）固定勾选并置灰；模块 2（Buccaneer/REFMAC）一个复选框，下面依次是「CCP4 位置（可选）」——留空用包内运行时，装在其它的地方时填安装根目录或 `ccp4.setup` / bashrc 的路径——、这一栏的说明、「重新检测 CCP4」按钮和一行检测结论。
+2. **运行模块（按本机 CCP4 检测结果默认勾选）**：模块 1（P+ 定相 + oasis-dm 密度修饰）固定勾选并置灰；模块 2（Buccaneer/REFMAC）一个复选框，下面依次是「CCP4 位置（可选）」——留空用包内运行时，装在其它的地方时填安装根目录或 `ccp4.setup` / bashrc 的路径——、这一栏的说明、「重新检测 CCP4」按钮和一行检测结论。
 3. **输入文件**：SAD MTZ、重原子 PDB、序列、元素、波长、份数、新输出目录。
 4. **① P+ 定相参数**：P+ 后端单选、P+ 参数方案、定相迭代周期、每反射 KL 上限、每个目标的关系上限。
-5. **② handdm 密度修饰参数（P+ 的一部分，必做）**：一段固定说明（引擎 handdm v2、不可关闭、不需要 `hist.lib`）、溶剂比例、密度修饰周期、trace 反馈轮数。没有引擎下拉框，也没有「掩膜过滤半径」（那是已删除的外部引擎的参数）。
+5. **② oasis-dm 密度修饰参数（P+ 的一部分，必做）**：一段固定说明（引擎 oasis-dm v2、不可关闭、不需要 `hist.lib`）、溶剂比例、密度修饰周期、trace 反馈轮数。没有引擎下拉框，也没有「掩膜过滤半径」（那是已删除的外部引擎的参数）。
 6. **③ Buccaneer 建模 + REFMAC 精修参数**：自动判手、Buccaneer/REFMAC 轮数、每轮 REFMAC 周期、构建配方、精修相位来源。
 7. **显示高级参数**（默认收起）：输入细节、P+ 掩膜与采样、运行资源与终点组合。
 
@@ -86,13 +86,13 @@ python run_sad_to_model.py --no-dm-enabled ...   # 同 --lite 的密度修饰部
 
 | 模块 | 判据 |
 | --- | --- |
-| ① handdm 密度修饰 | 不需要检测：树内 `handdm v2`，随程序提供，永远可用 |
+| ① oasis-dm 密度修饰 | 不需要检测：树内 `oasis-dm v2`，随程序提供，永远可用 |
 | ② Buccaneer/REFMAC | `cbuccaneer` 或 `buccaneer` **且** `refmac5` 都可执行 |
 
 结论直接写在那行提示里：
 
 - 找到：模块 2 默认勾选，提示"已检测到 CCP4：模块 2（建模与精修）默认勾选，可随时取消。"
-- 没找到：模块 2 关闭并置灰，提示"未检测到 CCP4：只做模块 1（P+ 定相 + handdm 密度修饰），输出相位/FOM/MTZ。"，第二行说明装好 CCP4 或设好 `CCP4`/`CBIN` 后点「重新检测」。
+- 没找到：模块 2 关闭并置灰，提示"未检测到 CCP4：只做模块 1（P+ 定相 + oasis-dm 密度修饰），输出相位/FOM/MTZ。"，第二行说明装好 CCP4 或设好 `CCP4`/`CBIN` 后点「重新检测」。
 - 外部密度修饰程序不参与检测：程序内已没有它，检测只看 `cbuccaneer`/`refmac5`。
 
 重新用"沿用参数"载入一条旧记录时，记录里的开关优先；但如果记录要求一个本机现在没有的模块，复选框会被压回关闭状态——不会留一个点了必然失败的勾。
@@ -110,7 +110,7 @@ python run_sad_to_model.py --no-dm-enabled ...   # 同 --lite 的密度修饰部
 CCP4 自带的 `phaser` 就能当 P+ 的前端，所以一个完整的 CCP4 安装足以跑完整条链。实测（3O2E，本机 `/Applications/ccp4-9`）：
 
 - 精简版 `--runtime /Applications/ccp4-9`：5763 反射、mean FOM 0.482，与包内运行时逐位一致；
-- 完整链同一 `--runtime`：P+ → handdm 密度修饰 → 2 轮 trace 反馈 → Buccaneer/REFMAC 全部从 `/Applications/ccp4-9/bin` 启动并跑通（见 4.2）。
+- 完整链同一 `--runtime`：P+ → oasis-dm 密度修饰 → 2 轮 trace 反馈 → Buccaneer/REFMAC 全部从 `/Applications/ccp4-9/bin` 启动并跑通（见 4.2）。
 
 代价是要求这个安装"什么都有"：若填的外部 CCP4 缺 `bin/phaser`，P+ 会直接报"P+ 引擎缺失：…/bin/phaser"，并提示清空该栏、改回包内运行时。
 
@@ -149,12 +149,12 @@ PYTHONPATH=src .conda-unified/bin/python run_sad_to_model.py --lite \
 - 产物 `02_sad/experimental.mtz`：5763 个反射、分辨率 1.95 Å、列 `H K L PHIB FOM PPLUS`、mean FOM 0.482；
 - 与十案例同一条路径的 `02_sad/experimental.mtz` 逐位相同（图相关同为 0.123），说明精简版没有偷偷改变模块 1 的行为。
 
-耗时：该案例约 2 分钟（那是 `--lite`：只做 Phaser 前端 + P+ 更新，不跑密度修饰和建模。界面上的模块 1 现在含 handdm 的 12 轮密度修饰，胰岛素 2.1 Å 的实测是每轮约 5 s、3 轮 16.6 s，见 `docs/HANDDM_V2_REPLACEMENT_20261114.md`）。
+耗时：该案例约 2 分钟（那是 `--lite`：只做 Phaser 前端 + P+ 更新，不跑密度修饰和建模。界面上的模块 1 现在含 oasis-dm 的 12 轮密度修饰，胰岛素 2.1 Å 的实测是每轮约 5 s、3 轮 16.6 s，见 `docs/OASIS_DM_REPLACEMENT_20261114.md`）。
 
 ## 6. 限制
 
 - 精简版**没有模型、没有 R-free、没有逐轮精修记录**，不能拿来做"结构解析完成"的验收；验收指标只有相位/FOM/图相关。
-- 没有本机 CCP4 时，模块 1 仍可运行（Phaser 前端在包内运行时里，密度修饰是树内 handdm），但模块 2 不可用；`pplus_bundled` 本身需要包内运行时，缺运行时的裸 Python 环境只能走 `pplus_internal`（实验性）。
+- 没有本机 CCP4 时，模块 1 仍可运行（Phaser 前端在包内运行时里，密度修饰是树内 oasis-dm），但模块 2 不可用；`pplus_bundled` 本身需要包内运行时，缺运行时的裸 Python 环境只能走 `pplus_internal`（实验性）。
 - 十案例的 `endpoint_*` 目录都是三段链的产物，精简版不复现它们；精简版的对照物是各案例的 `02_sad/experimental.mtz`。
 - 本页所有数字都来自 macOS Intel 运行时；Apple Silicon 需要 arm64 的 CCP4。
 

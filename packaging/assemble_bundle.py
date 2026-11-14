@@ -87,10 +87,6 @@ def main(argv=None):
     shutil.copytree(ROOT / 'packaging', app / 'packaging',
                     ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     shutil.copytree(ROOT / 'docs', app / 'docs')
-    provenance = app / 'vendor/oasis43'
-    provenance.mkdir(parents=True)
-    for name in ['UPSTREAM.json','TEST_PATCHES.md','LICENSE','AUTHORS.md']:
-        shutil.copy2(ROOT / 'vendor/oasis43' / name, provenance / name)
     files = [{'relative_path': str(path.relative_to(app)), 'sha256': digest(path),
               'bytes': path.stat().st_size} for path in sorted(app.rglob('*')) if path.is_file()]
     (app / 'app_manifest.json').write_text(json.dumps({'distribution_status': 'local-evaluation',

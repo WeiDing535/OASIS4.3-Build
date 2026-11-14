@@ -98,10 +98,10 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cyc
         cmbwt=0.4, holdout=0.05, hist_lib=None):
     """Iterate density modification and work-only tracing; persist every cycle.
 
-    Density modification is the in-tree handdm v2 engine, always: there is no
+    Density modification is the in-tree oasis-dm v2 engine, always: there is no
     engine switch any more.
     """
-    from . import handdm_dm as engine
+    from . import oasis_dm as engine
     out=Path(output);out.mkdir(parents=True,exist_ok=True)
     history=[]
     model=None
@@ -135,14 +135,14 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cyc
         history.append(row)
     final=out/'map_phases.mtz'
     merge_phase_map(merged,dm_path,final)
-    report={'engine':'handdm-v2-trace-feedback',
+    report={'engine':'oasis-dm-v2-trace-feedback',
         'history':history,'final_map':str(final),
         'work_only':True,'free_reflections_in_map':0,'reference_coordinates_used':False,
         'shelxe_phases_used':False,'rfree_used_for_selection':False,
         'inputs':{k:fingerprint(v) for k,v in [('work',work_mtz),('prior',prior_mtz),('sequence',sequence)]},
         'parameters':{'solvent_fraction':solvent_fraction,'dm_cycles':cycles,
             'feedback_cycles':feedback_cycles,'trace_resolution':trace_resolution,
-            'dm_engine':'handdm','cmbwt':cmbwt}}
+            'dm_engine':'oasis-dm','cmbwt':cmbwt}}
     (out/'feedback_report.json').write_text(json.dumps(report,indent=2)+'\n')
     return report
 
