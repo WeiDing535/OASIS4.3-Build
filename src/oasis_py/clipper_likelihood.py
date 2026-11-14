@@ -10,10 +10,11 @@ explicit input checks and exact centric phase integration on the same grid.
 This file is LGPL-2.1-or-later, including Clipper's additional linking
 permission. See THIRD_PARTY_NOTICES.md and licenses/clipper-LGPL.txt.
 The complete corresponding upstream source URL and SHA are recorded in
-docs/THIRD_PARTY.md and resources/clipper-source.json. No Parrot application code is used.
+docs/THIRD_PARTY.md and resources/clipper-source.json. No external density-modification
+application code is used.
 
 This is the likelihood kernel only: it does not reproduce Clipper's spline
-scaling/optimization or Parrot's map modification, masks and map simulation.
+scaling/optimization or an external engine's map modification, masks and map simulation.
 No target complete coordinates or reference phases are accepted.
 """
 from dataclasses import dataclass

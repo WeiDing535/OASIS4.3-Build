@@ -24,25 +24,29 @@ from .jobs import Jobs
 STATUS_NAMES={'queued':'等待运行','running':'正在运行','stopping':'正在停止','cancelled':'已停止',
               'failed':'失败','success':'已完成','imported':'已导入（仅查看）','interrupted':'界面曾中断'}
 IMPORTED_NOTE='导入的既有结果：只读目录，不会重新运行；可查看曲线/表格、导出结果、保存模型。'
-METHODS=[('pplus_bundled','P+ 自带引擎（Phaser + Parrot，推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
+METHODS=[('pplus_bundled','P+ 自带引擎（Phaser + handdm，推荐）'),('pplus_trust','Phaser SAD + 外部 P+'),
          ('pplus_internal','内部 P+（实验性，不用于正式解析）'),
          ('likelihood','连续 SAD（只需 CCP4）'),('pplus','旧版直接法 P+（只需 CCP4）')]
 METHOD_NAMES=dict(METHODS)
 # Shown under the method radios; the internal chain is the one that must not be
 # mistaken for a validated route (see docs/NO_CCP4_REPLACEMENT.md).
 METHOD_HINTS={
- 'pplus_bundled':'标定配方：P+ 定相 + Parrot 密度修饰 + Buccaneer/REFMAC，十案例 R-free 落在对照 ±5 点内。',
+ 'pplus_bundled':'标定配方：P+ 定相 + handdm v2 密度修饰 + Buccaneer/REFMAC，十案例 R-free 落在对照 ±5 点内。',
  'pplus_trust':'外部对照：Phaser 做 SAD，P+ 只接密度修饰之后的相位。',
- 'pplus_internal':'不用 Phaser：SAD 似然在程序内部算，密度修饰可选 Parrot、建模与推荐配方相同。'
+ 'pplus_internal':'不用 Phaser：SAD 似然在程序内部算，密度修饰用内置 handdm、建模与推荐配方相同。'
                   '代价是重原子不做精修：位点已是精修后的，两个最差案例只落后 Phaser 前端 0.3/1.9 点 R-free；'
                   '位点是原始 SHELXD 输出时要差 4 点以上。标为实验性，默认仍走推荐配方。',
- 'likelihood':'连续 SAD：不经过 P+，直接用似然法定相；密度修饰与建模只用 CCP4 的 Parrot/Buccaneer/REFMAC，'
+ 'likelihood':'连续 SAD：不经过 P+，直接用似然法定相；密度修饰用内置 handdm，建模用 CCP4 的 Buccaneer/REFMAC，'
                '所以只装一份 CCP4 就能跑完整条链（对标 SHELXC/D/E）。',
  'pplus':'旧版直接法 P+：保留用于复现历史结果，同样只需要 CCP4。'}
 PROTOCOLS=[('','不使用参数方案'),('pplus_w8_weight','P+ · Wang8＋精修权重搜索（标定配方）'),
            ('pplus_w8','P+ · Wang8'),('pplus_w14','P+ · Wang14'),('stable_w14','稳定化 P+ · Wang14')]
 RECIPES=[('pipeline','自带 Buccaneer/REFMAC'),('ccp4','外部 CCP4 流程'),('legacy','旧版逐轮流程')]
-ENGINES=[('parrot','CCP4 Parrot（推荐）'),('internal','内置 MLHL（仅连续 SAD / 旧版 P+）')]
+# Density modification is not a user choice: handdm v2 is part of P+, and the
+# window runs it unconditionally.  The tuple stays so saved records and tests can
+# still map a label to the one engine that exists.
+ENGINES=[('handdm','handdm v2（内置，随 P+ 运行）')]
+DM_ENGINE='handdm'
 PRIORS=[('dm_phifom','密度修饰相位 + 模型振幅'),('original_sad','原始 SAD 相位')]
 
 # key, title, kind, hint, options, only-methods
@@ -59,8 +63,7 @@ FIELD_SPECS=[
  ('copies','整个序列文件在 ASU 中的份数','int','正整数 1–100，或 auto 按 FASTA 头 / Matthews 自动判定（默认）；不是单独一条链的拷贝数。',None,None),
  ('solvent_fraction','溶剂比例（留空自动估算）','optional','0–1 之间；留空按序列与晶胞估算。',None,None),
  ('phase_cycles','定相迭代周期','int','1–100。',None,None),
- ('dm_cycles','密度修饰周期','int','1–100；标定配方为 40。',None,None),
- ('dm_mask_radius','掩膜过滤半径（Å）','float','Parrot 溶剂掩膜的过滤半径；默认 3.0。',None,None),
+ ('dm_cycles','密度修饰周期','int','1–100；默认 12，配合 2–3 轮 trace 反馈。',None,None),
  ('feedback_cycles','trace 反馈轮数','int','每轮用部分模型 Fcalc 反馈给密度修饰；0 表示不反馈，标定配方为 2–3。',None,None),
  ('rounds','Buccaneer / REFMAC 轮数','int','1–20；默认 5 轮。',None,None),
  ('cycles','每轮 REFMAC 精修周期','int','1–200；默认每轮 10 周期。',None,None),
@@ -81,7 +84,7 @@ FIELD_SPECS=[
 # resources and the rare overrides wait behind “显示高级参数”.
 ESSENTIAL_GROUPS=[('输入文件',('sad','heavy','sequence','elements','wavelength','copies','output')),
                   ('P+ 定相',('phase_cycles','trust_kl','max_per_target')),
-                  ('Parrot 密度修饰',('solvent_fraction','dm_cycles','dm_mask_radius','feedback_cycles')),
+                  ('handdm 密度修饰',('solvent_fraction','dm_cycles','feedback_cycles')),
                   ('Buccaneer / REFMAC',('rounds','cycles'))]
 # Fields that live in the 「运行模块」 box rather than under a parameter group.
 MODULE_FIELDS=('runtime',)
@@ -110,7 +113,7 @@ class Controller:
         return self.workflow.describe_plan(config)
 
     def fallback_notice(self, config):
-        """Red-line text for a run that fell back from Parrot, else ''."""
+        """Red-line text for a run that fell back from handdm, else ''."""
         from .sad_pipeline import fallback_notice
         return fallback_notice(config or {})
 
@@ -195,7 +198,7 @@ def stage_log_text(output):
 
     ``gui.log`` only carries the stage headers and the final report: every stage
     writes its own progress lines to ``<pipeline dir>/<stage id>.log`` and its
-    engines write deeper ones (``03_dm/cycle_02/parrot.log``,
+    engines write deeper ones (``03_dm/cycle_02/handdm.log``,
     ``02_sad/hands/input_hand/pilot/buccaneer.log``, ...).  The log pane is
     where a run gets debugged, so it shows all of them, untruncated.
     """
@@ -285,7 +288,7 @@ class App:
         tk,ttk=self.tk,self.ttk
         bar=ttk.Frame(self.root,padding=(10,8));bar.pack(side='top',fill='x')
         ttk.Label(bar,text='OASIS4.3',font=('Helvetica',16,'bold')).pack(side='left')
-        ttk.Label(bar,text='单波长异常散射 → 密度修饰（可选）→ Buccaneer / REFMAC（可选）',
+        ttk.Label(bar,text='单波长异常散射 → P+ 定相 + handdm 密度修饰 → Buccaneer / REFMAC（可选）',
                   style='Hint.TLabel').pack(side='left',padx=(10,0),pady=(4,0))
         self.status=ttk.Label(bar,text='就绪',style='Status.TLabel')
         self.status.pack(side='right')
@@ -512,15 +515,13 @@ class App:
         modules=self._group('modules','运行模块（按本机 CCP4 检测结果默认勾选）',expanded=True)
         row=ttk.Frame(modules);row.pack(fill='x',pady=2)
         self.module_phase=self.tk.BooleanVar(value=True)
-        ttk.Checkbutton(row,text='模块 1 · P+ 定相（必做）',variable=self.module_phase,
+        ttk.Checkbutton(row,text='模块 1 · P+ 定相 + handdm 密度修饰（必做）',variable=self.module_phase,
                         state='disabled').pack(side='left')
-        self.module_parrot=self.tk.BooleanVar(value=True)
-        self.parrot_check=ttk.Checkbutton(row,text='模块 2 · Parrot 密度修饰',
-                                          variable=self.module_parrot,command=self._modules_changed)
-        self.parrot_check.pack(side='left',padx=(18,0))
+        # Density modification is part of P+, not an add-on: handdm v2 ships with
+        # the program, so there is no switch and no engine choice to make.
         row=ttk.Frame(modules);row.pack(fill='x',pady=(2,0))
         self.module_build=self.tk.BooleanVar(value=True)
-        self.build_check=ttk.Checkbutton(row,text='模块 3 · Buccaneer 建模 + REFMAC 精修',
+        self.build_check=ttk.Checkbutton(row,text='模块 2 · Buccaneer 建模 + REFMAC 精修',
                                          variable=self.module_build,command=self._modules_changed)
         self.build_check.pack(side='left')
         self._field(modules,specs['runtime'])
@@ -555,16 +556,10 @@ class App:
         for key in ESSENTIAL_GROUPS[1][1]:
             self._field(phase,specs[key])
 
-        dm=self._group('dm','② Parrot 密度修饰参数',expanded=False)
-        row=ttk.Frame(dm);row.pack(fill='x',pady=2)
-        ttk.Label(row,text='密度修饰引擎',width=18,anchor='w').pack(side='left')
-        self.dm_engine=self.tk.StringVar(value='parrot')
-        self.dm_engine_box=ttk.Combobox(row,textvariable=self.dm_engine,values=[label for _,label in ENGINES],
-                                        state='readonly',width=22)
-        self.dm_engine_box.pack(side='left',fill='x',expand=True,padx=(0,2))
-        ttk.Label(dm,text='Parrot 是十案例标定的配方，需要 CCP4 的 cparrot；P+ 两条流程只能用它。'
-                          '内置 MLHL 不调用外部程序，只给连续 SAD / 旧版 P+ 做快速试算（图相关低约 0.13）。',
-                  style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
+        dm=self._group('dm','② handdm 密度修饰参数（P+ 的一部分，必做）',expanded=False)
+        ttk.Label(dm,text='密度修饰引擎：handdm v2（内置，随 P+ 一起运行，不可关闭）。'
+                          '直方图库随程序提供，不需要 CCP4 的任何数据文件。',
+                  style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0),pady=(2,0))
         for key in ESSENTIAL_GROUPS[2][1]:
             self._field(dm,specs[key])
 
@@ -577,7 +572,7 @@ class App:
         self.unverified_hand=self.tk.BooleanVar(value=False)
         self.unverified_hand_box=ttk.Checkbutton(row,text='证据不足也按输入手继续（结果标注未验证）',variable=self.unverified_hand)
         self.unverified_hand_box.pack(side='left')
-        ttk.Label(build,text='双手性：勾选时 Phaser 按输入手与反向手各定一次相、各做一轮 Parrot 密度修饰与'
+        ttk.Label(build,text='双手性：勾选时 Phaser 按输入手与反向手各定一次相、各做一轮 handdm 密度修饰与'
                              '测序试建，按工作集唯一测序残基数选手（不看 R-free）；不勾只算输入重原子文件'
                              '给出的手性，时间省一半。',
                   style='Hint.TLabel',wraplength=340,justify='left').pack(fill='x',padx=(2,0))
@@ -690,17 +685,15 @@ class App:
             report=module_detection.detect(fallback)
         self._module_report=report
         modules=report['modules']
-        self.module_parrot.set(modules['parrot']['available'])
         self.module_build.set(modules['build']['available'])
         self._sync_run_resources()
         self._modules_changed()
         if initial and self.method.get()=='pplus_bundled' and not self._p_plus_ready(resolved or typed):
-            # Say it before the user presses 开始: P+ needs phaser + cparrot +
-            # cbuccaneer + refmac5, and a machine without them must not discover
-            # that only after Phasing.
+            # Say it before the user presses 开始: P+ needs phaser (and, when the
+            # model stage is on, cbuccaneer + refmac5).  handdm ships in-tree.
             located=resolved or typed or '默认运行时'
-            self._warn('这台机器（%s）缺 P+ 需要的程序（phaser / cparrot / cbuccaneer / refmac5 之一）。'
-                       '点“开始”会自动改用“连续 SAD + Parrot + Buccaneer/REFMAC”，'
+            self._warn('这台机器（%s）缺 P+ 需要的程序（phaser / cbuccaneer / refmac5 之一）。'
+                       '点“开始”会自动改用“连续 SAD + handdm + Buccaneer/REFMAC”，'
                        '只依赖 CCP4 自带程序。'%located)
 
     def _sync_run_resources(self):
@@ -715,16 +708,12 @@ class App:
                 reference.set(str(candidate))
 
     def _modules_changed(self,*_):
-        """Building needs a density-modified map, so module 3 follows module 2."""
+        """Density modification always runs; only the model stage can be off."""
         modules=(getattr(self,'_module_report',None) or {}).get('modules') or {}
-        parrot_ok=bool((modules.get('parrot') or {}).get('available'))
         build_ok=bool((modules.get('build') or {}).get('available'))
-        if not parrot_ok:
-            self.module_parrot.set(False)      # a reused record cannot ask for what is missing
-        if not self.module_parrot.get():
-            self.module_build.set(False)
-        self.parrot_check.configure(state='normal' if parrot_ok else 'disabled')
-        self.build_check.configure(state='normal' if build_ok and self.module_parrot.get() else 'disabled')
+        if not build_ok:
+            self.module_build.set(False)       # a reused record cannot ask for what is missing
+        self.build_check.configure(state='normal' if build_ok else 'disabled')
         if not self.module_build.get():
             hand=getattr(self,'auto_hand',None)
             if hand is not None:
@@ -733,8 +722,8 @@ class App:
         self._refresh_module_hint()
 
     def _sync_module_state(self):
-        on={'parrot':self.module_parrot.get(),'build':self.module_build.get()}
-        for index,module in ((2,'parrot'),(3,'build')):
+        on={'build':self.module_build.get()}
+        for index,module in ((3,'build'),):
             state='normal' if on[module] else 'disabled'
             for key in ESSENTIAL_GROUPS[index][1]:
                 field=getattr(self,'fields',{}).get(key)
@@ -747,7 +736,7 @@ class App:
                         child.configure(state=state)
                     except Exception:
                         pass
-        for name,module,enabled in [('dm_engine_box','parrot','readonly'),('auto_hand_box','build','normal'),('unverified_hand_box','build','normal'),
+        for name,module,enabled in [('auto_hand_box','build','normal'),('unverified_hand_box','build','normal'),
                                     ('recipe_box','build','readonly'),('prior_box','build','readonly')]:
             widget=getattr(self,name,None)
             if widget is None:
@@ -766,25 +755,24 @@ class App:
         if warning:lines.append(warning)
         located=(report.get('location') or {}).get('resolved') or (report.get('location') or {}).get('found_at') or ''
         if report.get('ccp4_ready'):
-            lines.append('已检测到 CCP4：模块 2、3 默认勾选，可随时取消。')
+            lines.append('已检测到 CCP4：模块 2（建模与精修）默认勾选，可随时取消。')
             if located:lines.append('CCP4：'+located)
         elif report.get('available'):
             missing=[item['title'] for item in modules.values() if not item['available']]
             lines.append('只检测到部分 CCP4：默认勾选可用模块；未找到 '+'、'.join(missing)+'。')
             if located:lines.append('CCP4：'+located)
         else:
-            lines.append('未检测到 CCP4（cparrot、cbuccaneer、refmac5），默认只做模块 1。')
-            lines.append('模块 1 输出相位、FOM 与 MTZ；已装 CCP4 但不在默认位置时，在上方“CCP4 位置”里填根目录或 ccp4.setup 路径，再点“重新检测”。')
+            lines.append('未检测到 CCP4（cbuccaneer、refmac5），模块 2 保持关闭。')
+            lines.append('模块 1 仍会输出相位、FOM 与密度修饰后的 MTZ（handdm 内置）；'
+                         '已装 CCP4 但不在默认位置时，在上方“CCP4 位置”里填根目录或 ccp4.setup 路径，再点“重新检测”。')
         if located:
             if self._p_plus_ready(located):
-                lines.append('P+ 全链可用：Phaser 定相 + cparrot 密度修饰 + cbuccaneer/refmac5 建模。')
+                lines.append('P+ 全链可用：Phaser 定相 + handdm 密度修饰 + cbuccaneer/refmac5 建模。')
             else:
-                lines.append('这台机器缺 P+ 需要的程序（phaser / cparrot / cbuccaneer / refmac5 之一）：'
-                             '点“开始”会自动改用“连续 SAD + Parrot + Buccaneer/REFMAC”。')
-        if not self.module_parrot.get():
-            lines.append('模块 2 已关闭：跳过密度修饰，直接输出 P+ 相位；模块 3 需要修饰后的图，已一并关闭。')
-        elif not self.module_build.get():
-            lines.append('模块 3 已关闭：停在密度修饰后的相位与地图。')
+                lines.append('这台机器缺 P+ 需要的程序（phaser / cbuccaneer / refmac5 之一）：'
+                             '点“开始”会自动改用“连续 SAD + handdm + Buccaneer/REFMAC”。')
+        if not self.module_build.get():
+            lines.append('模块 2 已关闭：停在 handdm 密度修饰后的相位与地图。')
         self.module_hint.set('\n'.join(lines))
 
     def _method_changed(self,*_):
@@ -795,17 +783,7 @@ class App:
         hint=getattr(self,'method_hint',None)
         if hint is not None:
             hint.set(METHOD_HINTS.get(method,''))
-        # The two P+ routes have no in-tree density-modification backend: their
-        # DM is Parrot, so the engine box is pinned and disabled for them.
-        pinned=method in ('pplus_trust','pplus_bundled')
-        if pinned and self.dm_engine.get()!=dict(ENGINES)['parrot']:
-            self.dm_engine.set(dict(ENGINES)['parrot'])
-        box=getattr(self,'dm_engine_box',None)
-        if box is not None:
-            try:
-                box.configure(state='disabled' if pinned or not self.module_parrot.get() else 'readonly')
-            except Exception:
-                pass
+        # Density modification is always handdm; there is no engine to pin.
         # 双手性 is a P+ frontend feature (Phaser phases both enantiomorphs); the
         # other routes take the hand from the input heavy-atom file, so the box
         # is disabled there instead of being silently ignored by collect().
@@ -846,15 +824,12 @@ class App:
         prior=dict(self.prior_values).get(values.get('refinement_prior'),None)
         if prior:
             self.prior.set(prior)
-        # Old records say 'resolve'; that engine is gone, and Parrot replaces it.
-        engine=dict(ENGINES).get({'resolve':'parrot'}.get(values.get('dm_engine'),values.get('dm_engine')))
-        if engine:
-            self.dm_engine.set(engine)
+        # Density modification is always handdm; old records naming another
+        # engine simply map onto it.
+
         # Module 2/3 start from what this machine has; a reused record keeps its
         # own choice, so only a real config (strict=False) may override them.
         if not strict:
-            if 'dm_enabled' in values:
-                self.module_parrot.set(bool(values['dm_enabled']))
             if 'build_model' in values:
                 self.build_model.set(bool(values['build_model']))
             if 'auto_hand' in values:
@@ -902,9 +877,9 @@ class App:
             values['solvent_fraction']=None
         values['method']=self.method.get()
         bundled=values['method']=='pplus_bundled'
-        values['dm_engine']=dict((label,key) for key,label in ENGINES).get(self.dm_engine.get(),'parrot')
+        values['dm_engine']=DM_ENGINE
         values['building_recipe']=dict((label,key) for key,label in RECIPES).get(self.recipe.get(),'pipeline')
-        values['dm_enabled']=bool(self.module_parrot.get())
+        values['dm_enabled']=True
         values['build_model']=bool(self.build_model.get()) and values['dm_enabled']
         values['auto_hand']=bool(self.auto_hand.get()) and values['build_model']
         values['allow_unverified_hand']=bool(self.unverified_hand.get()) and values['auto_hand']
@@ -957,11 +932,15 @@ class App:
         resolved=(report.get('location') or {}).get('resolved') or ''
         return str(resolved or self.defaults.get('runtime') or '')
 
-    @staticmethod
-    def _p_plus_ready(runtime):
-        """True when this runtime has the four programs the P+ + Parrot chain runs."""
+    def _p_plus_ready(self,runtime):
+        """True when this runtime has what P+ needs: Phaser, plus the builder when
+        the model stage is on.  Density modification is handdm and ships in-tree,
+        so no CCP4 program is involved there."""
         if not runtime:return False
-        for name in ('phaser','cparrot','cbuccaneer','refmac5'):
+        needed=['phaser']
+        build=getattr(self,'module_build',None)
+        if build is None or build.get():needed+=['cbuccaneer','refmac5']
+        for name in needed:
             binary=Path(str(runtime))/'bin'/name
             if not binary.is_file() or not os.access(binary,os.X_OK):return False
         return True
@@ -970,29 +949,21 @@ class App:
         """Fall back to the route a bare CCP4 can run, or None if it cannot.
 
         Continuous SAD writes the same observation likelihood the bundled route
-        does, so Phaser is not needed at all: Parrot (or the internal engine)
-        modifies the density and Buccaneer/REFMAC build the model.  This is the
+        does, so Phaser is not needed at all: handdm (in-tree) modifies the
+        density and Buccaneer/REFMAC build the model.  This is the
         SHELXC/D/E-equivalent chain and it needs nothing outside a stock CCP4.
         """
         from .runtime import resolve_runtime
-        from . import parrot_dm
         runtime=str(config.get('runtime') or '').strip()
         if not runtime:return None
         try:
             resolve_runtime(runtime,required=('cbuccaneer','refmac5'))
         except Exception:
             return None
-        try:
-            parrot_dm.locate(str(Path(runtime)/'bin'/'cparrot'),runtime)
-            engine='parrot'
-        except Exception:
-            engine='internal'
+        engine=DM_ENGINE
         self.method.set('likelihood');self._method_changed()
-        if engine=='parrot':
-            self.dm_engine.set(dict(ENGINES)['parrot'])
-        self._location_warning=('这台机器（%s）缺 P+ 需要的 phaser/cparrot，P+ 定相跑不了；'
-                                '本次改用“连续 SAD + %s 密度修饰 + Buccaneer/REFMAC”。'
-                                %(runtime,'Parrot' if engine=='parrot' else '内置 MLHL'))
+        self._location_warning=('这台机器（%s）缺 P+ 需要的 phaser，P+ 定相跑不了；'
+                                '本次改用“连续 SAD + handdm 密度修饰 + Buccaneer/REFMAC”。'%runtime)
         self._refresh_module_hint()
         self._pending_warning=self._location_warning
         # Patch the collected config instead of re-reading the form: the caller
@@ -1006,14 +977,14 @@ class App:
     def _ensure_runnable(self,config):
         """Pick a route this machine can actually finish, and say so.
 
-        P+ needs phaser + cparrot + cbuccaneer + refmac5, all from CCP4; when one
-        is missing the run switches to 连续 SAD (Phaser is not needed there) and
-        the red bar names the switch.  P+ also always density-modifies with
-        Parrot, so an 'internal' engine inherited from an old saved job is
+        P+ needs phaser from CCP4 (plus cbuccaneer/refmac5 when the model stage
+        is on); when one is missing the run switches to 连续 SAD (Phaser is not
+        needed there) and the red bar names the switch.  Density modification is
+        handdm and always on, so an old record naming another engine is
         corrected here rather than failing after Phasing.
         """
-        if config.get('method') in ('pplus_trust','pplus_bundled') and config.get('dm_engine')!='parrot':
-            config=dict(config,dm_engine='parrot',feedback_cycles=0)
+        if config.get('method') in ('pplus_trust','pplus_bundled') and config.get('dm_engine')!=DM_ENGINE:
+            config=dict(config,dm_engine=DM_ENGINE)
         if config.get('method')!='pplus_bundled':return config
         runtime=str(config.get('runtime') or '').strip() or self._effective_runtime()
         if not runtime:
@@ -1023,7 +994,7 @@ class App:
         switched=self._switch_to_ccp4_only(dict(config,runtime=runtime))
         if switched is not None:return switched
         raise ValueError(
-            '这台机器（%s）跑不了 P+：需要 phaser / cparrot / cbuccaneer / refmac5（CCP4 自带），'
+            '这台机器（%s）跑不了 P+：需要 phaser / cbuccaneer / refmac5（CCP4 自带），'
             '也跑不了“连续 SAD”：还需要 cbuccaneer / refmac5。'
             '请把“CCP4 位置”指向一份完整的 CCP4 安装。'%(runtime or '（未指定运行时）'))
 

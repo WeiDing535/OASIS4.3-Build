@@ -30,7 +30,7 @@ def build_parser():
     p.add_argument('--build-model',action=argparse.BooleanOptionalAction,default=True,
                    help='Enable Buccaneer/REFMAC (default); --no-build-model stops after DM without external engines')
     p.add_argument('--dm-enabled',action=argparse.BooleanOptionalAction,default=True,
-                   help='Enable density modification (CCP4 Parrot or the internal MLHL engine); --no-dm-enabled stops after P+ phasing and implies --no-build-model')
+                   help='Enable density modification (in-tree handdm v2, the default; --dm-engine internal for the legacy MLHL kernel); --no-dm-enabled stops after P+ phasing and implies --no-build-model')
     p.add_argument('--lite',action='store_true',
                    help='精简版：只做 P+ 定相（等价 --no-dm-enabled --no-build-model），输出相位/FOM/MTZ')
     p.add_argument('--method',choices=['likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'],default=None,help='New-run default: bundled P+ Wang8 with work-weight search; explicit historical methods retained for reproducibility')
@@ -51,13 +51,14 @@ def build_parser():
     p.add_argument('--trust-wang-radius',type=float,default=None,help='New default profile uses8 Angstrom; explicit historical routes retain14')
     p.add_argument('--trust-stability',action=argparse.BooleanOptionalAction,default=False,help='Opt-in disjoint-relation stability shrinkage of genuine P+ updates')
     p.add_argument('--trust-partial-cleanup',action=argparse.BooleanOptionalAction,default=None,help='Work-map/sequence-anchored cleanup; enabled for new default runs')
-    p.add_argument('--dm-engine',choices=['internal','parrot'],default=None,help='Density-modification engine: parrot (CCP4) or internal MLHL; the bundled RESOLVE tree is gone')
+    p.add_argument('--dm-engine',choices=['handdm','internal'],default=None,help='Density-modification engine: handdm (in-tree handdm v2, default) or internal (legacy MLHL kernel)')
     p.add_argument('--dm-solvent',type=float,default=None,help='Override the sequence-estimated solvent content for density modification')
-    p.add_argument('--dm-mask-radius',type=float,default=3.0,help='Solvent-mask filter radius in Angstrom')
-    p.add_argument('--dm-anisotropy',action=argparse.BooleanOptionalAction,default=True,help='Anisotropic scaling correction during density modification')
     p.add_argument('--feedback-cycles',type=int,default=0,help='Work-only trace -> model Fcalc -> density-modification feedback cycles')
     p.add_argument('--trace-resolution',type=float,default=2.0,help='Resolution used for the partial-model tracing step')
-    p.add_argument('--dm-executable',default='',help='Explicit cparrot path; blank searches the runtime and PATH')
+    p.add_argument('--dm-executable',default='',help='Explicit handdm_v2.py path; blank uses the vendored copy')
+    p.add_argument('--dm-cmbwt',default=None,help='handdm recombination weight for the DM phase likelihood, or auto (short holdout calibration sweep before the production pass)')
+    p.add_argument('--dm-holdout',type=float,default=None,help='Fraction of WORK reflections held out for handdm cross-validation (default 0.05); the crystallographic free set is never used')
+    p.add_argument('--dm-hist-lib',default='',help='CCP4 density-histogram library for handdm; blank uses the bundled lib/data/hist.lib')
     p.add_argument('--fcalc',choices=['fc','fc_all','refined'],default='fc_all',help='Partial-model structure factors used by the trace feedback: FC/PHIC or FC_ALL/PHIC_ALL (bulk solvent included)')
     p.add_argument('--build-semet',action='store_true')
     p.add_argument('--copies',default='auto',help='ASU 中序列文件的份数：正整数，或 auto（默认；先读 RCSB FASTA 头的 Chains 注释，否则取 Matthews 溶剂含量 20–65%% 的最小拷贝数）')
@@ -73,6 +74,15 @@ def build_parser():
 def main(argv=None):
     p=build_parser()
     args=vars(p.parse_args(argv));resume=args.pop('resume');check=args.pop('check')
+    if args['dm_cmbwt'] is None:
+        args['dm_cmbwt']=0.4
+    else:
+        text=str(args['dm_cmbwt']).strip().lower()
+        if text=='auto':args['dm_cmbwt']='auto'
+        else:
+            try:args['dm_cmbwt']=float(text)
+            except ValueError:p.error('--dm-cmbwt 必须是 auto 或一个数值')
+    if args['dm_holdout'] is None:args['dm_holdout']=0.05
     if args.pop('lite'):
         # 精简版 is one decision, not two: phasing only, no density modification,
         # no external builder.  The dependency is enforced here so a stale flag
@@ -99,10 +109,10 @@ def main(argv=None):
     if args['auto_hand'] is None:args['auto_hand']=profile and args['build_model']
     if args['refinement_prior'] is None:args['refinement_prior']='dm_phifom' if profile else 'original_sad'
     if args['building_recipe'] is None:args['building_recipe']='pipeline' if profile else 'legacy'
-    # The two P+ routes always density-modify with CCP4 Parrot; only the
+    # The two P+ routes density-modify with the in-tree handdm engine; only the
     # in-tree MLHL methods may default to the internal engine.
     if args['dm_engine'] is None:
-        args['dm_engine']='parrot' if profile or args['method'] in ('pplus_trust','pplus_bundled') else 'internal'
+        args['dm_engine']='handdm' if profile or args['method'] in ('pplus_trust','pplus_bundled') else 'internal'
     if profile and not args['fpp']:args['auto_fpp']=True
     for flag in ['trust_work_weight','trust_partial_cleanup']:
         if args[flag] is None:args[flag]=profile and args['build_model']

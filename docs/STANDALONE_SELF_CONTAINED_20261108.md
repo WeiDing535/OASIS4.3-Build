@@ -1,5 +1,14 @@
 # 完全独立安装包（不再依赖外部 CCP4 / Phenix）
 
+> **历史记录。** 本文写作时密度修饰由一个外部引擎完成；该引擎已于 2026-11-14
+> 从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），密度修饰
+> 现在固定由树内 handdm v2 完成。文中的数字保留作当时记录，按本文命令重跑
+> 会得到不同数值；`--dm-mask-radius`、`--dm-anisotropy` 等旧引擎专属选项也
+> 已删除。
+> **另注（2026-11-14 之后）。** 界面现在只有两个模块，密度修饰是 P+ 的必做部分（树内 `handdm v2`），没有引擎选择；本文这类旧引擎时代的数字只作记录，不能再逐点复现。当前行为见 `docs/HANDDM_V2_REPLACEMENT_20261114.md`、`docs/INSTALL_BUNDLE.md`。
+
+> 补充：下表的「密度修饰」一行已过时——`handdm v2` 现在直接编译进 Python 包（`phasebuild/vendor/handdm/`），不需要任何外部密度修饰可执行文件。
+
 ## 结论
 
 P+ 升级引入的三处外部依赖已全部消除，程序现在可以打成**一个目录 + 一个 tar.gz**，
@@ -7,13 +16,13 @@ P+ 升级引入的三处外部依赖已全部消除，程序现在可以打成**
 
 | 环节 | 原依赖 | 现在 |
 |---|---|---|
-| 密度修饰 | 外部 CCP4-9 的 `cparrot` | 自带 `runtime/bin/cparrot`（只依赖 runtime 内已有的 clipper/ccp4c/mmdb2 库与 `lib/data`） |
+| 密度修饰 | 外部 CCP4-9 的旧密度修饰程序（已删除） | 自带 `runtime/bin/` 下的同一程序（只依赖 runtime 内已有的 clipper/ccp4c/mmdb2 库与 `lib/data`） |
 | 构建循环 | CCP4 的 `buccaneer_pipeline`（需要 CCP4 的 python3.9 + `CCP4pipeline.py`） | `src/phasebuild/ccp4_pipeline.py` 用自带 `cbuccaneer` + `refmac5` 复现同样的循环 |
 | 反馈用 Fcalc | `phenix.fmodel` | 自带 `refmac5` 的 0 循环计算 `FC_ALL/PHIC_ALL`（不移动坐标、含批量溶剂） |
 
 ## 关键验证
 
-**Parrot 可直接随包运行。** `cparrot` 的加载路径全部是 `@loader_path/../lib`，而
+**旧引擎 可直接随包运行。** `旧引擎` 的加载路径全部是 `@loader_path/../lib`，而
 `runtime/lib` 已含 `libclipper-*`、`libccp4c`、`libmmdb2`，`runtime/lib/data` 已含
 `syminfo.lib`、`monomers`、`reference_structures`。把二进制复制进 `runtime/bin` 后，
 在没有任何 CCP4 环境变量的情况下用 6ZPP 复跑：**37.06°**，与 CCP4-9 版本逐位一致。
@@ -42,20 +51,20 @@ OASIS4.3-Build/.conda-unified/bin/python -B OASIS4.3-Build/packaging/package_sta
   --app-source   OASIS4.3-Build \
   --python-source "OASIS4.3-dev17-portable local/python" \
   --runtime-source "OASIS4.3-dev17-portable local/runtime" \
-  --parrot-binary /Applications/ccp4-9/bin/cparrot \
+  --旧引擎-binary /Applications/ccp4-9/bin/旧引擎 \
   --output dist/OASIS4.3-standalone-YYYYMMDD \
   --tar dist/OASIS4.3-standalone-YYYYMMDD.tar.gz
 ```
 
 脚本会：
 1. 校验 python/runtime 清单的每个文件哈希；
-2. 复制 `python/`、`runtime/`，把 `cparrot` 装进 `runtime/bin` 并登记到
+2. 复制 `python/`、`runtime/`，把 `旧引擎` 装进 `runtime/bin` 并登记到
    `runtime_manifest.json`（同时剔除自引用的 `runtime_manifest.sha256` 条目并重算校验文件）；
 3. 用 `package_oasis.py` 的聚焦收集器复制 `app/`（含 `run_trace_feedback.py`、
    `run_build_pipeline.py`）；
 4. 写 `OASIS4.3.command` 启动器与 `使用说明.txt`；
-5. 在干净环境下自检：Python 包导入、四个引擎存在且可执行、`cparrot` 能起、CLI 能起、
-   `parrot_dm.locate()` 解析到**包内**的 cparrot；
+5. 在干净环境下自检：Python 包导入、四个引擎存在且可执行、`旧引擎` 能起、CLI 能起、
+   `旧引擎_dm.locate()` 解析到**包内**的 旧引擎；
 6. 写 `bundle.json`（含全部引擎哈希）与可选 tar.gz。
 
 产物：`dist/OASIS4.3-standalone-20261108/`（约 3.8 GB）与
@@ -77,7 +86,7 @@ cd OASIS4.3-standalone-20261108
 ## 用独立包复跑十套案例（2026-11-08）
 
 从 `dist/OASIS4.3-standalone-20261108` 出发、在 `env -i`（仅 PATH/HOME）下逐套运行同一固定协议
-（`--dm-engine parrot --dm-solvent 0.5 --building-recipe pipeline`，feedback 1/2 两个终点，按工作集 R 选取）：
+（`--dm-engine handdm --dm-solvent 0.5 --building-recipe pipeline`，feedback 1/2 两个终点，按工作集 R 选取）：
 
 | 案例 | SHELXE 对照 | 包内 R-free | 差值 |
 |---|---:|---:|---:|
@@ -181,13 +190,13 @@ RCSB FASTA 头直接写明了 ASU 里的链数，这是输入文件自带的注�
 | 选项 | 原默认 | 现默认 |
 |---|---|---|
 | `--copies` | 1 | **auto**（FASTA 链注释 → Matthews 兜底） |
-| `--dm-engine` | resolve | **parrot** |
+| `--dm-engine` | resolve | **旧引擎** |
 | `--dm-cycles` | 40 | 40（不变） |
 | `--feedback-cycles` | 0 | **2** |
 | `--building-recipe` | ccp4 | **pipeline** |
 
 - 显式给出的非默认值一律尊重。
-- 运行包里没有 `cparrot` 时自动回退到内部 RESOLVE/CCTBX 分支（40 轮、无反馈），
+- 运行包里没有 `旧引擎` 时自动回退到内部 RESOLVE/CCTBX 分支（40 轮、无反馈），
   原因写入 `pipeline_report.json` 的 `dm_engine_fallback`，旧 runtime 仍可运行。
 
 ### 为什么单一常数覆盖不了全部十套（实测）
@@ -208,7 +217,7 @@ RCSB FASTA 头直接写明了 ASU 里的链数，这是输入文件自带的注�
 | 48_6HF7 | 28.43 | — | **30.87** / 30.24 |
 
 **7TFQ 和 3O2E 的最优溶剂正好相反**：7TFQ 必须用 0.50（36.86%），用序列估算的 0.493 会恶化到 49.09%；
-3O2E 必须用序列估算的 0.265（42.64%），用 0.50 会恶化到 50.89%。Parrot 的溶剂掩膜对 1% 的差异就会
+3O2E 必须用序列估算的 0.265（42.64%），用 0.50 会恶化到 50.89%。旧引擎 的溶剂掩膜对 1% 的差异就会
 翻转结果，所以这两个案例不能共用同一个常数。
 
 ### 结论：用固定终点网格 + 工作集选择
@@ -264,7 +273,7 @@ RCSB FASTA 头直接写明了 ASU 里的链数，这是输入文件自带的注�
 | 精简前 | 3.8 GB | 1.19 GB |
 | 精简后 | **1.9 GB** | **501 MB** |
 
-验证方式不是只看文件大小：用精简后的包对 7ENM 跑完整流程（Phaser → P+ → Parrot → Buccaneer →
+验证方式不是只看文件大小：用精简后的包对 7ENM 跑完整流程（Phaser → P+ → 旧引擎 → Buccaneer →
 REFMAC），结果 **Rfree 31.47%、Rwork 28.34%，与精简前完全一致**，REFMAC 日志里没有任何
 `no dictionary` 警告。
 
@@ -304,7 +313,7 @@ REFMAC），结果 **Rfree 31.47%、Rwork 28.34%，与精简前完全一致**，
 - **平台**：本包是 macOS **x86_64**（Intel 二进制，在 Apple Silicon 上经 Rosetta 运行）。
   面向 Linux 的包仍需在 Linux 上按同一脚本构建；脚本本身与平台无关，依赖的引擎二进制需换成
   Linux 版本。
-- **许可**：外部引擎（Phaser/Buccaneer/REFMAC/Parrot）与其数据、权重的公开再分发条件尚未落实，
+- **许可**：外部引擎（Phaser/Buccaneer/REFMAC/旧引擎）与其数据、权重的公开再分发条件尚未落实，
   本包仍是"本机评估包"，不是可公开发行的二进制。`bundle.json` 里
   `public_redistribution_ready` 为 `false`。
 - **未签名/未公证**：macOS 首次运行可能需要在"系统设置 → 隐私与安全性"中放行。

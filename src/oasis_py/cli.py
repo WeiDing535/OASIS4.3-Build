@@ -18,7 +18,6 @@ from .substructure import search_native,write_atoms,invert_hand
 from .reference import run_reference
 from .backends import phaser_sad
 from .sad import phase_sad_likelihood
-from .density import density_modify_parrot
 from .native_density import density_modify_native
 from .fom import FomCalibration
 from .ensemble import phase_sad_ensemble,mix_mtz_files
@@ -179,18 +178,6 @@ def main(argv=None):
     ml.add_argument('--jobs',type=int,default=1);ml.add_argument('--dmin',type=float)
     ml.add_argument('--timeout',type=float,default=1800)
     ml.add_argument('--labels',help='Four comma-separated Friedel-pair column labels')
-    dm=subs.add_parser('density-modify',help='External CCP4 Parrot solvent flattening and histogram matching')
-    dm.add_argument('hklin',type=Path)
-    dm.add_argument('--executable',type=Path,required=True)
-    dm.add_argument('--out-dir',type=Path,required=True)
-    dm.add_argument('--solvent-fraction',type=float,required=True)
-    dm.add_argument('--reference-mtz',type=Path,required=True)
-    dm.add_argument('--reference-pdb',type=Path,required=True)
-    dm.add_argument('--cycles',type=int,default=20)
-    dm.add_argument('--representation',choices=['hl','phifom'],default='hl')
-    dm.add_argument('--canonical-centric-hl',action='store_true',
-        help='Equivalent centric HL representation to avoid older Clipper underflow; HL input only')
-    dm.add_argument('--timeout',type=float,default=300)
     mix=subs.add_parser('mix-phases',help='Equal first-moment mixture of two matching PHIB/FOM MTZ outputs')
     mix.add_argument('first',type=Path);mix.add_argument('second',type=Path);mix.add_argument('--out',type=Path,required=True)
     args=parser.parse_args(argv)
@@ -215,11 +202,6 @@ def main(argv=None):
             if labels is not None and len(labels)!=4:raise ValueError('Four Friedel-pair labels required')
             result=phaser_sad(args.phenix_python,args.hklin,args.sequence,args.out_dir,args.wavelength,
                               args.heavy,args.sites,args.element,args.copies,labels,args.jobs,args.dmin,args.timeout)
-            print(json.dumps(result,indent=2));return 0
-        if args.command=='density-modify':
-            result=density_modify_parrot(args.executable,args.hklin,args.out_dir,args.solvent_fraction,
-                args.reference_mtz,args.reference_pdb,args.cycles,args.representation,args.timeout,
-                canonical_centric=args.canonical_centric_hl)
             print(json.dumps(result,indent=2));return 0
         if args.command=='solve-sad' and args.sad_method=='alternating':
             raise ValueError('Alternating DM is currently available only via phase --native-dm')

@@ -11,10 +11,9 @@ the preceding 100-case experiments. Only unused columns were removed.
 Original reference data: CCP4 reference_structures/reference-1tqw.mtz:
 https://ftp.ccp4.ac.uk/ccp4/6.4.0/ccp4-6.4.0/lib/data/reference_structures/reference-1tqw.mtz
 Reference structure and its authors: https://www.rcsb.org/structure/1TQW
-Reference-use documentation: https://www.ccp4.ac.uk/html/parrot.html
 
-The resource is map data, not Parrot source or executable code. Running the
-Python program does not require a CCP4/Parrot installation. PDB 1TQW is
+The resource is map data, not program source or executable code. Running the
+Python program does not require a CCP4 installation. PDB 1TQW is
 outside our 100 target cases. No identity/homology screening against future
 user targets is implemented: for 1TQW itself or closely related targets,
 provide an independent reference with --reference-mtz.

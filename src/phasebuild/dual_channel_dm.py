@@ -77,6 +77,6 @@ def density_modify_dual_channel(data,observation_prior,map_initial,solvent_fract
         'cycles':history,'seed':seed,'solvent_fraction':solvent_fraction,'grid_shape':shape,
         'grid_sample_rate':rate,'reference_mtz':str(Path(reference_mtz).resolve()),
         'target_complete_model_used':False,'ncs_operator_count':0,'anisotropy':{'status':'disabled'},
-        'limitations':['Experimental fork of approximate native DM primitives, not a Parrot reproduction',
+        'limitations':['Experimental fork of approximate native DM primitives, not a reproduction of any external density modifier',
                        'Phase FOM is not calibrated; fixed generic histogram and approximate shell likelihood',
                        'No NCS or anisotropy in this controlled research comparison']})

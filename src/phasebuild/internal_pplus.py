@@ -159,11 +159,11 @@ def seeded_dm(data,observation,seed_phase,seed_fom,solvent,reference,*,cycles,ra
     return PhaseResult(phase,fom,None,hl,{'method':'internal_fixed_observation_MLHL_seeded_DM','backend':'NumPy/SciPy/Gemmi only; no external executable',
         'cycles':history,'grid_shape':shape,'grid_sample_rate':rate,'seed_map':'P+ first moment once','fixed_HL':'Original internal observation likelihood, never accumulated',
         'combination':combine,'map_weight':float(map_weight),'prior_weight':float(prior_weight),'external_mask':mask_override is not None,'oracle_weights':oracle is not None,
-        'limitations':['Approximate mask, reference histogram, shell scale and field cap inherited from internal MLHL DM','No automatic NCS; not RESOLVE/Parrot/Phenix equivalent']}),coefficients
+        'limitations':['Approximate mask, reference histogram, shell scale and field cap inherited from internal MLHL DM','No automatic NCS; not an external density-modifier equivalent']}),coefficients
 
 
 def _ladder_from_env(data):
-    """Multi-resolution DM schedule: low-resolution shells first (Parrot-like)."""
+    """Multi-resolution DM schedule: low-resolution shells first (coarse-to-fine)."""
     spec=os.environ.get('OASIS_INTERNAL_DM_LADDER','').strip()
     if not spec:return None
     d_min=float(1.0/np.sqrt(np.max((data.hkl**2/np.array([data.cell.a,data.cell.b,data.cell.c])**2).sum(axis=1))))

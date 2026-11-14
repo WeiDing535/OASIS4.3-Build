@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Copyright (C) 2026 DingWei (丁玮) and contributors.
-"""Native Qt desktop front end for independent SAD phasing; no external Parrot."""
+"""Native Qt desktop front end for independent SAD phasing; no external programs."""
 from pathlib import Path
 import json
 import sys
@@ -42,7 +42,7 @@ def make_window(C,G,W):
             host=W.QWidget();self.setCentralWidget(host);layout=W.QVBoxLayout(host)
             title=W.QLabel('OASIS4.3-GUI-0.1  /  SAD 相位计算');title.setStyleSheet('font-size:24px;font-weight:600')
             layout.addWidget(title)
-            note=W.QLabel('独立 Python 引擎 · 默认通用蛋白参考 · 无需 CCP4 / Parrot')
+            note=W.QLabel('独立 Python 引擎 · 默认通用蛋白参考 · 无需 CCP4')
             layout.addWidget(note)
             scroll=W.QScrollArea();scroll.setWidgetResizable(True);layout.addWidget(scroll,3)
             self.form_host=W.QWidget();scroll.setWidget(self.form_host);form=W.QFormLayout(self.form_host)
@@ -76,7 +76,7 @@ def make_window(C,G,W):
             form.addRow('可选理论估算',wave_row)
             self.method=W.QComboBox();self.method.addItem('连续 SAD + MLHL-best 密度修饰','likelihood');self.method.addItem('P+ + legacy 密度修饰','pplus')
             self.field(form,'算法',self.method,'method','连续 SAD 使用当前的连续相位似然方法，启用密度修饰时采用独立 MLHL-best 引擎；P+ 路径采用此前的 legacy 密度修饰。默认选择连续 SAD。自动组成和溶剂估算不会根据已知完整结构挑选算法。')
-            self.dm=W.QCheckBox('启用独立密度修饰');self.dm.setChecked(True);self.field(form,'密度修饰',self.dm,'dm','在 SAD 初始相位后使用溶剂平坦化、直方图匹配和相位概率更新。溶剂比例来自上方自动估算。取消后仅输出 SAD 相位；全过程不调用外部 Parrot。')
+            self.dm=W.QCheckBox('启用独立密度修饰');self.dm.setChecked(True);self.field(form,'密度修饰',self.dm,'dm','在 SAD 初始相位后使用溶剂平坦化、直方图匹配和相位概率更新。溶剂比例来自上方自动估算。取消后仅输出 SAD 相位；全过程不调用任何外部程序。')
             self.cycles=W.QSpinBox();self.cycles.setRange(1,100);self.cycles.setValue(5);self.field(form,'SAD 初始相位轮数',self.cycles,'cycles','初始 SAD/直接法相位计算轮数，默认 5，允许 1–100。更多轮次不保证相位更准确；它与密度修饰轮数分别设置。')
             self.dm_cycles=W.QSpinBox();self.dm_cycles.setRange(1,100);self.dm_cycles.setValue(5);self.field(form,'密度修饰轮数',self.dm_cycles,'dm_cycles','独立密度修饰迭代轮数，默认 5，允许 1–100。仅在启用密度修饰时使用。轮数增加不保证求解效果提高。')
             self.dmin=W.QLineEdit();self.dmin.setPlaceholderText('留空使用输入分辨率；复现此前基准填 2.8')

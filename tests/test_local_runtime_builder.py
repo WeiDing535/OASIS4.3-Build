@@ -78,7 +78,10 @@ def test_startup_probe_uses_application_environment_without_host_scratch(tmp_pat
 def test_engine_list_keeps_the_minimal_default_and_rejects_typos():
     assert BUILDER.engine_names('') == ('cbuccaneer', 'refmac5')
     assert BUILDER.engine_names(None) == ('cbuccaneer', 'refmac5')
-    assert BUILDER.engine_names('phaser, cparrot') == ('phaser', 'cparrot')
-    assert BUILDER.engine_names('cparrot,phaser,cparrot') == ('cparrot', 'phaser')
+    assert BUILDER.engine_names('phaser, cbuccaneer') == ('phaser', 'cbuccaneer')
+    assert BUILDER.engine_names('cbuccaneer,phaser,cbuccaneer') == ('cbuccaneer', 'phaser')
+    for gone in ('density',):
+        with pytest.raises(ValueError, match='Unknown engine'):
+            BUILDER.engine_names(gone)
     with pytest.raises(ValueError, match='Unknown engine'):
         BUILDER.engine_names('cbuccaneer,cparot')

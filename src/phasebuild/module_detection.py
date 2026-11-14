@@ -1,7 +1,8 @@
 """Which optional CCP4 modules this machine can really run.
 
-OASIS4.3 always runs its own P+ phasing (module 1).  Parrot (module 2) and
-Buccaneer/REFMAC (module 3) are CCP4 programs, so the window must not offer a
+OASIS4.3 always runs P+ phasing together with handdm density modification
+(module 1): handdm ships in-tree, so that half needs no detection at all.
+Buccaneer/REFMAC (module 2) are CCP4 programs, so the window must not offer a
 stage the machine cannot execute.  This module answers one question — "are the
 executables there?" — and never raises: a broken or absent CCP4 installation is
 a normal answer, not an error.
@@ -17,9 +18,11 @@ from pathlib import Path
 
 # key, title, executables any one of which proves the module is installed
 MODULES=(
-    ('parrot','Parrot 密度修饰',('cparrot','parrot')),
     ('build','Buccaneer 建模 + REFMAC 精修',('cbuccaneer','buccaneer')),
 )
+# Density modification is not detected: handdm v2 is part of the program and is
+# always available.  It stays in the report so the window can show one list.
+IN_TREE=(('dm','handdm v2 密度修饰'),)
 # Buccaneer and REFMAC travel together: the builder writes the model, REFMAC
 # refines it, and a machine with only one of them cannot finish the stage.
 BUILD_PARTNER=('refmac5',)
@@ -27,9 +30,9 @@ BUILD_PARTNER=('refmac5',)
 # almost no environment, so these are searched explicitly.
 INSTALL_PATTERNS=('/Applications/ccp4-*/bin','/opt/ccp4*/bin','/usr/local/ccp4*/bin')
 
-MISSING_HINT='未检测到 CCP4：只做 P+ 定相，输出相位/FOM/MTZ。需要密度修饰或建模时，'
-MISSING_TAIL=('请安装 CCP4；已装但不在默认位置时，在“CCP4 位置”里填 CCP4 根目录'
-              '（含 bin/）或 ccp4.setup / bashrc 的路径，再点“重新检测”。')
+MISSING_HINT='未检测到 CCP4：只做模块 1（P+ 定相 + handdm 密度修饰），输出相位/FOM/MTZ。'
+MISSING_TAIL=('需要 Buccaneer 建模与 REFMAC 精修时请安装 CCP4；已装但不在默认位置时，'
+              '在“CCP4 位置”里填 CCP4 根目录（含 bin/）或 ccp4.setup / bashrc 的路径，再点“重新检测”。')
 
 # CCP4=/opt/ccp4-8, export CBIN=/opt/ccp4-8/bin, CCP4_ROOT='/Applications/ccp4-9'
 _ASSIGNMENT=re.compile(r'''(?:^|[;\s])(?:export\s+)?(CCP4|CCP4_ROOT|CBIN|CCP4_BIN)\s*=\s*("[^"]*"|'[^']*'|[^\s;]+)''')
@@ -115,7 +118,8 @@ def detect(runtime=None,environ=None,location=None):
     dirs=_candidate_dirs(runtime,environ,location)
     found={key:_find(names,dirs) for key,_,names in MODULES}
     refmac=_find(BUILD_PARTNER,dirs)
-    modules={}
+    modules={key:dict(title=title,available=True,path='内置（随程序提供）',
+                      reason='') for key,title in IN_TREE}
     for key,title,names in MODULES:
         available=bool(found[key]) and (key!='build' or bool(refmac))
         missing=[]
@@ -125,11 +129,8 @@ def detect(runtime=None,environ=None,location=None):
                           reason='' if available else '未找到可执行文件：'+'、'.join(missing))
     if refmac:modules['build']['refmac']=refmac
     ready=[modules[key]['title'] for key,_,_ in MODULES if modules[key]['available']]
-    if len(ready)==2:
-        summary='已检测到 CCP4：Parrot 与 Buccaneer/REFMAC 默认启用（可在上方取消勾选）。'
-    elif ready:
-        summary='只检测到 CCP4 的一部分：默认启用 %s；%s 未找到，保持关闭。'%(
-            '、'.join(ready),'、'.join(modules[key]['title'] for key,_,_ in MODULES if not modules[key]['available']))
+    if ready:
+        summary='已检测到 CCP4：Buccaneer/REFMAC 建模默认启用（可在上方取消勾选）。'
     else:
         summary=MISSING_HINT+MISSING_TAIL
     # Which installation actually answered.  ``found_at`` is where the

@@ -49,13 +49,13 @@ from phasebuild.oasis_workflow import defaults
 cfg=defaults(base/'app');assert cfg['method'] in ('pplus_internal','pplus_bundled') and not cfg['phenix_bin']
 doc=json.loads((base/'runtime/runtime_manifest.json').read_text())
 names={Path(e['relative_path']).name for e in doc.get('dependency_graph',[])}
-labels={'phaser':'Phaser','cparrot':'Parrot','cbuccaneer':'Buccaneer','refmac5':'REFMAC'}
+labels={'phaser':'Phaser','cbuccaneer':'Buccaneer','refmac5':'REFMAC'}
 engines=[labels[n] for n in labels if n in names]
 print(json.dumps({'status':'passed','paths':paths,'python_version':sys.version,'default_method':cfg['method'],'requires_separate_Phenix':False,'requires_separate_CCP4':False,'bundled_external_engines':engines,'public_redistribution_ready':False},indent=2))
 '''
 
 
-ENGINE_LABELS={'phaser':'Phaser','cparrot':'Parrot','cbuccaneer':'Buccaneer','refmac5':'REFMAC'}
+ENGINE_LABELS={'phaser':'Phaser','cbuccaneer':'Buccaneer','refmac5':'REFMAC'}
 
 
 def bundled_engines(root):
@@ -118,12 +118,15 @@ def main(argv=None):
     doctor['paths']={k:str(Path(v).relative_to(out)) if str(v).startswith(str(out)) else v
                      for k,v in doctor.get('paths',{}).items()}
     (out/'DOCTOR.json').write_text(json.dumps(doctor,indent=2)+'\n')
-    engines=bundled_engines(out);parrot='cparrot' in engines
-    scope=('Bundled Phaser SAD -> P+ -> Parrot density modification -> Buccaneer/REFMAC. '
-        'The RESOLVE/CCTBX density runtime is not part of this assembly.') if parrot else \
+    engines=bundled_engines(out)
+    # Density modification is the in-tree handdm v2 engine, so a P+ bundle only
+    # needs Phaser plus the model-building programs.
+    pplus='phaser' in engines
+    scope=('Bundled Phaser SAD -> P+ -> handdm v2 density modification -> Buccaneer/REFMAC. '
+        'No external density-modification program is part of this assembly.') if pplus else \
         'Internal approximate likelihood and DM. External-branch SEC17 Rfree27.42% is not claimed for this route.'
     report={'version':tomllib.loads((ROOT/'pyproject.toml').read_text())['tool']['oasis43']['version'],'platform':'macOS Intel x86_64','status':'assembled',
-        'default_method':'pplus_bundled' if {'phaser','cparrot'}<=set(engines) else 'pplus_internal',
+        'default_method':'pplus_bundled' if pplus else 'pplus_internal',
         'requires_separate_Phenix_installation':False,'requires_separate_CCP4_installation':False,'Phenix_bundled':False,
         'bundled_external_engines':[ENGINE_LABELS[n] for n in ENGINE_LABELS if n in engines],
         'bundled_engine_ids':[n for n in ENGINE_LABELS if n in engines],
@@ -133,7 +136,7 @@ def main(argv=None):
         'scientific_scope':scope}
     (out/'bundle.json').write_text(json.dumps(report,indent=2)+'\n')
     engine_text='、'.join(ENGINE_LABELS[n] for n in ENGINE_LABELS if n in engines)
-    dm_text='Parrot 密度修饰' if parrot else '内置 RESOLVE/MLHL 密度修饰'
+    dm_text='handdm v2 密度修饰' if pplus else '内置 MLHL 密度修饰'
     (out/'使用说明.txt').write_text('OASIS4.3 本机免安装套件评估包（macOS Intel）\n\n双击 OASIS4.3.command；保持整个目录完整。无需另装 Python、Phenix 或整套 CCP4。\n随包引擎：'+engine_text+'；密度修饰：'+dm_text+'。内部 SAD/P+ 使用随包 NumPy/SciPy/Gemmi。不是全部算法由 OASIS 原创。\nPhenix 对照模式在此包中禁止调用。数据文件由用户提供；运行写入新目录。\n这是由本机已有授权组件构建的本机评估包；公开再分发条件尚未落实，不是公开发行包。\n')
     print(json.dumps({'bundle':str(out),'status':report['status'],'doctor':'passed'},indent=2))
 

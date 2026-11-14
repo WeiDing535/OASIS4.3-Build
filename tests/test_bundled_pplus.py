@@ -11,16 +11,16 @@ from phasebuild.sad_input import read_sad_pairs
 def bundled(trusted,tmp_path):
  cfg={**trusted,'method':'pplus_bundled','observation_prior':'','wavelength':.9792}
  runtime=Path(cfg['runtime'])
- # P+ needs exactly these four CCP4 programs; no bundled density/ tree.
- for name in ['bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5']:
+ # P+ needs exactly these three CCP4 programs; density modification is in-tree.
+ for name in ['bin/phaser','bin/cbuccaneer','bin/refmac5']:
   p=runtime/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('#!/bin/sh\nexit 0\n');p.chmod(0o755)
  return cfg
 
 def test_bundle_plan_and_explicit_experimental_wavelength(bundled):
- # The bundled profile defaults to 40 density-modification cycles, but an
- # explicit request must survive (a silently ignored CLI flag is a defect).
+ # The bundled profile picks a cycle budget (12 for handdm v2), but an explicit
+ # request must survive (a silently ignored CLI flag is a defect).
  cfg=pipeline.validate({k:v for k,v in bundled.items() if k!='dm_cycles'});plan=pipeline.stage_plan(cfg)
- assert cfg['phenix_bin']=='' and cfg['dm_cycles']==40
+ assert cfg['phenix_bin']=='' and cfg['dm_cycles']==12
  assert pipeline.validate({**bundled,'dm_cycles':20})['dm_cycles']==20
  assert 'frontend.json' in '\n'.join(plan[1]['outputs'])
  assert plan[4]['command'][plan[4]['command'].index('--phase-prior')+1].endswith('02_sad/observations.mtz')

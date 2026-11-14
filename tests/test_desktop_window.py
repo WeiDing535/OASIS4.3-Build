@@ -15,7 +15,7 @@ def project(tmp_path):
 def test_controller_defaults_and_plan_come_from_the_workflow(tmp_path):
     controller=desktop.Controller(project(tmp_path))
     default=controller.defaults()
-    assert default['method']=='pplus_bundled' and default['dm_engine']=='parrot'
+    assert default['method']=='pplus_bundled' and default['dm_engine']=='handdm'
     assert 'profile' not in default
     assert 'gui_workflow' not in __import__('sys').modules
 
@@ -62,13 +62,15 @@ def test_every_method_carries_a_hint_and_the_internal_route_is_flagged():
     assert '实验性' in desktop.METHOD_NAMES['pplus_internal']
     assert '实验性' in desktop.METHOD_HINTS['pplus_internal']
     assert '推荐' in desktop.METHOD_NAMES['pplus_bundled']
-    assert 'Parrot' in desktop.METHOD_HINTS['pplus_bundled']
+    assert 'handdm' in desktop.METHOD_HINTS['pplus_bundled']
 
 
 def test_protocol_and_engine_labels_round_trip():
     for key,label in desktop.PROTOCOLS:
         assert dict((label,value) for value,label in desktop.PROTOCOLS)[label]==key
-    assert dict(desktop.ENGINES)['parrot']=='CCP4 Parrot（推荐）'
+    # Density modification is not a choice any more: one in-tree engine.
+    assert [key for key,_ in desktop.ENGINES]==['handdm']
+    assert desktop.DM_ENGINE=='handdm'
 
 
 def fill(app,values):
@@ -95,7 +97,8 @@ def test_window_builds_and_collects_the_form(tmp_path):
         fill(app,dict(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
                       wavelength='0.97918',copies='2',output=str(tmp_path/'run')))
         values=app.collect()
-        assert values['method']=='pplus_bundled' and values['dm_engine']=='parrot'
+        assert values['method']=='pplus_bundled' and values['dm_engine']=='handdm'
+        assert values['dm_enabled'] is True      # part of P+, not an optional stage
         assert values['build_model'] is True and values['auto_hand'] is True
         assert values['allow_unverified_hand'] is False   # default off: marginal evidence still fails closed
         app.unverified_hand.set(True)
@@ -197,7 +200,7 @@ def test_fallback_warning_is_a_red_line_that_clears(tmp_path):
         app._warn('')                       # detection may already have said something
         app.root.update_idletasks()
         assert not app.warning.winfo_ismapped()
-        notice=app.controller.fallback_notice({'dm_engine_fallback':'Parrot (cparrot) was not found'})
+        notice=app.controller.fallback_notice({'dm_engine_fallback':'handdm v2 needs a Python with numpy, scipy and gemmi'})
         assert '已回退' in notice
         app._warn(notice)
         app.root.update_idletasks()
@@ -233,7 +236,7 @@ def test_results_panel_lists_the_endpoint_grid_and_the_retained_one(tmp_path):
     except tkinter.TclError:
         pytest.skip('no display available')
     controller=desktop.Controller(project(tmp_path))
-    controller.results=lambda identifier: dict(method_name='P+ Wang8 + 精修权重搜索',dm_engine='parrot',metrics=[],
+    controller.results=lambda identifier: dict(method_name='P+ Wang8 + 精修权重搜索',dm_engine='handdm',metrics=[],
                 solvent_fraction=0.5,solvent_source='user',final_model='00_sad_to_model/endpoint_fb2_s0.50/primary_model.cif',
                 primary_metric={'stage':'完整链后精修','r_work':0.2834,'r_free':0.3147},
                 endpoint_selection={'selected_feedback':2},
@@ -304,7 +307,7 @@ def test_imported_result_is_shown_read_only(tmp_path):
     metrics=[dict(stage='第 %d 轮'%index,round=index,r_work=work,r_free=free)
              for index,(work,free) in enumerate(pairs,1)]
     controller.results=lambda identifier:dict(metrics=metrics,final_model=None,preview=[],
-                                              method_name='P+ 自带引擎',dm_engine='parrot',
+                                              method_name='P+ 自带引擎',dm_engine='handdm',
                                               primary_metric=dict(stage='第 2 轮',r_work=0.3156,r_free=0.3829))
     app=desktop.App(controller)
     try:
@@ -554,7 +557,7 @@ def test_window_names_relaunches_and_deletes_history_rows(tmp_path,monkeypatch):
         rows[:]=[r for r in rows if r['id']!=identifier]
     controller.delete=delete
     controller.results=lambda identifier:dict(metrics=[],final_model=None,preview=[],
-                                              method_name='P+ 自带引擎',dm_engine='parrot',
+                                              method_name='P+ 自带引擎',dm_engine='handdm',
                                               primary_metric={})
     errors=[]
     monkeypatch.setattr(box,'showerror',lambda title,text:errors.append(text))
@@ -691,48 +694,47 @@ def test_results_page_draws_the_r_work_and_r_free_curve(tmp_path):
 
 
 @pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
-def test_optional_modules_follow_ccp4_detection_and_gate_building(tmp_path,monkeypatch):
-    """Parrot and Buccaneer default on when CCP4 is found, off with a notice when not."""
+def test_density_modification_is_always_on_and_only_building_follows_ccp4(tmp_path,monkeypatch):
+    """handdm ships with the program, so no detection can switch it off; the model
+    stage still follows what this machine can run."""
     import tkinter
     try:
         tkinter.Tk().destroy()
     except tkinter.TclError:
         pytest.skip('no display available')
     from phasebuild import module_detection
-    def report(parrot,build):
-        modules={'parrot':dict(title='Parrot 密度修饰',available=parrot,path=None,reason=''),
+    def report(build):
+        modules={'dm':dict(title='handdm v2 密度修饰',available=True,path='内置（随程序提供）',reason=''),
                  'build':dict(title='Buccaneer 建模 + REFMAC 精修',available=build,path=None,
                               reason='',refmac=build)}
-        return dict(available=parrot or build,modules=modules,summary='',
-                    ccp4_ready=parrot and build,searched=[])
-    monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None,location=None: report(False,False))
+        return dict(available=build,modules=modules,summary='',
+                    ccp4_ready=build,searched=[])
+    monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None,location=None: report(False))
     app=desktop.App(desktop.Controller(project(tmp_path)))
     try:
         app.root.update_idletasks()
         app.fields['wavelength']['var'].set('0.97918')
         app.fields['copies']['var'].set('1')
-        assert app.module_parrot.get() is False and app.module_build.get() is False
+        # No CCP4 at all: module 1 still runs to completion, with handdm.
+        assert app.module_phase.get() is True and app.module_build.get() is False
         assert str(app.build_check.cget('state'))=='disabled'
         hint=app.module_hint.get()
-        assert '未检测到 CCP4' in hint and '模块 1 输出相位' in hint
+        assert '未检测到 CCP4' in hint and 'handdm 内置' in hint
         values=app.collect()
-        assert values['dm_enabled'] is False and values['build_model'] is False
-        monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None,location=None: report(True,True))
+        assert values['dm_enabled'] is True and values['dm_engine']=='handdm'
+        assert values['build_model'] is False
+        # Density-modification fields are never greyed out: they always apply.
+        assert str(app.fields['dm_cycles']['row'].winfo_children()[1].cget('state'))=='normal'
+        monkeypatch.setattr(module_detection,'detect',lambda runtime=None,environ=None,location=None: report(True))
         app._detect_modules()
-        assert app.module_parrot.get() is True and app.module_build.get() is True
+        assert app.module_build.get() is True
         assert '已检测到 CCP4' in app.module_hint.get()
         assert str(app.build_check.cget('state'))=='normal'
-        values=app.collect()
-        assert values['dm_enabled'] is True and values['build_model'] is True
-        app.module_parrot.set(False);app._modules_changed()
-        assert app.module_build.get() is False
-        assert str(app.build_check.cget('state'))=='disabled'
+        assert app.collect()['build_model'] is True
+        app.module_build.set(False);app._modules_changed()
         assert '模块 2 已关闭' in app.module_hint.get()
-        assert str(app.fields['dm_cycles']['row'].winfo_children()[1].cget('state'))=='disabled'
         values=app.collect()
-        assert values['dm_enabled'] is False and values['build_model'] is False
-        app.module_parrot.set(True);app._modules_changed()
-        assert str(app.fields['dm_cycles']['row'].winfo_children()[1].cget('state'))=='normal'
+        assert values['dm_enabled'] is True and values['build_model'] is False
     finally:
         app.root.destroy()
 
@@ -749,7 +751,7 @@ def test_a_typo_in_the_ccp4_location_falls_back_and_says_so(tmp_path,monkeypatch
     calls=[]
     def fake(runtime=None,environ=None,location=None):
         calls.append((runtime,location))
-        modules={'parrot':dict(title='Parrot 密度修饰',available=True,path='/x/cparrot',reason=''),
+        modules={'dm':dict(title='handdm v2 密度修饰',available=True,path='内置（随程序提供）',reason=''),
                  'build':dict(title='Buccaneer 建模 + REFMAC 精修',available=True,path='/x/cbuccaneer',
                               reason='',refmac='/x/refmac5')}
         return dict(available=True,modules=modules,summary='',ccp4_ready=True,searched=[],
@@ -764,7 +766,7 @@ def test_a_typo_in_the_ccp4_location_falls_back_and_says_so(tmp_path,monkeypatch
         assert app.fields['runtime']['var'].get()==bundled
         assert '“%s”里没找到 CCP4 程序'%str(tmp_path/'typo') in app.module_hint.get()
         assert 'CCP4：/opt/ccp4-9' in app.module_hint.get()
-        assert app.module_parrot.get() and app.module_build.get()
+        assert app.module_build.get()
         # the retry asked about the runtime the run will actually use
         assert calls[-1]==(bundled or None,None)
     finally:
@@ -783,7 +785,7 @@ def test_browse_buttons_stay_visible_and_ccp4_location_feeds_detection(tmp_path,
     seen={}
     def fake(runtime=None,environ=None,location=None):
         seen['runtime'],seen['location']=runtime,location
-        modules={'parrot':dict(title='Parrot 密度修饰',available=True,path='/x/cparrot',reason=''),
+        modules={'dm':dict(title='handdm v2 密度修饰',available=True,path='内置（随程序提供）',reason=''),
                  'build':dict(title='Buccaneer 建模 + REFMAC 精修',available=True,path='/x/cbuccaneer',
                               reason='',refmac='/x/refmac5')}
         return dict(available=True,modules=modules,summary='',ccp4_ready=True,searched=[],
@@ -814,27 +816,28 @@ def test_browse_buttons_stay_visible_and_ccp4_location_feeds_detection(tmp_path,
         # the same root is what the run uses, and both CCP4 modules default on
         app.fields['wavelength']['var'].set('0.97918')
         assert app.collect()['runtime']=='/opt/ccp4-9'
-        assert app.module_parrot.get() and app.module_build.get()
+        assert app.module_build.get()
     finally:
         app.root.destroy()
 
 
-def test_a_complete_ccp4_runs_p_plus_with_parrot(tmp_path,monkeypatch):
-    """P+ is in-tree Python; the only external pieces are the four CCP4 programs."""
+def test_a_complete_ccp4_runs_p_plus_with_handdm(tmp_path,monkeypatch):
+    """P+ and handdm are in-tree; the only external pieces are Phaser and the builder."""
     from phasebuild import oasis_workflow
     monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+        for name in ('bin/phaser','bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
         config=app._ensure_runnable(dict(app.defaults,method='pplus_bundled',
                                          runtime=str(bare),dm_engine='internal'))
         assert config['runtime']==str(bare)
         assert config['method']=='pplus_bundled'
-        # P+ can only density-modify with Parrot: an inherited 'internal' is fixed.
-        assert config['dm_engine']=='parrot' and config['feedback_cycles']==0
+        # An engine inherited from an old record is corrected to the in-tree one,
+        # and the calibrated feedback cycle count is left alone.
+        assert config['dm_engine']=='handdm' and config['feedback_cycles']==2
         assert 'density_runtime' not in config
         assert app._p_plus_ready(str(bare))
     finally:
@@ -848,31 +851,31 @@ def test_a_ccp4_without_phaser_moves_to_continuous_sad(tmp_path,monkeypatch):
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+        for name in ('bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
         config=app._ensure_runnable(dict(app.defaults,method='pplus_bundled',
-                                         runtime=str(bare),dm_engine='parrot'))
-        assert config['method']=='likelihood' and config['dm_engine']=='parrot'
+                                         runtime=str(bare),dm_engine='handdm'))
+        assert config['method']=='likelihood' and config['dm_engine']=='handdm'
         assert config['auto_hand'] is False and config['allow_unverified_hand'] is False
-        assert '连续 SAD' in app._location_warning and 'Parrot' in app._location_warning
+        assert '连续 SAD' in app._location_warning and 'handdm' in app._location_warning
         assert app.method.get()=='likelihood'
     finally:
         app.root.destroy()
 
 
 def test_a_bare_ccp4_keeps_its_engines(tmp_path,monkeypatch):
-    """The user's own CCP4 is enough for Phaser/Parrot/Buccaneer/REFMAC."""
+    """The user's own CCP4 is enough for Phaser/Buccaneer/REFMAC; handdm is in-tree."""
     from phasebuild import oasis_workflow
     monkeypatch.setattr(oasis_workflow,'bundled_runtime',lambda project:None)
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/phaser','bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+        for name in ('bin/phaser','bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
         config=app._ensure_runnable(dict(app.defaults,method='pplus_bundled',
-                                         runtime=str(bare),dm_engine='parrot'))
+                                         runtime=str(bare),dm_engine='handdm'))
         assert config['runtime']==str(bare) and config['method']=='pplus_bundled'
         assert app._location_warning==''
     finally:
@@ -886,25 +889,30 @@ def test_an_incomplete_ccp4_is_refused_with_the_missing_program(tmp_path,monkeyp
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/phaser','bin/cparrot'):
+        for name in ('bin/phaser',):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#!/bin/sh\n')
         with pytest.raises(ValueError) as caught:
             app._ensure_runnable(dict(app.defaults,method='pplus_bundled',
-                                      runtime=str(bare),dm_engine='parrot'))
+                                      runtime=str(bare),dm_engine='handdm'))
         assert 'cbuccaneer' in str(caught.value) and 'CCP4' in str(caught.value)
     finally:
         app.root.destroy()
 
 
-def test_the_engine_box_is_pinned_for_the_p_plus_routes(tmp_path):
-    """P+ has no in-tree DM backend, so the engine choice is not the user's."""
+def test_there_is_no_density_modification_engine_to_choose(tmp_path):
+    """handdm is part of P+; the window must not offer any engine choice at all."""
     app=window(tmp_path)
     try:
-        app.method.set('pplus_bundled');app._method_changed()
-        assert app.dm_engine.get()==dict(desktop.ENGINES)['parrot']
-        assert str(app.dm_engine_box.cget('state'))=='disabled'
-        app.method.set('likelihood');app._method_changed()
-        assert str(app.dm_engine_box.cget('state'))=='readonly'
+        assert not hasattr(app,'dm_engine_box')
+        assert not hasattr(app,'dm_engine')
+        # Module 1 is mandatory and has no sub-option for the density modifier.
+        assert app.module_phase.get() is True
+        app.fields['wavelength']['var'].set('2.0')
+        app.fields['copies']['var'].set('1')
+        for method in ('pplus_bundled','pplus_internal','likelihood','pplus'):
+            app.method.set(method);app._method_changed()
+            values=app.collect()
+            assert values['dm_engine']=='handdm' and values['dm_enabled'] is True
     finally:
         app.root.destroy()
 
@@ -931,7 +939,7 @@ def test_starting_on_a_bare_ccp4_says_the_method_changed(tmp_path,monkeypatch):
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/cparrot','bin/cbuccaneer','bin/refmac5'):
+        for name in ('bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
         for key,value in [('sad','sad.mtz'),('heavy','heavy.pdb'),('sequence','seq.pir')]:
@@ -1016,21 +1024,21 @@ def test_a_long_stage_log_is_shown_whole(tmp_path):
 
 
 def test_engine_sub_logs_are_shown_under_their_stage(tmp_path):
-    """Parrot/REFMAC/trace logs live one or two folders deeper; they are the story."""
+    """handdm/REFMAC/trace logs live one or two folders deeper; they are the story."""
     folder=tmp_path/'run/00_sad_to_model';folder.mkdir(parents=True)
     (folder/'pipeline_report.json').write_text(json.dumps(dict(completed=[
         dict(id='dm',name='密度修饰'),dict(id='build',name='Buccaneer 构建')])))
     (folder/'dm.log').write_text('dm summary\n')
     cycle=folder/'03_dm/cycle_02';cycle.mkdir(parents=True)
-    (cycle/'parrot.log').write_text('parrot cycle 2: contrast 0.71\n')
+    (cycle/'handdm.log').write_text('handdm cycle 2: holdout CC 0.85\n')
     refmac=folder/'05_build/cycle_01';refmac.mkdir(parents=True)
     (refmac/'refmac.log').write_text('Rwork 0.2834 Rfree 0.3147\n')
     (folder/'build.log').write_text('build summary\n')
     text=desktop.stage_log_text(tmp_path/'run')
-    assert text.index('dm summary') < text.index('parrot cycle 2') < text.index('build summary')
+    assert text.index('dm summary') < text.index('handdm cycle 2') < text.index('build summary')
     assert text.index('build summary') < text.index('Rwork 0.2834')
-    assert 'cycle_02/parrot.log' in text and 'cycle_01/refmac.log' in text
-    assert text.count('parrot cycle 2')==1        # each file appears once
+    assert 'cycle_02/handdm.log' in text and 'cycle_01/refmac.log' in text
+    assert text.count('handdm cycle 2')==1        # each file appears once
 
 
 @pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
@@ -1062,14 +1070,14 @@ def test_a_bare_ccp4_warns_before_the_first_run_not_only_after(tmp_path,monkeypa
     app=window(tmp_path)
     try:
         bare=tmp_path/'ccp4-9'
-        for name in ('bin/phaser','bin/cbuccaneer','bin/refmac5'):
+        for name in ('bin/cbuccaneer','bin/refmac5'):
             path=bare/name;path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text('#!/bin/sh\n');path.chmod(0o755)
         app.fields['runtime']['var'].set(str(bare))
         app.method.set('pplus_bundled')
         app._detect_modules(initial=True)
         text=app.warning.cget('text')
-        assert 'cparrot' in text and '连续 SAD' in text and str(bare) in text
+        assert 'phaser' in text and '连续 SAD' in text and str(bare) in text
         # The method itself is untouched until 开始, so nothing is hidden either.
         assert app.method.get()=='pplus_bundled'
     finally:

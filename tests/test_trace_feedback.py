@@ -1,6 +1,6 @@
-"""Unit tests for the work-only Parrot + trace-feedback density-modification layer.
+"""Unit tests for the work-only handdm v2 + trace-feedback density-modification layer.
 
-These tests use synthetic MTZs and never execute Parrot, Buccaneer or REFMAC.
+These tests use synthetic MTZs and never execute handdm, Buccaneer or REFMAC.
 """
 from pathlib import Path
 import json
@@ -8,7 +8,7 @@ import numpy as np
 import gemmi
 import pytest
 
-from phasebuild import parrot_dm, trace_feedback, ccp4_pipeline
+from phasebuild import handdm_dm, trace_feedback, ccp4_pipeline
 
 
 def _mtz(path, rows, cell=(40.0, 40.0, 40.0, 90.0, 90.0, 90.0), sg='P 1', extra=()):
@@ -28,27 +28,35 @@ def _hl(kappa, phase_deg):
     return [kappa*np.cos(r),kappa*np.sin(r),0.0,0.0]
 
 
-def test_to_phifom_recovers_phase_and_monotone_fom(tmp_path):
+def test_phi_fom_recovers_the_centroid_phase_and_a_monotone_fom():
+    hl=np.array([_hl(k,p) for k,p in [(0.0,0.0),(0.5,90.0),(5.0,180.0),(60.0,270.0)]])
+    phase,fom=handdm_dm.phi_fom(hl)
+    assert np.allclose(phase%360,[0.0,90.0,180.0,270.0],atol=1e-4)
+    assert np.all(np.diff(fom)>0),'FOM must increase with the HL magnitude'
+    assert fom[0]==0.0 and fom[-1]<1.0
+
+
+def test_write_schema_renames_handdm_output_to_the_pipeline_schema(tmp_path):
     rows=[]
     for i,(kappa,phase) in enumerate([(0.0,0.0),(0.5,90.0),(5.0,180.0),(60.0,270.0)]):
-        rows.append([i+1,0,1,10.0,1.0]+_hl(kappa,phase))
-    src=_mtz(tmp_path/'hl.mtz',rows,extra=[('FP','F'),('SIGFP','Q'),
-        ('HLA','A'),('HLB','A'),('HLC','A'),('HLD','A')])
+        rows.append([i+1,0,1,10.0,1.0,10.0,phase,phase,0.8]+_hl(kappa,phase))
+    src=_mtz(tmp_path/'dm.mtz',rows,extra=[('FP','F'),('SIGFP','Q'),
+        ('DM_FWT','F'),('DM_PHWT','P'),('DM_PHIDM','P'),('DM_FOMDM','W'),
+        ('DM_HLADM','A'),('DM_HLBDM','A'),('DM_HLCDM','A'),('DM_HLDDM','A')])
     dst=tmp_path/'phifom.mtz'
-    info=parrot_dm.to_phifom(src,dst)
+    info=handdm_dm.write_schema(src,dst)
     m=gemmi.read_mtz_file(str(dst));labels=m.column_labels()
-    for label in ('F','SIGF','FWT','PHWT','PHIB','FOM'):
+    for label in ('F','SIGF','FWT','PHWT','PHIB','FOM','HLA','HLB','HLC','HLD'):
         assert label in labels
-    phases=np.asarray(m.column_with_label('PHIB'))
-    foms=np.asarray(m.column_with_label('FOM'))
-    assert np.allclose(phases%360,[0.0,90.0,180.0,270.0],atol=1e-4)
-    assert np.all(np.diff(foms)>0),'FOM must increase with the HL magnitude'
-    assert 0.0<=float(foms.min()) and float(foms.max())<=1.0
+    assert np.allclose(np.asarray(m.column_with_label('PHIB'))%360,
+                       [0.0,90.0,180.0,270.0],atol=1e-4)
+    assert info['mean_fom']>0
+    fom=np.asarray(m.column_with_label('FOM'))
+    assert 0.0<=float(fom.min()) and float(fom.max())<=1.0
 
-    # FWTs are the FOM-weighted amplitudes actually used downstream.
-    fwt=np.asarray(m.column_with_label('FWT'))
-    assert np.allclose(fwt,10.0*foms,atol=1e-4)
-    assert info['mean_fom']==pytest.approx(float(foms.mean()))
+    # FWTs and PHWT are handdm's own map coefficients, carried through unchanged.
+    assert np.allclose(np.asarray(m.column_with_label('FWT')),10.0,atol=1e-4)
+    assert info['mean_fom']==pytest.approx(float(fom.mean()))
 
 
 def test_work_only_input_excludes_free_rows(tmp_path):
@@ -76,9 +84,10 @@ def test_empty_trace_stops_the_feedback_and_keeps_the_dm_map(tmp_path,monkeypatc
     def fake_trace(work_mtz,phase_mtz,seq,runtime,output_dir,**kw):
         model=Path(output_dir)/'model.pdb';model.parent.mkdir(parents=True,exist_ok=True);model.write_text('END\n')
         return {'model':str(model),'residues':0,'fragments':0}
-    monkeypatch.setattr(parrot_dm,'run',fake_dm)
+    monkeypatch.setattr(handdm_dm,'run',fake_dm)
     monkeypatch.setattr(trace_feedback,'trace',fake_trace)
-    report=trace_feedback.run(work,prior,sequence,'runtime',tmp_path/'out',solvent_fraction=.5,feedback_cycles=3)
+    report=trace_feedback.run(work,prior,sequence,'runtime',tmp_path/'out',solvent_fraction=.5,
+                              feedback_cycles=3)
     assert len(report['history'])==1                 # no second cycle was attempted
     assert 'no residues' in report['history'][0]['feedback_stopped']
     assert dm_models==[None]                          # the empty model was never fed back
@@ -177,3 +186,32 @@ def test_work_from_experimental_supplies_the_free_set_a_phases_only_run_lacks(tm
     assert merged.column_labels()==['H','K','L','FP','SIGFP','FreeR_flag']
     kept=np.array(merged)[:,5]!=7
     assert kept.sum()==int((flags!=7).sum())
+
+
+def test_handdm_engine_receives_its_own_options(tmp_path, monkeypatch):
+    """cmbwt/holdout/hist-lib must reach the in-tree engine."""
+    from phasebuild import handdm_dm
+    seen = {}
+
+    def fake_dm(work_mtz, prior_mtz, destination, solvent_fraction, **kw):
+        seen.update(kw)
+        Path(destination).write_text('x')
+        return {'dm_cycles': kw.get('cycles')}
+
+    monkeypatch.setattr(handdm_dm, 'run', fake_dm)
+    monkeypatch.setattr(trace_feedback, 'merge_work', lambda src, dest: Path(dest).write_text('x'))
+    monkeypatch.setattr(trace_feedback, 'phase_input', lambda w, d, dest: Path(dest).write_text('x'))
+    monkeypatch.setattr(trace_feedback, 'merge_phase_map',
+                        lambda w, d, dest: Path(dest).write_text('x') or {'work_rows': 1})
+    monkeypatch.setattr(trace_feedback, 'trace',
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError('no trace expected')))
+    work = tmp_path / 'work.mtz'; work.write_text('x')
+    prior = tmp_path / 'prior.mtz'; prior.write_text('x')
+    sequence = tmp_path / 'seq.fasta'; sequence.write_text('>a\nAAAA\n')
+    report = trace_feedback.run(work, prior, sequence, 'runtime', tmp_path / 'out',
+                               solvent_fraction=.5, feedback_cycles=0,
+                               cmbwt='auto', holdout=.08, hist_lib='/tmp/hist.lib', cycles=7)
+    assert seen['cmbwt'] == 'auto' and seen['holdout'] == .08
+    assert seen['hist_lib'] == '/tmp/hist.lib' and seen['cycles'] == 7
+    assert report['engine'] == 'handdm-v2-trace-feedback'
+    assert report['parameters']['dm_engine'] == 'handdm'

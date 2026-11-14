@@ -30,9 +30,9 @@ def main():
         from phasebuild import bundled_pplus
         module=bundled_pplus
     if a.stage=='dm' and module is trust_workflow:
-        # The RESOLVE/CCTBX tree is gone: P+ density-modifies with CCP4 Parrot,
-        # which sad_pipeline runs through run_trace_feedback.py instead.
-        raise ValueError('P+ 两条流程的密度修饰由 CCP4 Parrot 完成（--dm-engine parrot），'
+        # P+ density-modifies with the in-tree handdm v2, which sad_pipeline runs
+        # through run_trace_feedback.py instead.
+        raise ValueError('P+ 两条流程的密度修饰由树内 handdm v2 完成（--dm-engine handdm），'
                          '没有可单独调用的内置 dm 阶段')
     getattr(module,a.stage)(cfg,out)
 

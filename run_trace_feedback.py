@@ -1,4 +1,4 @@
-"""Execute the work-only Parrot + trace-feedback density-modification stage.
+"""Execute the work-only density-modification + trace-feedback stage.
 
 Reads the persisted pipeline configuration, uses only the prepared work data and
 the persisted original observation likelihood, and writes the standard
@@ -32,7 +32,8 @@ def main():
     prior=root/'02_sad/observations.mtz'
     if not Path(native).is_file():
         # The phase stage always writes FP/PHIB/FOM to experimental.mtz, which
-        # is all Parrot needs; a phases-only run may have no native amplitudes.
+        # is all the density modifier needs; a phases-only run may have no
+        # native amplitudes.
         from phasebuild.sad_bridge import FLAG
         out.mkdir(parents=True,exist_ok=True)
         native=Path(trace_feedback.work_from_experimental(root/'02_sad/experimental.mtz',sad,FLAG,
@@ -52,15 +53,16 @@ def main():
         solvent_fraction=float(solvent),cycles=int(cfg.get('dm_cycles',20)),
         feedback_cycles=int(cfg.get('feedback_cycles',0)),
         trace_resolution=float(cfg.get('trace_resolution',2.0)),
-        mask_radius=float(cfg.get('dm_mask_radius',3.0)),
-        anisotropy=bool(cfg.get('dm_anisotropy',True)),
         executable=cfg.get('dm_executable') or None,
+        cmbwt=cfg.get('dm_cmbwt',0.4),
+        holdout=float(cfg.get('dm_holdout',0.05)),
+        hist_lib=cfg.get('dm_hist_lib') or None,
         phenix_bin=(cfg.get('phenix_bin') or None) or None,
         fcalc=cfg.get('fcalc','fc_all'),
         progress=lambda m:print(m,flush=True))
     report.update(solvent_source='user' if cfg.get('dm_solvent') is not None else 'sequence_estimate',
         original_prior=fingerprint(prior),
-        map_formula='FWT=|FP|*FOM, PHWT=PHIB from the final Parrot HL quartet; work reflections only',
+        map_formula='FWT=|FP|*FOM, PHWT=PHIB from the final handdm v2 HL quartet; work reflections only',
         free_reflections_in_map=0)
     (out/'map_phases.json').write_text(json.dumps(report,indent=2)+'\n')
 

@@ -73,7 +73,7 @@ def resolve_dependency(name, loader, source):
     return target
 
 
-ENGINES = ('cbuccaneer', 'refmac5', 'phaser', 'cparrot')
+ENGINES = ('cbuccaneer', 'refmac5', 'phaser')
 DEFAULT_ENGINES = ('cbuccaneer', 'refmac5')
 
 

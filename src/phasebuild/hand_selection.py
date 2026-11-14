@@ -156,23 +156,26 @@ def pilot(cfg,root):
 
 
 def density_modify(cfg,phase,dm,native,solvent):
-    """Density-modify one hand with the same CCP4 Parrot protocol as the final run.
+    """Density-modify one hand with the same engine and protocol as the final run.
 
     The hand pilot used to go through the bundled RESOLVE/CCTBX tree, which made
     the two-hand decision the only part of the pipeline that needed a 2.4 GB
-    Phenix copy.  Parrot needs nothing beyond the CCP4 that already supplies
-    Phaser, cbuccaneer and refmac5, so both hands can be scored on a stock CCP4.
+    Phenix copy.  It now runs the in-tree handdm v2, exactly like the production
+    chain, so a stock CCP4 (or no CCP4 at all) is enough and both hands are
+    scored with precisely the modification the chosen hand will get downstream.
     """
-    from . import parrot_dm,trace_feedback
-    dm=Path(dm);nested=dm/'parrot';nested.mkdir(exist_ok=True)
-    executable=parrot_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime'))
-    info=parrot_dm.run(str(native),str(Path(phase)/'observations.mtz'),nested/'dm.mtz',float(solvent),
-        cycles=int(cfg.get('dm_cycles',20)),mask_radius=float(cfg.get('dm_mask_radius',3.0)),
-        anisotropy=bool(cfg.get('dm_anisotropy',True)),executable=executable,runtime=cfg.get('runtime'),
-        scratch=nested/'scratch',metadata={'hand_pilot':True})
+    from . import handdm_dm,trace_feedback
+    dm=Path(dm)
+    name='handdm'
+    nested=dm/name;nested.mkdir(exist_ok=True)
+    info=handdm_dm.run(str(native),str(Path(phase)/'observations.mtz'),nested/'dm.mtz',float(solvent),
+        cycles=int(cfg.get('dm_cycles',12)),runtime=cfg.get('runtime'),
+        scratch=nested/'scratch',metadata={'hand_pilot':True},
+        cmbwt=float(cfg.get('dm_cmbwt',0.4) or 0.4),holdout=float(cfg.get('dm_holdout',0.05)),
+        hist_lib=cfg.get('dm_hist_lib') or None,executable=cfg.get('dm_executable') or None)
     merged=trace_feedback.merge_phase_map(str(native),str(nested/'dm.mtz'),dm/'map_phases.mtz',free_value=cfg['free_value'])
-    dump(dm/'map_phases.json',{'dm_engine':'CCP4 Parrot','dm_computed_during_hand_selection':True,
-        'parrot':info,'work_only':merged,'free_reflections_in_map':0})
+    dump(dm/'map_phases.json',{'dm_engine':'handdm v2',
+        'dm_computed_during_hand_selection':True,name:info,'work_only':merged,'free_reflections_in_map':0})
     return info
 
 
@@ -233,4 +236,7 @@ def copy_selected_dm(cfg,out):
     for row in report['selected_dm_artifacts']:
         if fingerprint(row['path'])!=row:raise RuntimeError('Selected hand density artifact changed')
         shutil.copy2(row['path'],out/Path(row['path']).name)
-    meta=json.loads((out/'map_phases.json').read_text());meta.update(auto_hand=report['selected_hand'],selected_spacegroup=report['selected_spacegroup'],hand_selection=fingerprint(phase/'hand_selection.json'),dm_computed_during_hand_selection=True,dm_engine='CCP4 Parrot');dump(out/'map_phases.json',meta)
+    meta=json.loads((out/'map_phases.json').read_text())
+    # dm_engine comes from the copied hand-pilot map_phases.json, i.e. whatever
+    # engine actually ran (handdm v2 by default), not a hard-coded name.
+    meta.update(auto_hand=report['selected_hand'],selected_spacegroup=report['selected_spacegroup'],hand_selection=fingerprint(phase/'hand_selection.json'),dm_computed_during_hand_selection=True);dump(out/'map_phases.json',meta)

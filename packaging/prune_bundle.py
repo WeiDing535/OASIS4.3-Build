@@ -2,8 +2,8 @@
 """Remove components the SAD pipeline never loads from a built bundle.
 
 Every rule here is a directory or glob that belongs to a GUI, plotting or
-validation tool that the bundled engines (phaser, refmac5, cbuccaneer, cparrot)
-never import. Anything the pipeline needs is kept, and package_standalone re-runs
+validation tool that the bundled engines (phaser, refmac5, cbuccaneer) never
+import. Anything the pipeline needs is kept, and package_standalone re-runs
 its smoke tests after pruning. The old runtime/density/ (RESOLVE/CCTBX) tree is
 gone, so no rule here mentions it.
 """

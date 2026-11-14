@@ -26,13 +26,13 @@ P+ 的可选研究模块、四组消融试验及补充先验对照见 [P+ 优化
 
 专用精简源码包由 `python -B package_oasis.py --output /new/path.zip` 生成；只收录此流程所需代码与资源，排除旧产品入口、旧界面、训练脚本和训练模型。源码包不包含 Buccaneer/REFMAC 运行时，当前也不是新的完整安装包。
 
-从源码树直接运行时，P+ 流程默认用 CCP4 Parrot 做密度修饰；找不到 `cparrot` 时不再静默改道：命令行把回退原因写到标准错误，界面在工具栏下显示红字警告，结果页把密度修饰引擎标为“内置 RESOLVE/MLHL（Parrot 不可用，已回退）”，`pipeline_report.json` 里保留 `dm_engine_requested`、`dm_engine_fallback` 两个字段。自带完整运行时内含 Parrot，不受此影响。
+密度修饰现在默认由仓库内的 handdm v2 完成（`--dm-engine handdm`），不需要任何外部密度修饰程序，也不再需要 CCP4 的 `hist.lib`：直方图匹配库已随仓库放在 `lib/data/hist.lib`，可用 `--dm-hist-lib` 或环境变量 `PHASEBUILD_HIST_LIB` 覆盖。旧的密度修饰引擎已从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），只剩 `handdm` 与供研究对照的 `internal`。handdm 找不到可用的 Python（需要 gemmi/numpy/scipy）时，命令行把回退原因写到标准错误，界面显示红字警告，`pipeline_report.json` 里保留 `dm_engine_requested`、`dm_engine_fallback` 两个字段；两条 P+ 流程不允许回退到旧内部引擎，会直接报错。
 
-“免安装”指的是**完整包**：`OASIS4.3-dev17-portable` 内自带 `runtime/`（Phaser、Parrot、Buccaneer、REFMAC 与 OASIS 密度修饰），双击即用，不需要另装 CCP4 或 Phenix。源码树不含这些二进制，从源码运行时要由本机提供：macOS 上可指向已安装的 CCP4 9（`/Applications/ccp4-9`），或把完整包的 `runtime/` 放到源码树旁并用 `--runtime` 指定；Linux 目前还没有完整运行时。本仓库记录的十案例基准是在自带运行时下跑出的，因此源码树缺 Parrot 时的那次运行只能算内置引擎的参考结果，不能与基准直接对比。
+“免安装”指的是**完整包**：`OASIS4.3-dev17-portable` 内自带 `runtime/`（Phaser、Buccaneer、REFMAC 与 OASIS 密度修饰），双击即用，不需要另装 CCP4 或 Phenix。源码树不含这些二进制，从源码运行时要由本机提供：macOS 上可指向已安装的 CCP4 9（`/Applications/ccp4-9`），或把完整包的 `runtime/` 放到源码树旁并用 `--runtime` 指定；Linux 目前还没有完整运行时。本仓库记录的十案例基准是用已删除的旧外部引擎跑出的，只能作为历史记录；换成默认的 handdm v2 后属于不同引擎，数值不能逐点对比，但整条链不再依赖任何外部密度修饰程序。
 
 完整包目前没有公开下载地址（第三方引擎许可）；怎样用本机已有的 CCP4 组装出等价的私有免安装包、以及跑通十案例协议的完整命令，见 [免安装包获取说明](docs/INSTALL_BUNDLE.md)。
 
-为什么现在还绕不开 CCP4——四个模块（Phaser、Parrot、REFMAC、Buccaneer）各自能自研到什么程度、实测差距是多少、发布路线怎么分三档，见 [CCP4 替换评估](docs/NO_CCP4_REPLACEMENT.md)。其中定相与密度修饰已有仓库内实现（`--method pplus_internal`），精修有可调用的原型（`run_refine.py --engine internal`），建链仍只有未接入的原型。
+为什么现在还绕不开 CCP4——三个模块（Phaser、REFMAC、Buccaneer）各自能自研到什么程度、实测差距是多少、发布路线怎么分三档，见 [CCP4 替换评估](docs/NO_CCP4_REPLACEMENT.md)。其中定相与密度修饰已有仓库内实现（`--method pplus_internal`），精修有可调用的原型（`run_refine.py --engine internal`），建链仍只有未接入的原型。
 
 现存 Intel Mac 0.8.3 完整包保持原样。Linux 完整运行时仍待提供。开发仓库保留历史模块用于回溯与测试；本版产品不提供其他独立功能入口。旧版说明存档见 [历史 Build 说明](docs/LEGACY_BUILD_README_20261023.md)。
 
@@ -40,6 +40,6 @@ P+ 的可选研究模块、四组消融试验及补充先验对照见 [P+ 优化
 
 新增三组实验数据、六组密度修饰追加试验、数值修正及全部正负结果见 [P+ 多案例验证报告](docs/PPLUS_MULTICASE_VALIDATION_20261024.md)。研究方案尚未升级为默认流程。
 
-后续发现旧 Parrot 对照实际读取纯观测 HL，不能将其改善归因于 P+ 后验。更正与 18 组相同先验配对结果见 [DM 先验交接审计](docs/DM_PRIOR_AUDIT_20261024.md)。
+后续发现旧外部引擎对照实际读取纯观测 HL，不能将其改善归因于 P+ 后验。更正与 18 组相同先验配对结果见 [DM 先验交接审计](docs/DM_PRIOR_AUDIT_20261024.md)。
 
 P+ 初始图与原始 SAD 双峰约束的分离、条件分支种子及三例固定预算结果见 [双通道 P+ 验证](docs/DUAL_CHANNEL_PPLUS_20261024.md)。有部分改善，尚未证明稳定优于纯观测对照，默认流程未改动。

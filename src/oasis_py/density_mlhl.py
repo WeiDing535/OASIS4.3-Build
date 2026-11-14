@@ -3,8 +3,8 @@
 """Controlled integration of the Clipper kernel into our existing Python DM.
 
 Only the MLHL kernel and the 2mFo-DFc feedback formula follow LGPL Clipper.
-Map modification remains our older approximation. This is NOT a Parrot port,
-nor Clipper's full spline weighting. No external program is executed here.
+Map modification remains our older approximation: not a reproduction of
+Clipper's full spline weighting, and no external program is executed here.
 """
 import numpy as np
 import gemmi
@@ -86,7 +86,7 @@ def density_modify_mlhl(data,initial,solvent_fraction,reference_mtz,cycles=5,
             feedback_amplitude_rms=float(np.sqrt(np.mean(abs(coefficients)**2)))))
         if cycle_callback is not None:cycle_callback(cycle+1,phase.copy(),fom.copy())
     return PhaseResult(phase,fom,None,hl,dict(method='experimental_clipper_kernel_legacy_dm',
-        backend='NumPy/SciPy/Gemmi; no Parrot or Clipper runtime execution',
+        backend='NumPy/SciPy/Gemmi; no external density-modification runtime',
         feedback=feedback,cycles=history,grid_shape=shape,grid_sample_rate=rate,
         prior_kind=kind,input_HL_moment_mismatch=mismatch,seed=seed,
         likelihood_grid=samples,output_moment_grid=720,
@@ -95,4 +95,4 @@ def density_modify_mlhl(data,initial,solvent_fraction,reference_mtz,cycles=5,
         limitations=['Only per-reflection Clipper MLHL kernel and coefficient formula ported',
                      'Legacy shell scaling, L-BFGS optimizer and field cap 20 retained',
                      'Reference histogram, masks and perturbation correction are legacy approximations',
-                     'No NCS or anisotropy; not a complete Parrot/Clipper SFweight_spline reproduction']))
+                     'No NCS or anisotropy; not a complete Clipper SFweight_spline reproduction']))

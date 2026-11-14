@@ -38,10 +38,12 @@ def test_reused_runtime_manifest_does_not_hash_its_previous_self(tmp_path):
 
 def test_bundled_engine_list_comes_from_the_reused_runtime_manifest(tmp_path):
     root=tmp_path/'bundle';(root/'runtime').mkdir(parents=True)
-    rows=[{'relative_path':'bin/'+name} for name in ('cbuccaneer','refmac5','cparrot')]
+    rows=[{'relative_path':'bin/'+name} for name in ('cbuccaneer','refmac5')]
     (root/'runtime/runtime_manifest.json').write_text(json.dumps({'dependency_graph':rows}))
-    assert BUILDER.bundled_engines(root)==['cparrot','cbuccaneer','refmac5']
-    assert BUILDER.ENGINE_LABELS['cparrot']=='Parrot'
+    assert BUILDER.bundled_engines(root)==['cbuccaneer','refmac5']
+    assert BUILDER.ENGINE_LABELS['cbuccaneer']=='Buccaneer'
     rows.append({'relative_path':'bin/phaser'})
     (root/'runtime/runtime_manifest.json').write_text(json.dumps({'dependency_graph':rows}))
-    assert BUILDER.bundled_engines(root)==['phaser','cparrot','cbuccaneer','refmac5']
+    assert BUILDER.bundled_engines(root)==['phaser','cbuccaneer','refmac5']
+    # No external density-modification program may ever reappear in a bundle.
+    assert set(BUILDER.ENGINE_LABELS) == {'phaser', 'cbuccaneer', 'refmac5'}

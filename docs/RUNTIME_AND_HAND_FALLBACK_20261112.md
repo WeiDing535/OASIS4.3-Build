@@ -1,13 +1,20 @@
 # 运行时两件套、单手续算与 insulin 2.0 Å 实测 — 2026-11-12
 
+> **历史记录。** 本文写作时密度修饰由一个外部引擎完成；该引擎已于 2026-11-14
+> 从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），密度修饰
+> 现在固定由树内 handdm v2 完成。文中的数字保留作当时记录，按本文命令重跑
+> 会得到不同数值；`--dm-mask-radius`、`--dm-anisotropy` 等旧引擎专属选项也
+> 已删除。
 > **历史记录，部分内容已被取代（2026-11-13）。** 本文提到的
 > `bundled_pplus.density_root()/require_density()`、`PHASEBUILD_DENSITY`、
 > `desktop._density_runtime_fix()/_apply_density_fix()` 与「包内密度引擎」
-> 表单字段都随 `density/` 一起删除；密度修饰现在统一由 CCP4 `cparrot`
-> 完成，双手性也改用两轮 Parrot。见 `CHANGELOG.md` 的 Unreleased 与
+> 表单字段都随 `density/` 一起删除。密度修饰随后先统一交给 CCP4 的外部引擎（已删除），
+> **2026-11-14 起又换成随程序提供的 `handdm v2`**（P+ 的必做部分，界面无开关、
+> 无引擎选择，也不需要 `hist.lib`）；双手性判别也不再依赖它。
+> 见 `CHANGELOG.md` 的 Unreleased、`docs/HANDDM_V2_REPLACEMENT_20261114.md` 与
 > `docs/INSTALL_BUNDLE.md`。下文保留当时的失败分析与实测数字。
 
-本轮起因：GUI 提交的作业（`runs/oasis_run`，job `7c8b11d7c0d9ee23`）报
+本轮起因：GUI 提交的一个作业（`runs/oasis_run`，旧引擎时代的作业记录，目录已随引擎一起清理）报
 “定相 → 密度修饰 → Buccaneer → REFMAC 失败（退出码 1）”，用户读到的
 一手失败提示与实际原因不一致。
 
@@ -123,7 +130,7 @@ GUI 的“③ Buccaneer”面板提供一个默认关闭的勾选项：
 
 ## 3. 修好运行时之后：这份 insulin 数据本身在边缘
 
-用便携包 runtime 重跑同一份输入（`runs/ins_portable`），作业不再因缺文件失败，
+用便携包 runtime 重跑同一份输入（当时目录 `runs/ins_portable`，现已清理），作业不再因缺文件失败，
 但停在手性判别：
 
 | 手 | status | 唯一测序 | 建出残基 | 最长片段 |
@@ -153,12 +160,12 @@ Wang8 + classic40 修饰图本身没有可用信息。
 
 ### 3.1 打开“证据不足也继续”之后，流程能走到哪一步
 
-同一份输入加 `--allow-unverified-hand`（`runs/ins_unverified_final`，`dm_solvent=0.64`）：
+同一份输入加 `--allow-unverified-hand`（当时目录 `runs/ins_unverified_final`，现已清理，`dm_solvent=0.64`）：
 
 | 阶段 | 结果 |
 | --- | --- |
 | 手性 | 沿用 `input_hand`；`hand_verified=false`、`unverified_selection=true`，拒绝理由原样留在 `policy.refusal_reason`；`sad.log` 首行打印警告 |
-| Parrot 密度修饰 | 第 1 轮 trace 出 6 个残基；第 2 轮 trace 0 个 → 停止 Fcalc 反馈，保留第 2 轮 DM 图（`feedback_report.json` 记 `feedback_stopped`） |
+| 旧引擎 密度修饰 | 第 1 轮 trace 出 6 个残基；第 2 轮 trace 0 个 → 停止 Fcalc 反馈，保留第 2 轮 DM 图（`feedback_report.json` 记 `feedback_stopped`） |
 | Buccaneer+REFMAC | 第 1 轮 Buccaneer 0 原子 → 不再调用 REFMAC；`hybrid_report.json` 记 `status=no_model`、`residues_built=0`，作业以“密度修饰后的图未建出任何残基”结束 |
 
 这个开关只放开“手性没判定”这一道门，不改变“图里有没有可建密度”这个客观事实。

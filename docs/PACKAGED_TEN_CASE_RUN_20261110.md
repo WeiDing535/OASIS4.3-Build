@@ -1,5 +1,12 @@
 # 打包产物十案例实测（2026-11-10）
 
+> **历史记录。** 本文写作时密度修饰由一个外部引擎完成；该引擎已于 2026-11-14
+> 从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），密度修饰
+> 现在固定由树内 handdm v2 完成。文中的数字保留作当时记录，按本文命令重跑
+> 会得到不同数值；`--dm-mask-radius`、`--dm-anisotropy` 等旧引擎专属选项也
+> 已删除。
+> **另注（2026-11-14 之后）。** 界面现在只有两个模块，密度修饰是 P+ 的必做部分（树内 `handdm v2`），没有引擎选择；本文这类旧引擎时代的数字只作记录，不能再逐点复现。当前行为见 `docs/HANDDM_V2_REPLACEMENT_20261114.md`、`docs/INSTALL_BUNDLE.md`。
+
 ## 1. 测的是什么
 
 直接解压发布用的压缩包，用包内启动器跑完十个困难案例，检验"压缩后的程序"本身能否复现开发树的结果。
@@ -22,8 +29,8 @@
 
 - 运行环境用 `env -i` 清空，`PATH` 只有 `/usr/bin:/bin`，不含任何 CCP4、Phenix、conda 路径。
 - 启动器把 `CCP4`、`CLIBD`、`CLIBD_MON`、`SYMINFO`、`CINCL` 全部指向包内 `runtime/`。
-- 每次运行的 `pipeline_report.json` 记录 `runtime.root = <包>/runtime`，即 Phaser / Buccaneer / REFMAC / cparrot 均来自包内。
-- 包内符号链接 1,194 个，全部相对链接、无断链；`runtime/bin` 含 `phaser`、`refmac5`、`cparrot`。
+- 每次运行的 `pipeline_report.json` 记录 `runtime.root = <包>/runtime`，即 Phaser / Buccaneer / REFMAC / 旧引擎 均来自包内。
+- 包内符号链接 1,194 个，全部相对链接、无断链；`runtime/bin` 含 `phaser`、`refmac5`、`旧引擎`。
 - 启动器现导出 `PHASEBUILD_STANDALONE=1`，包内缺文件会直接报错，不会悄悄回退到本机 CCP4。
 
 ## 3. 结果
@@ -82,14 +89,14 @@
    两个界面作业（`work/exp/gui_run3`、`gui_run4`）都卡在这一步。已把 `segments/` 从裁剪清单移除（`segments_em`、`segments_rich_small` 仍删），并在 `verify_bundle()` 里加了 `rho.list`、`Richardson_rho.dat`、`side_chains_rho.dat`、`gap_library.dat` 的存在性与大小检查，让这类"删了才炸"的裁剪在打包阶段就报错。
 4. 补上密度库之后暴露出第二个只在自动判别手上才走到的缺陷：手性判别的 pilot 构建把流水线级配方名 `building_recipe='pipeline'` 原样传给 Buccaneer 命令行构造器，而后者只认 `legacy` / `ccp4`，于是抛 `ValueError: Unknown construction recipe`（`work/exp/gui_run5`）。已在 `hybrid_recycle` 里加 `concrete_recipe()`，把 `pipeline` 映射到 `ccp4` 构建，并补了回归测试。
 
-5. 结果面板把 `dm_engine` 直接印成方法的**默认**引擎名（`自带 RESOLVE + CCTBX`），而本次实际跑的是 Parrot；溶剂分数也因为 Parrot 路径的 `map_phases.json` 没有 `solvent_fraction_used` 而显示为空。现在改为读实际执行记录，界面显示 `CCP4 Parrot + 2 轮 trace 反馈`、溶剂 0.5。
+5. 结果面板把 `dm_engine` 直接印成方法的**默认**引擎名（`自带 RESOLVE + CCTBX`），而本次实际跑的是那个外部引擎；溶剂分数也因为外部引擎路径的 `map_phases.json` 没有 `solvent_fraction_used` 而显示为空。现在改为读实际执行记录，界面显示 `CCP4 旧引擎 + 2 轮 trace 反馈`、溶剂 0.5。
 
 前三项修改后重新打包，`app/` 与上一版逐文件比较只差 `oasis_workflow.py` 一行默认值，并清除了残留的 `__pycache__`；第三项使包体增加约 8 MB 压缩后体积（35 MB 原始）。
 
-修完之后用打包版界面的默认参数（自动判手、`dm_solvent=0.5`、Parrot 40 轮、2 轮反馈）重跑 7ENM（`work/exp/gui_run6`），6/6 阶段完成，得到 R-work 28.34 / **R-free 31.47**，与批量结果和开发树逐位一致；手性判别选中 `input_hand`，判别依据是唯一测序残基数（不用 R-free、不用参考坐标）。这说明十个案例的成绩不是靠绕过自动判手拿到的：走完整默认路径同样得到 31.47。
+修完之后用打包版界面的默认参数（自动判手、`dm_solvent=0.5`、旧引擎 40 轮、2 轮反馈）重跑 7ENM（`work/exp/gui_run6`），6/6 阶段完成，得到 R-work 28.34 / **R-free 31.47**，与批量结果和开发树逐位一致；手性判别选中 `input_hand`，判别依据是唯一测序残基数（不用 R-free、不用参考坐标）。这说明十个案例的成绩不是靠绕过自动判手拿到的：走完整默认路径同样得到 31.47。
 
 ## 7. 边界与未决
 
-- 包是 macOS x86_64、未签名，`public_redistribution_ready=false`，外部引擎（Buccaneer/REFMAC/Phaser/cparrot）的再分发授权仍未解决。
+- 包是 macOS x86_64、未签名，`public_redistribution_ready=false`，外部引擎（Buccaneer/REFMAC/Phaser/旧引擎）的再分发授权仍未解决。
 - 6HF7 用的是按预期占位度手工标注的 Tb/Mg 位点文件，属假设性输入修复，需实验确认。
 - 3O2E 与 7TFQ 依赖案例专用参数（前者 `auto` 溶剂网格 + `--fcalc fc`，后者 `pplus_trust` + 观测先验），通用默认值在这两个案例上会明显变差。

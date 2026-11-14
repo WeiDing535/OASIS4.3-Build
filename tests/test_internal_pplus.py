@@ -32,12 +32,12 @@ def test_internal_preflight_needs_no_phenix_or_external_phase_file(own,monkeypat
     with pytest.raises(ValueError,match='不接受外部'):pipeline.validate({**own,'observation_prior':'from_phaser.mtz'})
 
 
-def test_installation_free_trusted_route_is_allowed_when_parrot_replaces_phenix(trusted,monkeypatch):
-    """The ban exists for the RESOLVE/CCTBX backend; the Parrot route never calls Phenix."""
+def test_installation_free_trusted_route_is_allowed_when_handdm_replaces_phenix(trusted,monkeypatch):
+    """The ban exists for the RESOLVE/CCTBX backend; handdm v2 never calls Phenix."""
     monkeypatch.setenv('OASIS_INSTALLATION_FREE','1')
-    cfg=pipeline.validate({**trusted,'dm_engine':'parrot','phenix_bin':'/not-installed'})
-    assert cfg['phenix_bin']=='' and cfg['dm_engine']=='parrot'
-    assert cfg['dm_cycles']==40 and cfg['phase_cycles']==100
+    cfg=pipeline.validate({**trusted,'dm_engine':'handdm','phenix_bin':'/not-installed'})
+    assert cfg['phenix_bin']=='' and cfg['dm_engine']=='handdm'
+    assert cfg['dm_cycles']==12 and cfg['phase_cycles']==100
     with pytest.raises(ValueError,match='禁止调用 Phenix'):
         pipeline.validate({**trusted,'dm_engine':None,'phenix_bin':'/not-installed'})
 

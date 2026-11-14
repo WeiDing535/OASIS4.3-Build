@@ -93,10 +93,15 @@ def merge_phase_map(work_mtz, dm_mtz, destination, *, free_value=0):
 
 
 def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cycles=20,
-        feedback_cycles=1, trace_resolution=2.0, mask_radius=3.0, anisotropy=True,
-        executable=None, trace_cycles=5, progress=print, phenix_bin=None, fcalc='fc_all'):
-    """Iterate external DM and work-only tracing; persist every cycle."""
-    from . import parrot_dm
+        feedback_cycles=1, trace_resolution=2.0,
+        executable=None, trace_cycles=5, progress=print, phenix_bin=None, fcalc='fc_all',
+        cmbwt=0.4, holdout=0.05, hist_lib=None):
+    """Iterate density modification and work-only tracing; persist every cycle.
+
+    Density modification is the in-tree handdm v2 engine, always: there is no
+    engine switch any more.
+    """
+    from . import handdm_dm as engine
     out=Path(output);out.mkdir(parents=True,exist_ok=True)
     history=[]
     model=None
@@ -106,9 +111,9 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cyc
     for cycle in range(max(1,feedback_cycles+1)):
         folder=out/('cycle_%02d'%(cycle+1));folder.mkdir(exist_ok=True)
         dm_path=folder/'dm.mtz'
-        info=parrot_dm.run(merged,prior_mtz,dm_path,solvent_fraction,cycles=cycles,
-            mask_radius=mask_radius,anisotropy=anisotropy,model_pdb=model,executable=executable,
-            runtime=runtime,scratch=folder/'scratch',phenix_bin=phenix_bin,fcalc=fcalc)
+        info=engine.run(merged,prior_mtz,dm_path,solvent_fraction,cycles=cycles,
+            model_pdb=model,executable=executable,runtime=runtime,scratch=folder/'scratch',
+            phenix_bin=phenix_bin,fcalc=fcalc,cmbwt=cmbwt,holdout=holdout,hist_lib=hist_lib)
         row={'cycle':cycle+1,'dm':str(dm_path),'dm_info':info}
         if cycle<feedback_cycles:
             trace_in=folder/'trace_input.mtz'
@@ -130,13 +135,14 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, cyc
         history.append(row)
     final=out/'map_phases.mtz'
     merge_phase_map(merged,dm_path,final)
-    report={'engine':'parrot-trace-feedback','history':history,'final_map':str(final),
+    report={'engine':'handdm-v2-trace-feedback',
+        'history':history,'final_map':str(final),
         'work_only':True,'free_reflections_in_map':0,'reference_coordinates_used':False,
         'shelxe_phases_used':False,'rfree_used_for_selection':False,
         'inputs':{k:fingerprint(v) for k,v in [('work',work_mtz),('prior',prior_mtz),('sequence',sequence)]},
         'parameters':{'solvent_fraction':solvent_fraction,'dm_cycles':cycles,
             'feedback_cycles':feedback_cycles,'trace_resolution':trace_resolution,
-            'mask_filter_radius':mask_radius,'anisotropy_correction':anisotropy}}
+            'dm_engine':'handdm','cmbwt':cmbwt}}
     (out/'feedback_report.json').write_text(json.dumps(report,indent=2)+'\n')
     return report
 
@@ -149,7 +155,7 @@ def phase_input(work_mtz, dm_mtz, destination):
     fp_label,sig_label=_amp_labels(wl)
     quartet=['HL'+k for k in 'ABCD']
     if not all(c in dl for c in quartet):
-        for prefix in ('DM','PIRATE','PARROT'):
+        for prefix in ('DM','PIRATE'):
             if all(prefix+'.ABCD.'+k in dl for k in 'ABCD'):
                 quartet=[prefix+'.ABCD.'+k for k in 'ABCD'];break
         else:raise ValueError('No HL quartet in the density-modified MTZ')
@@ -199,8 +205,9 @@ def merge_work(work_mtz, destination):
 def work_from_experimental(experimental,sad,free_label,free_value,destination):
     """Write FP/SIGFP/FreeR_flag from the phase-stage map plus the SAD free set.
 
-    A phases-only run has no ``01_inputs/native.mtz``; Parrot still needs the
-    observed amplitudes and the test set, both of which the SAD file carries.
+    A phases-only run has no ``01_inputs/native.mtz``; the density modifier still
+    needs the observed amplitudes and the test set, both of which the SAD file
+    carries.
     """
     exp=gemmi.read_mtz_file(str(experimental));exp.ensure_asu()
     obs=gemmi.read_mtz_file(str(sad));obs.ensure_asu()

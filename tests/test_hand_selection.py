@@ -192,3 +192,26 @@ def test_dm_prior_refiner_does_not_claim_original_sad_likelihood(inputs,tmp_path
  result=wrapper(inputs['native'],inputs['heavy'],tmp_path/'refine',free_value=7)
  assert 'fixed_original_experimental_prior' not in result and 'fixed_density_modified_work_prior' in result
  assert result['phase_merge_audit']['matched_free_prior_rows']==0
+
+
+def test_the_hand_pilot_uses_the_in_tree_handdm_engine(tmp_path,monkeypatch):
+    """Both hands must be modified by the same engine the final run will use."""
+    from phasebuild import handdm_dm,trace_feedback
+    seen={}
+    def fake_handdm(work,prior,output,solvent,**options):
+        seen['engine']='handdm';seen['options']=options;seen['solvent']=solvent
+        Path(output).write_bytes(b'x');return {'engine':'handdm v2 (in-tree)'}
+    monkeypatch.setattr(handdm_dm,'run',fake_handdm)
+    monkeypatch.setattr(trace_feedback,'merge_phase_map',lambda *a,**k:dict(work_only=True))
+    phase=tmp_path/'02_sad';phase.mkdir();(phase/'observations.mtz').write_bytes(b'x')
+    (tmp_path/'03_dm').mkdir()
+    native=tmp_path/'native.mtz';native.write_bytes(b'x')
+    cfg={'dm_engine':'handdm','dm_cycles':12,'dm_cmbwt':0.4,'dm_holdout':0.05,'free_value':0,
+         'runtime':str(tmp_path),'dm_solvent':0.5}
+    info=hs.density_modify(cfg,phase,tmp_path/'03_dm',native,0.5)
+    assert seen['engine']=='handdm' and info['engine'].startswith('handdm')
+    assert seen['options']['cmbwt']==0.4 and seen['options']['holdout']==0.05
+    assert 'mask_radius' not in seen['options'] and 'anisotropy' not in seen['options']
+    record=json.loads((tmp_path/'03_dm/map_phases.json').read_text())
+    assert record['dm_engine']=='handdm v2'
+    assert record['dm_computed_during_hand_selection'] is True

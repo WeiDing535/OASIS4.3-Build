@@ -5,7 +5,7 @@
 A and B are initial P+ / continuous SAD solutions on the SAME reflection
 rows. Each DM round consumes the preceding map but replaces DM evidence and
 uses exactly one fixed initial prior. This is not alternating triplet updates,
-not a joint independent-data likelihood, and not a Parrot implementation.
+not a joint independent-data likelihood, and not an external-engine implementation.
 """
 from .native_density import _density_modify
 

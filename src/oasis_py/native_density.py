@@ -2,8 +2,8 @@
 # Copyright (C) 2026 DingWei (丁玮) and contributors.
 """Independent experimental classical density modification, inspired by Cowtan 2010.
 
-Uses NumPy/SciPy and Gemmi FFT/symmetry; never executes Parrot. This is NOT
-an implementation-equivalent Parrot port: histogram simulation, shell MLHL
+Uses NumPy/SciPy and Gemmi FFT/symmetry; never executes an external program.
+This is not an implementation-equivalent reproduction: histogram simulation, shell MLHL
 model and perturbation correction are approximations. Optional anisotropic
 Wilson correction and explicit-operator NCS averaging require validation.
 """
@@ -98,7 +98,7 @@ def reference_histogram(data, fom, reference_mtz, solvent_fraction=.5, max_grid_
     """Generic reference radial amplitude/FOM matching; no target model accepted.
 
     The reference ordered region is estimated by local variance rather than
-    an atomic mask. Bin medians replace Parrot's spline scaling/simulation.
+    an atomic mask. Bin medians replace the spline scaling/simulation of external engines.
     """
     from .reference_data import read_reference
     m=read_reference(reference_mtz)
@@ -166,7 +166,7 @@ def fit_shell_likelihood(data, fc, prior_hl, samples=72):
         d,t=np.exp(fitted.x);v=eps[ix]*t+sig[ix]**2
         field[ix]=2*d*fo[ix]*calc[ix]/v
         history.append({'nfit':len(use),'D':float(d),'tau':float(t),'converged':bool(fitted.success)})
-    # Conservative cap is a research stabilizer, not Parrot's calibration.
+    # Conservative cap is a research stabilizer, not an external calibration.
     field*=np.minimum(1,20/np.maximum(np.abs(field),1e-12))
     return field,history
 
@@ -262,7 +262,7 @@ def _density_modify(data, initial, solvent_fraction, reference_mtz, cycles=5,
         if priors is not None:history[-1]['active_prior']=_pattern[cycle%len(_pattern)]
         if _cycle_callback is not None:
             _cycle_callback(cycle+1,phase.copy(),fom.copy())
-    result=PhaseResult(phase,fom,None,hl,{'method':'native_classical_dm_experimental','backend':'NumPy/SciPy/Gemmi; no Parrot execution','initial_method':initial.metadata.get('method','legacy_pplus'),'initial_scale_fit_version':initial.metadata.get('anomalous_scale_fit_version','legacy_bounded'),'initial_prior':prior_kind,'input_HL_moment_mismatch':input_mismatch,'cycles':history,'seed':seed,'solvent_fraction':solvent_fraction,'grid_shape':shape,'grid_sample_rate':sample_rate,'reference_mtz':str(Path(reference_mtz).resolve()),'target_complete_model_used':False,'prior_repeatedly_accumulated':False,'limitations':['NCS requires explicit operators; automatic discovery not implemented','Approximate radial histogram scaling and variance mask','Approximate shell MLHL and global perturbation correction; FOM not calibrated','Generic histogram simulated once using initial FOM, not every cycle','Not a Parrot reproduction; experimental validation required']})
+    result=PhaseResult(phase,fom,None,hl,{'method':'native_classical_dm_experimental','backend':'NumPy/SciPy/Gemmi; no external density-modification execution','initial_method':initial.metadata.get('method','legacy_pplus'),'initial_scale_fit_version':initial.metadata.get('anomalous_scale_fit_version','legacy_bounded'),'initial_prior':prior_kind,'input_HL_moment_mismatch':input_mismatch,'cycles':history,'seed':seed,'solvent_fraction':solvent_fraction,'grid_shape':shape,'grid_sample_rate':sample_rate,'reference_mtz':str(Path(reference_mtz).resolve()),'target_complete_model_used':False,'prior_repeatedly_accumulated':False,'limitations':['NCS requires explicit operators; automatic discovery not implemented','Approximate radial histogram scaling and variance mask','Approximate shell MLHL and global perturbation correction; FOM not calibrated','Generic histogram simulated once using initial FOM, not every cycle','Not a reproduction of any external engine; experimental validation required']})
     if priors is not None:
         result.metadata.update(method='alternating_fixed_prior_native_dm_experimental',
             pattern=_pattern, initial_method=initial.metadata.get('method') if _pattern[0]=='A' else _alternate_initial.metadata.get('method'),

@@ -39,7 +39,7 @@ def test_new_gui_plan_preserves_explicit_route_and_legacy_missing_method(trusted
     command=steps[0]['command']
     assert command.count('--trust-cleanup')==1 and 'True' not in command and 'False' not in command
     assert '--build-semet' not in command
-    assert cfg['phase_cycles']==100 and cfg['dm_cycles']==40
+    assert cfg['phase_cycles']==100 and cfg['dm_cycles']==12
     plan=workflow.describe_plan(cfg)
     assert [s['id'] for s in plan['stages']]==['prepare','sad','dm','bridge','build','finish']
     assert plan['effective_options']['trust_kl']==.0005 and 'aoe' not in plan['effective_options']

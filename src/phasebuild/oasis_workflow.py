@@ -45,8 +45,9 @@ def runtime_candidates(project):
 def bundled_runtime(project):
     """The runtime carrying Phaser and cbuccaneer, else None.
 
-    The bundled P+ route runs on Phaser + Parrot + Buccaneer + REFMAC, all of
-    which a CCP4 installation provides, so any CCP4 with these programs works.
+    The bundled P+ route runs on Phaser + Buccaneer + REFMAC, all of which a
+    CCP4 installation provides, so any CCP4 with these programs works; density
+    modification is the in-tree handdm v2 and needs nothing from CCP4.
     """
     for path in runtime_candidates(project):
         if (path/'bin/phaser').is_file() and (path/'bin/cbuccaneer').is_file():
@@ -57,15 +58,15 @@ def bundled_runtime(project):
 def defaults(project):
     project=Path(project)
     usable=[p for p in runtime_candidates(project) if (p/'bin/cbuccaneer').is_file() and (p/'bin/refmac5').is_file()]
-    # Prefer a runtime that carries the whole chain (Phaser, Parrot, Buccaneer,
-    # REFMAC); a bare CCP4 without cbuccaneer cannot finish the run.
+    # Prefer a runtime that carries the whole chain (Phaser, Buccaneer, REFMAC);
+    # a bare CCP4 without cbuccaneer cannot finish the run.
     runtime=bundled_runtime(project) or (usable[0] if usable else None)
     runtime=str(runtime) if runtime else (default_runtime() or '')
     cfg=dict(DEFAULTS)
     cfg['phenix_bin']=''
     cfg['method']='pplus_bundled'
-    # 标定配方：Parrot 密度修饰 + 2 轮反馈 + 40 轮修饰；非 P+ 方法会被降级为内置 MLHL。
-    cfg.update(dm_engine='parrot',dm_cycles=40,feedback_cycles=2,max_per_target=48,dm_solvent=0.5)
+    # 标定配方：handdm 密度修饰 + 2 轮反馈 + 12 轮修饰；非 P+ 方法会被降级为内置 MLHL。
+    cfg.update(dm_engine='handdm',dm_cycles=12,feedback_cycles=2,max_per_target=48,dm_solvent=0.5)
     # 终点组合默认留空：等价于单终点，由 --feedback-cycles 决定；填写后按工作集 R 选终点。
     cfg.update(feedback_endpoints='',dm_solvents='')
     cfg.update(sad='',native='',sequence='',heavy='',fpp='',runtime=runtime,
@@ -102,14 +103,14 @@ def make_plan(config, project, python=None, inspect=True):
             if key not in config and protocol is None:cfg[key]=DEFAULTS[key]
     if protocol is not None and not cfg['build_model']:cfg.update(trust_work_weight=False,trust_partial_cleanup=False)
     if 'method' not in config:cfg['method']='pplus_bundled' if protocol is not None else DEFAULTS['method'] # old saved configs retain their historical route
-    if cfg.get('dm_engine')=='parrot' and cfg.get('method') not in ('likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'):
-        # Every phasing method writes the same FP/PHIB/FOM + HL quartet, so
-        # Parrot is meaningful on the continuous-SAD and legacy P+ routes too.
+    if cfg.get('dm_engine')=='handdm' and cfg.get('method') not in ('likelihood','pplus','pplus_trust','pplus_internal','pplus_bundled'):
+        # Every phasing method writes the same FP/PHIB/FOM + HL quartet, so the
+        # DM engine is meaningful on the continuous-SAD and legacy P+ routes too.
         cfg['dm_engine']='internal'
         cfg['feedback_cycles']=0
-        cfg['dm_engine_fallback']='parrot requires a phasing method that writes an observation likelihood'
+        cfg['dm_engine_fallback']='the density-modification engine requires a phasing method that writes an observation likelihood'
     if cfg.get('dm_engine')=='internal':
-        # Trace feedback is a Parrot feature; the defaults() recipe asks for two
+        # Trace feedback is a density-modification feature (handdm); the defaults() recipe asks for two
         # rounds, which an explicitly chosen internal engine cannot honour.
         cfg['feedback_cycles']=0
     if 'explore' not in config:cfg['explore']=False # never silently migrate saved single-run configs
@@ -151,11 +152,11 @@ def make_plan(config, project, python=None, inspect=True):
 
 
 def engine_fallback(cfg):
-    """Reason text when the requested Parrot engine is unavailable, else ''."""
+    """Reason text when the requested DM engine is unavailable, else ''."""
     fallback=cfg.get('dm_engine_fallback') or ''
-    if cfg.get('dm_engine')=='parrot' and not fallback:
-        from . import parrot_dm
-        try:parrot_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime') or None)
+    if cfg.get('dm_engine')=='handdm' and not fallback:
+        from . import handdm_dm
+        try:handdm_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime') or None)
         except ValueError as error:fallback=str(error)
     return fallback
 
@@ -188,13 +189,13 @@ def describe_plan(cfg):
     if cfg.get('explore'):
         from .portfolio_gui import describe
         return describe(cfg)
-    # Describe the run that will actually happen: if Parrot cannot be located,
+    # Describe the run that will actually happen: if handdm cannot be located,
     # validate() will fall back to the internal engine, so the plan must show the
-    # internal stages instead of advertising a Parrot run that never occurs.
+    # internal stages instead of advertising a handdm run that never occurs.
     values=planned_config(cfg)
     fallback=engine_fallback(cfg)
-    requested_parrot=bool(fallback) and (cfg.get('dm_engine')=='parrot'
-                                        or cfg.get('dm_engine_requested')=='parrot')
+    requested_handdm=bool(fallback) and (cfg.get('dm_engine')=='handdm'
+                                        or cfg.get('dm_engine_requested')=='handdm')
     phase,dm=METHODS[cfg['method']]
     active=dict(method=phase,dm_engine=dm,solvent_fraction=cfg['solvent_fraction'],
                 solvent_source='按序列与 ASU 份数估算' if cfg['solvent_fraction'] is None else '用户指定',
@@ -262,9 +263,9 @@ def describe_plan(cfg):
     if cfg['method']=='pplus_internal':protocol_extra+=' 内部异常差似然与内部 MLHL DM 均为近似实现，非 Phaser/RESOLVE 等价替代；此前外部流程的 27.42% 不适用于此模式。'
     warnings=list(sample['warnings'])
     if fallback:
-        if requested_parrot:
+        if requested_handdm:
             active['dm_engine']=(active['dm_engine']+'；' if active.get('dm_engine') else '')+\
-                '密度修饰已回退内置 RESOLVE/MLHL（Parrot 不可用）'
+                '密度修饰已回退内置 MLHL（handdm 不可用）'
         warnings.append(fallback_notice(values))
     return dict(stages=stage_plan(values),effective_options=active,sample_warnings=warnings,
                 fixed_protocol=('Buccaneer 首轮 3 周期、后续每轮 2 周期；单线程；REFMAC '+('冻结工作集 DM 相位/FOM 近似约束' if cfg.get('refinement_prior')=='dm_phifom' else '固定原始 SAD 观测 HL')+'；固定最后一轮结果。'+protocol_extra) if active['build_model'] else
@@ -345,10 +346,11 @@ def phase_statistics(path):
 def _engine_label(method,cfg,dm_meta):
  """Report the density-modification engine that actually ran, not the method default."""
  if not cfg.get('dm_enabled',True):return '未启用（精简版只做 P+ 定相）'
- if cfg.get('dm_engine_requested')=='parrot' and cfg.get('dm_engine_fallback'):
-  return '内置 RESOLVE/MLHL（Parrot 不可用，已回退）'
+ if cfg.get('dm_engine_requested')=='handdm' and cfg.get('dm_engine_fallback'):
+  return '内置 MLHL（handdm 不可用，已回退）'
  engine=(dm_meta.get('parameters') or {}).get('engine') or cfg.get('dm_engine')
- if engine=='parrot':return 'CCP4 Parrot + %d 轮 trace 反馈'%cfg['feedback_cycles'] if cfg.get('feedback_cycles') else 'CCP4 Parrot'
+ if engine in ('handdm','handdm_dm') or str(engine).startswith('handdm'):
+  return 'handdm v2 + %d 轮 trace 反馈'%cfg['feedback_cycles'] if cfg.get('feedback_cycles') else 'handdm v2'
  return METHODS[method][1]
 
 

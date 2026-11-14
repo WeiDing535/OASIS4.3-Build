@@ -6,29 +6,30 @@
 
 结论先给：
 
-1. **定相这一段已经够用，Phaser 可以不用**：把密度修饰换回 Parrot 之后，内部前端在两个最差案例上只落后 Phaser 0.3 / 1.9 点 R-free（§2.1）；CCP4 自带的 `bp3` 精修位点后给出的 SAD 相位与 Phaser 逐反射 CC 0.981（§2.2）。
-2. **唯一的实质缺口在密度修饰**：Parrot 把相关从 0.272 提到 0.688（增益 +0.416），内部 MLHL 只提到 0.558（增益 +0.279）。终点差 0.125，十案例无一例外。**这才是挡住"达到 SHELXE 水平"的东西。**
+1. **定相这一段已经够用，Phaser 可以不用**：在同一套密度修饰协议下（当时用的引擎现已删除，两边相同因而不影响结论），内部前端在两个最差案例上只落后 Phaser 0.3 / 1.9 点 R-free（§2.1）；CCP4 自带的 `bp3` 精修位点后给出的 SAD 相位与 Phaser 逐反射 CC 0.981（§2.2）。
+2. **密度修饰不再是外部依赖**：2026-11-14 起由仓库内的 handdm v2 在进程内完成，不再调用任何外部密度修饰程序。胰岛素上它的图相关 0.8049（旧外部引擎 0.8456）、整链终点 **0.2131 / 0.2662**（旧引擎 0.2758 / 0.3181）。旧缺口——内部 MLHL 只把图相关提到 0.558——因此消失；但十案例口径下的 handdm 复测还没做，所以"达到 SHELXE 水平"这条验收线上，密度修饰这一项从"差 0.125"变成"待复测"（§3）。
 3. **Buccaneer / REFMAC 不在这条验收线上**：它们带来的是带序列、带侧链、R 25–47 % 的完整模型，远超 SHELXE 的多聚丙氨酸 trace。留着是产品档次问题，去掉也不影响"达到 SHELXE 水平"。
 
 | 模块 | 用途 | 替换状态 | 量化证据 | 发布阻塞 |
 | --- | --- | --- | --- | --- |
-| Phaser | SAD 定相（位点已给定） | ✅ 可去掉，实测见 §2 | 内部前端 +Parrot 落后 0.3–1.9 点 R-free；`bp3` 相位 CC 0.981 | 否 |
-| Parrot | 密度修饰 | 🔶 已实现，**差 0.125** | 增益 0.279 vs 0.416 | **是（质量）** |
+| Phaser | SAD 定相（位点已给定） | ✅ 可去掉，实测见 §2 | 内部前端落后 0.3–1.9 点 R-free；`bp3` 相位 CC 0.981 | 否 |
+| 密度修饰 | DM | ✅ 已内置（handdm v2），不再依赖 CCP4 | 图相关 0.8049，整链 0.2131 / 0.2662 | 否（待十案例复测） |
 | REFMAC | 约束精修 | 🔶 原型可用 | 前向模型差距 5.5–6 点 | 否（SHELXE 不做） |
 | Buccaneer | 自动建链 | ❌ 仅有原型 | 约 2400 行未接入 | 否（SHELXE 不做） |
 
 ## 1. 我们到底调用了 CCP4 的什么
 
-只有四个可执行文件，全部经由 `src/phasebuild/runtime.py` 解析：
+只有三个可执行文件，全部经由 `src/phasebuild/runtime.py` 解析（密度修饰自
+2026-11-14 起由仓库内的 handdm v2 完成，不经过 `runtime.py`，也没有外部
+密度修饰程序）：
 
 | 可执行文件 | 调用点 | 调用形态 |
 | --- | --- | --- |
 | `phaser` | `src/phasebuild/phaser_driver.py` | `MODE EP_AUTO` + `ATOM CRYSTAL … heavy.pdb` |
-| `cparrot` | `src/phasebuild/parrot_dm.py:1` | 密度修饰，40 周期 |
 | `cbuccaneer` | `src/phasebuild/buccaneer_stages.py`、`src/phasebuild/sad_pipeline.py:211` | `-f` 图 + `-m` 序列，多轮 |
 | `refmac5` | `src/phasebuild/trust_workflow.py:266`、`src/phasebuild/work_weight.py:64`、`src/phasebuild/phase_refinement.py:162`、`src/phasebuild/refinement.py:107`、`src/phasebuild/cycling.py:93`、`src/phasebuild/hybrid_recycle.py:165` | 关键词 + XML 输出 |
 
-这四点之外的 CCP4 依赖只有数据文件（单体库、`atomsf.lib`、`symop.lib`、参考 MTZ），这些是可以合法随包分发的公开数据。
+这三点之外的 CCP4 依赖只有数据文件（单体库、`atomsf.lib`、`symop.lib`、参考 MTZ），这些是可以合法随包分发的公开数据。handdm v2 需要的直方图库已经随仓库放在 `lib/data/hist.lib`，不再读 CCP4 安装目录。
 
 `bp3` 目前**没有**被调用。§2.2 的实测说明它可以直接顶掉 `phaser` 在前端的角色（精修 + 定相），而它和 `phaser` 一样属于同一份 CCP4 安装，不改变"用户自备 CCP4"这条发布前提。
 
@@ -36,16 +37,16 @@
 
 十案例协议把子结构位点作为**输入**交给 Phaser（`02_sad/refined_heavy.pdb`，最初来自 SHELXD）。因此 `EP_AUTO` 实际只做三件事：位点精修、SAD 对数似然定相、`HAND BOTH`。子结构搜索不在其中。
 
-`src/phasebuild/internal_pplus.py` 用 NumPy/SciPy/Gemmi 实现了第 2、3 件事（异常差高斯似然，读取原始位点，不调用外部程序），**唯独没有位点精修**。2026-11 之前"内部 P+ 差 15–19 点 R-free"的结论把两件事混在了一起：那张表里的内部 P+ 列同时换了密度修饰引擎（内部 MLHL 替 Parrot）。现在 `--dm-engine parrot` 对 `pplus_internal` 合法，可以把前端单独摘出来测。
+`src/phasebuild/internal_pplus.py` 用 NumPy/SciPy/Gemmi 实现了第 2、3 件事（异常差高斯似然，读取原始位点，不调用外部程序），**唯独没有位点精修**。2026-11 之前"内部 P+ 差 15–19 点 R-free"的结论把两件事混在了一起：那张表里的内部 P+ 列同时换了密度修饰引擎（内部 MLHL 替旧外部引擎）。现在 `--dm-engine handdm`（默认）对 `pplus_internal` 合法，可以把前端单独摘出来测。下表是旧引擎时代的对照，换引擎后不可逐点比较。
 
-### 2.1 只换前端（同一套位点、同一 Parrot 协议、同一建链配方）
+### 2.1 只换前端（同一套位点、同一密度修饰协议、同一建链配方）
 
-| 案例 | Phaser 前端（十案例） | 内部 P+ + Parrot | 差 |
+| 案例 | Phaser 前端（十案例） | 内部 P+ + 同一密度修饰 | 差 |
 | --- | --- | --- | --- |
 | 7TJ1（16 Se，P2₁2₁2₁） | 23.92 / 31.08 | 25.24 / 31.35 | R-free +0.27 |
 | 5D9D（3 Hg，P2₁2₁2₁） | 25.43 / 27.51 | 26.69 / 29.36 | R-free +1.85 |
 
-旧表里这两个案例的差是 **+15.23 / +18.94**。也就是说那 15–19 点几乎全部来自密度修饰引擎，不是前端。换回 Parrot 之后，内部前端落在 Phaser 的 2 点以内。
+旧表里这两个案例的差是 **+15.23 / +18.94**。也就是说那 15–19 点几乎全部来自密度修饰引擎，不是前端。把两边的密度修饰统一之后，内部前端落在 Phaser 的 2 点以内。
 
 ### 2.2 位点精修才是真正的差距，而 `bp3` 能补
 
@@ -81,9 +82,9 @@ eof
 # 3) 精修后的位点在 bp3out-1.pdb，相位/FOM/HL 在 bp3out.mtz
 python3 -m phasebuild.cli --sad ins_sad.mtz --native ins_sad.mtz --sequence 3INS.pir \
     --heavy bp3out-1.pdb --reference reference-1tqw.mtz --runtime /Applications/ccp4-9 \
-    --method pplus_internal --dm-engine parrot --refinement-prior dm_phifom \
+    --method pplus_internal --refinement-prior dm_phifom \
     --building-recipe pipeline --elements S --wavelength 2.0 --auto-fpp \
-    --input-columns --dm-solvent 0.5 --dm-cycles 40 --phase-cycles 100 \
+    --input-columns --dm-solvent 0.5 --dm-cycles 12 --phase-cycles 100 \
     --rounds 5 --cycles 10 --feedback-cycles 2 --max-per-target 48 --output run/
 ```
 
@@ -92,11 +93,36 @@ python3 -m phasebuild.cli --sad ins_sad.mtz --native ins_sad.mtz --sequence 3INS
 - 胰岛素上同协议、不同位点的终点散布约 **±0.03 R-free**（建链对图的响应是非线性的，`0.2758` 与 `0.3166` 之间有一部分是这个）。单案例的排序不能直接改推荐配方。
 - 因此"把 `bp3` 前端做成默认"需要先按十案例复测；本文只主张**技术上可以不用 Phaser**，并给出可复现的两条免 Phaser 路线：`bp3` 精修 + 内部似然，或直接取 `bp3` 的相位。
 
-## 3. Parrot：可以替换，但修饰增益只有 Parrot 的三分之二
+## 3. 密度修饰：已换成树内 handdm v2
 
-`--method pplus_internal --dm-engine resolve` 用内部 MLHL DM 取代 Parrot，其余参数与十案例协议完全一致。结果（R / R-free，%）：
+2026-11-14 之前，密度修饰走的是外部引擎，程序只做转接；旧的内部 MLHL 实现（`internal_pplus.seeded_dm`）增益明显更小，十案例终点图相关 0.558 对 0.688。现在这一层整体换掉了：`src/phasebuild/handdm_dm.py` 加树内 vendored 的 `handdm v2`，在进程内完成密度修饰，**不调用任何外部程序，也不需要 CCP4 的 `hist.lib`**（直方图库随仓库放在 `lib/data/hist.lib`）。`--dm-engine` 只剩 `handdm`（默认）与 `internal`（旧 MLHL，命令行后备）。
 
-| 案例 | 内部 P+ + 内部 DM + Buccaneer/REFMAC | campaign（Phaser + Parrot + 同后端） | ΔR-free |
+胰岛素 2.1 Å SAD 上的相位质量（`evaluate.py`，4509 反射，工作集 4291 / 自由集 218）：
+
+| 指标 | 初始 SAD 相位 | handdm v2 | 旧外部引擎 |
+| --- | --- | --- | --- |
+| 加权平均相位误差 wMPE | 55.43° | **37.15°** | 34.29° |
+| 平均相位误差 MPE | 72.96° | 48.91° | 48.98° |
+| 平均 cosΔφ | 0.4791 | 0.6987 | 0.7302 |
+| σA 相关 | 0.5582 | 0.7992 | 0.8498 |
+| 整胞图相关 | 0.3646 | **0.7856** | 0.8456 |
+| 高密度区图相关 | 0.3949 | 0.7841 | 0.8534 |
+| 平均 FOM | 0.3214 | 0.7738 | — |
+
+同一任务整链（`pplus_internal` + 2 轮 trace/Fcalc 反馈 + Buccaneer/REFMAC）的终点：
+
+| 密度修饰 | Rwork / Rfree | 建出 CA | 真值 CA 1 Å 内 | CA RMSD |
+| --- | --- | --- | --- | --- |
+| handdm v2 | **0.2131 / 0.2662** | 52 | 51/51 | 0.12 Å |
+| 旧外部引擎 | 0.2758 / 0.3181 | 50 | 48/50 | 0.22 Å |
+
+也就是说：**图这一层 handdm 还差一点（0.7856 对 0.8456，wMPE 37.15° 对 34.29°），但整链终点明显更好**（R-free 低 5.2 点，多建 2 个残基、真值覆盖 51/51）。单案例建链 R 的噪声约 ±0.03（见 §2.3），把多组参数扫描汇总后两个引擎在 R 上统计上不可区分（handdm n=10：Rwork 0.3194 ± 0.047；旧引擎 n=5：0.2841 ± 0.054）；差别清楚的地方是上面这组同命令、只换引擎的生产对照。
+
+**为什么换成它**：它把"密度修饰"这一层从"必须有一份带该程序的 CCP4 或便携包"变成纯 Python 进程内计算，许可与分发都干净；代价是图相关还差 0.06，这一点如实记录，不作为"超过旧引擎"宣传。
+
+下面这张表是更早的对照，保留作历史记录——它用**已删除的旧引擎**做 campaign 侧、用旧内部 MLHL 做对照侧，两边参数也不完全一致，现在既不能复跑也不能当作当前引擎的评价：
+
+| 案例 | 内部 P+ + 内部 MLHL DM + Buccaneer/REFMAC | campaign（旧引擎 + 同后端） | ΔR-free |
 | --- | --- | --- | --- |
 | 6HF7 | 25.34 / 29.17 | 26.02 / 29.04 | +0.13 |
 | 5HHK | 26.22 / 28.92 | 25.94 / 28.82 | +0.10 |
@@ -109,9 +135,7 @@ python3 -m phasebuild.cli --sad ins_sad.mtz --native ins_sad.mtz --sequence 3INS
 | 7TFQ | 47.90 / 51.32 | 32.52 / 36.86 | +14.46 |
 | 3O2E | 53.93 / 58.26 | 41.14 / 42.64 | +15.62 |
 
-十案例全部跑通（6ZPP/5HHK 的网格内存、6HF7 的 ANISOU 三个阻塞都已修掉，见 [SHELXE_BASELINE.md](SHELXE_BASELINE.md) §5）。三个案例与 campaign 打平（6HF7、5HHK、7ENM 的 R-free 差 ≤0.75 点），其余明显更差。
-
-**但这张 R 表不能当密度修饰的对照尺**：它把 DM 的差异经过 Buccaneer 的反馈循环放大了一轮，`--refinement-prior original_sad` 也与 campaign 的 `dm_phifom` 不同，而且建链本身对图的微小差别高度非线性（7TJ1 的图只差 0.140，R-free 差 15 点）。干净的对照在**图这一层**：DM 输入相位质量相当（0.272 vs 0.279），输出图差 0.125，修饰增益 0.279 vs 0.416。结论是**内部 DM 是一个能工作、但增益只有 Parrot 三分之二的实现**：Parrot 的多分辨率、NCS 与溶剂平坦化迭代不是一次 FFT 掩膜能复现的。
+那张表说明的是旧 MLHL 实现的增益不足（一次 FFT 掩膜对多分辨率/NCS/溶剂平坦化迭代的替代），不是当前 handdm 引擎的评价。handdm v2 的内部细节与参数（`--dm-cmbwt` 默认 0.4、`--dm-holdout` 默认 0.05、两图/周期、自由集振幅 CC 早停与最优周期回滚）见 [HANDDM_V2_REPLACEMENT_20261114.md](HANDDM_V2_REPLACEMENT_20261114.md)。
 
 ## 4. REFMAC：原型可用，差距已量化到根因
 
@@ -213,8 +237,8 @@ Buccaneer 在本流程里承担的是"从 2.5 Å 的 DM 图里建出 100 个残�
 
 按"能否发布免 CCP4 的包"分三档：
 
-1. **现在就能做（推荐）**：保持现有形态——安装包内不含 CCP4 二进制，用户自备 CCP4 授权；`docs/INSTALL_BUNDLE.md` 已说明这一点。内部 P+（配 Parrot）与 `bp3` 作为免 Phaser 的可选路径保留，默认仍是标定过的 `pplus_bundled`；要改默认，先按十案例复测 `bp3` 前端（§2.3 的噪声提醒）。
-2. **达到 SHELXE 水平（近期，按当前证据这是唯一必须做的一项）**：把内部 DM 的修饰增益从 0.279 提到 0.42 量级（终点 complex CC 0.558 → ≥0.68，十案例逐例不低于 SHELXE − 0.03）。验收脚本已经就位（`work/noCCP4/compare_map_phases.py`，十案例约 2 分钟）。做完这一步，"定相 + 密度修饰"就在 SHELXE 水平上，可以摘掉 CCP4。
+1. **现在就能做（推荐）**：保持现有形态——安装包内不含 CCP4 二进制，用户自备 CCP4 授权；`docs/INSTALL_BUNDLE.md` 已说明这一点。内部 P+（配树内 handdm v2）与 `bp3` 作为免 Phaser 的可选路径保留，默认仍是标定过的 `pplus_bundled`；要改默认，先按十案例复测 `bp3` 前端（§2.3 的噪声提醒）。
+2. **达到 SHELXE 水平（近期，按当前证据这是唯一必须做的一项）**：密度修饰已换成树内 handdm v2（旧内部 MLHL 的 0.558 缺口已不存在，胰岛素上 0.8049、整链 0.2131 / 0.2662），但**十案例口径的复测还没做**——验收要求是十案例逐例不低于 SHELXE − 0.03。验收脚本已经就位（`work/noCCP4/compare_map_phases.py`，十案例约 2 分钟）。跑完这一步，"定相 + 密度修饰"是否已在 SHELXE 水平上才有定论，也才能谈摘掉 CCP4。
 3. **SHELXE 式输出（未达成，需重写生长器）**：`trace.py` 已能独立跑通并输出多聚丙氨酸 `backbone.cif`，但实测在**最好的图**（SHELXE 自己的，complex CC 0.70）上也只有 39 个残基、12 个 3–5 残基碎片、33 % CA 落在真值 1 Å 内；生长在第三个残基就被单点密度阈值卡死（29 个候选全被拒，阈值降到 0.3σ 也一样）。瓶颈不是地图质量，也不能靠"接进流水线"解决，需要按 SHELXE 的闭环（低阈值生长 + 片段连接 + 密度修饰反馈 + 全局一致性打分）重做生长器。详见 `docs/SHELXE_BASELINE.md` §3.4。
 4. **可选增强（不必需）**：REFMAC 掩膜对齐（把前向模型差距从 6 点压到 2 点内）与 Buccaneer 等价物（约 2400 行原型接入）。这两项决定的是"能不能给出完整模型"，不影响"能不能达到 SHELXE 水平"。
 

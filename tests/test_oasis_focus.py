@@ -16,7 +16,7 @@ def root():return Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize('method',['likelihood','pplus'])
 def test_both_real_phase_and_dm_routes_match_preserved_upstream(inputs,method):
     # This test compares the in-tree MLHL/legacy DM against the upstream engine;
-    # pin it so a host CCP4 cannot swap in the Parrot stage.
+    # pin it so a host CCP4 cannot swap in the handdm stage.
     cfg={**inputs,'method':method,'solvent_fraction':.45,'dm_engine':'internal'}
     runner=FakeStages(cfg,real_phase=True)
     state=pipeline.run_pipeline(cfg,runner=runner,progress=lambda x:None)

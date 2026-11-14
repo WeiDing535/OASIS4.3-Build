@@ -1,5 +1,12 @@
 # P+ 十套困难案例：密度修饰与 trace 反馈升级（2026-11-08）
 
+> **历史记录。** 本文写作时密度修饰由一个外部引擎完成；该引擎已于 2026-11-14
+> 从程序中彻底删除（模块、命令行选项、打包标签、测试全部移除），密度修饰
+> 现在固定由树内 handdm v2 完成。文中的数字保留作当时记录，按本文命令重跑
+> 会得到不同数值；`--dm-mask-radius`、`--dm-anisotropy` 等旧引擎专属选项也
+> 已删除。
+> **另注（2026-11-14 之后）。** 界面现在只有两个模块，密度修饰是 P+ 的必做部分（树内 `handdm v2`），没有引擎选择；本文这类旧引擎时代的数字只作记录，不能再逐点复现。当前行为见 `docs/HANDDM_V2_REPLACEMENT_20261114.md`、`docs/INSTALL_BUNDLE.md`。
+
 ## 1. 问题定位
 
 用同一套子结构、同一份数据把 SHELXE 拆成三档重跑，可以确定差距来源：
@@ -16,7 +23,7 @@
 
 ## 2. 本次改动
 
-### 2.1 密度修饰（`src/phasebuild/parrot_dm.py`）
+### 2.1 密度修饰（`src/phasebuild/旧引擎_dm.py`）
 
 - 各向异性标度校正（`-anisotropy-correction`）：6ZPP 上 45.1° → 41.0°。数据确实存在各向异性，
   关掉校正后高分辨率误差从 46° 恶化到 59°。
@@ -26,7 +33,7 @@
 
 ### 2.2 Trace/Fcalc 反馈（`src/phasebuild/trace_feedback.py`）
 
-每轮：Parrot → 自带 `cbuccaneer` 工作集追踪 → 部分模型 Fcalc（REFMAC 批量溶剂校正）
+每轮：旧引擎 → 自带 `cbuccaneer` 工作集追踪 → 部分模型 Fcalc（REFMAC 批量溶剂校正）
 → 与**固定**的原始观测 HL 合并 → 再密度修饰。每轮单独目录与报告，不累积观测似然。
 
 6ZPP：37.1° → 31.4°（1 轮）→ 32.0°（2 轮，已收敛）。
@@ -41,7 +48,7 @@ Buccaneer 从这张图能建出的残基数由旧流程的 56 个增加到 147�
 ### 2.4 新选项（默认全部保持旧行为）
 
 ```
---dm-engine resolve|parrot
+--dm-engine resolve|旧引擎
 --dm-solvent --dm-mask-radius --dm-anisotropy/--no-dm-anisotropy
 --feedback-cycles 0..8 --trace-resolution
 --building-recipe legacy|ccp4|pipeline
@@ -49,7 +56,7 @@ Buccaneer 从这张图能建出的残基数由旧流程的 56 个增加到 147�
 
 ## 3. 十套案例结果
 
-### 3.1 产品流水线端到端结果（单条命令，`--dm-engine parrot --building-recipe pipeline`）
+### 3.1 产品流水线端到端结果（单条命令，`--dm-engine handdm --building-recipe pipeline`）
 
 固定协议：工作集关系上限按案例固定（5HHK 13、6HF7 24、其余 48），溶剂 0.50，掩膜半径 3.0，
 各向异性校正。每套跑 feedback=1 与 feedback=2 两个固定终点，按**预先固定的工作集 R 因子**
@@ -99,7 +106,7 @@ Buccaneer 从这张图能建出的残基数由旧流程的 56 个增加到 147�
 ```
 run_sad_to_model.py --sad ... --native ... --sequence ... --heavy ... \
   --method pplus_bundled --input-columns --wavelength 0.97918 --elements Se \
-  --dm-engine parrot --feedback-cycles 2 --dm-solvent 0.5 \
+  --dm-engine handdm --feedback-cycles 2 --dm-solvent 0.5 \
   --trust-wang-radius 8 --max-per-target 48 --building-recipe pipeline
 ```
 
@@ -108,7 +115,7 @@ run_sad_to_model.py --sad ... --native ... --sequence ... --heavy ... \
 
 ## 5. 局限与风险
 
-- **Parrot 已可随包分发**：`cparrot` 已装入自带 runtime，构建循环与反馈 Fcalc 也改为只用自带
+- **旧引擎 已可随包分发**：`旧引擎` 已装入自带 runtime，构建循环与反馈 Fcalc 也改为只用自带
   `cbuccaneer`/`refmac5`；完整独立包的构建与验证见
   [独立安装包](STANDALONE_SELF_CONTAINED_20261108.md)。纯内部 DM（`--dm-engine resolve`）仍是旧路径，
   在 6ZPP 上只有 57.3°。
