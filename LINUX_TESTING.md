@@ -261,6 +261,38 @@ GUI check points (focus of this update):
 3. With valid input, "Check Config" auto-switches to "Run & Results → Run Plan"; "New Task" switches back to "Configuration Input".
 4. Scrolling the log on the run page does not scroll the hidden input form.
 
+### 5.4 In-house engine check (optional, no CCP4 needed for these two stages)
+
+The package can run density modification with the in-house `handdm` engine and refinement with the in-house `minirefmac` engine. Both are opt-in; the default still runs CCP4 Parrot and REFMAC. The two engines are deployed outside the package, so point the pipeline at them:
+
+```bash
+export PHASEBUILD_PYTHON="$(command -v python)"
+python -u run_sad_to_model.py \
+  --method pplus_bundled \
+  --dm-engine handdm --refine-engine minirefmac \
+  --handdm-script /path/to/oasis-dm/src/handdm_v2.py \
+  --handdm-hist-lib /path/to/oasis-dm/hist.lib \
+  --minirefmac-root /path/to/oasis-refine \
+  --sad validation_ten_cases/inputs/6ZPP/selected_sad.mtz \
+  --native validation_ten_cases/inputs/6ZPP/native.mtz \
+  --sequence validation_ten_cases/inputs/6ZPP/building.fasta \
+  --heavy validation_ten_cases/inputs/6ZPP/refined_heavy.pdb \
+  --ccp4-root "$PHASEBUILD_CCP4" \
+  --elements Se --wavelength 0.97918 --auto-fpp --input-columns \
+  --build-model --no-auto-hand --building-recipe legacy \
+  --dm-solvent 0.5 --feedback-cycles 0 \
+  --output work/6zpp_inhouse
+```
+
+Check points:
+- `03_dm/map_phases.json` records `engine` containing `handdm`; `03_dm/feedback_report.json` shows the per-cycle DM statistics.
+- `03_dm/cycle_01/handdm.log` shows the requested cycle count being run. The pipeline hands the engine work-only data, so it has no free reflections and the engine's free-set early stop cannot be evaluated; the adapter disables the early stop in that case and the log line `no valid free reflections` is expected.
+- `05_build/hybrid_report.json` records the refinement engine per round; `06_finish/refinement_report.json` records `free_flag_audit`.
+- `--feedback-cycles` must stay `0` with `handdm`: a non-zero value is refused at validation time (`handdm ... does not support trace feedback`).
+- `--refinement-prior dm_phifom` is accepted with `minirefmac` as an approximation: the in-house engine uses the DM phase/FOM columns as an MLHL phase prior and refines the phases as well, instead of restraining them. The refinement report records `phase_prior.mode: mlhl_prior` and `approximation: true`.
+
+`/path/to/oasis-refine` must contain `minirefmac/cli.py` and `minirefmac/data/monlib_bundle.zip` (the bundled monomer-restraint dictionary, ~48 MB). Check it with `python check_install.py` inside that directory; it prints `RESULT : PASS`.
+
 ## 6. Reporting format (send back to the macOS side)
 
 ```

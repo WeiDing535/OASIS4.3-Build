@@ -103,22 +103,25 @@ def pilot(cfg,root):
 
 
 def dm_parrot(cfg,out,solvent):
-    """External CCP4 Parrot density modification for one hand.
+    """External density modification for one hand.
 
     Writes the standard ``map_phases.mtz``/``map_phases.json`` contract consumed
     by the bridge stage, from the fixed original observation likelihood only.
     """
     from . import trace_feedback
     out=Path(out)
+    engine=cfg.get('dm_engine') or 'parrot'
     trace_feedback.run(cfg['native'],cfg['observation_prior'],cfg['sequence'],cfg['runtime'],out,
         solvent_fraction=float(solvent),free_value=cfg['free_value'],
         cycles=int(cfg.get('dm_cycles',40)),feedback_cycles=0,
-        executable=cfg.get('dm_executable') or None)
-    dump(out/'map_phases.json',{'phase_method':'pplus_bundled','dm_engine':'CCP4 Parrot (external)',
+        executable=cfg.get('dm_executable') or None,dm_engine=engine,
+        handdm_script=cfg.get('handdm_script') or '',handdm_hist_lib=cfg.get('handdm_hist_lib') or '')
+    label='CCP4 Parrot (external)' if engine!='handdm' else 'handdm (in-house)'
+    dump(out/'map_phases.json',{'phase_method':'pplus_bundled','dm_engine':label,
         'role':'Post-DM map; never the original observation prior',
         'solvent_fraction_used':float(solvent),
         'solvent_source':'user' if cfg['solvent_fraction'] is not None else 'sequence_estimate',
-        'density_modification':{'engine':'CCP4 Parrot','feedback_cycles':0}})
+        'density_modification':{'engine':label,'feedback_cycles':0}})
 
 
 def resolve(cfg,out,front,work):
@@ -175,4 +178,4 @@ def copy_selected_dm(cfg,out):
     for row in report['selected_dm_artifacts']:
         if fingerprint(row['path'])!=row:raise RuntimeError('Selected hand density artifact changed')
         shutil.copy2(row['path'],out/Path(row['path']).name)
-    meta=json.loads((out/'map_phases.json').read_text());meta.update(auto_hand=report['selected_hand'],selected_spacegroup=report['selected_spacegroup'],hand_selection=fingerprint(phase/'hand_selection.json'),dm_computed_during_hand_selection=True,dm_engine='CCP4 Parrot (external)');dump(out/'map_phases.json',meta)
+    meta=json.loads((out/'map_phases.json').read_text());meta.update(auto_hand=report['selected_hand'],selected_spacegroup=report['selected_spacegroup'],hand_selection=fingerprint(phase/'hand_selection.json'),dm_computed_during_hand_selection=True,dm_engine=meta.get('dm_engine','CCP4 Parrot (external)'));dump(out/'map_phases.json',meta)

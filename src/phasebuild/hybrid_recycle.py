@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 import gemmi
 from .data import fingerprint,audit
+from .refinement import refine_model
 from .refinement import refmac_refine
 from .runtime import resolve_runtime, runtime_environment, runtime_info
 
@@ -110,7 +111,7 @@ def select_round_by_work_fit(stages, max_final_work_rise=.01):
  best=min(range(len(values)),key=values.__getitem__)
  return best if values[-1]>values[best]+max_final_work_rise else len(values)-1
 
-def recycle(mtz,native,model,sequence,output,rounds=5,refine_cycles=10,ccp4=None,build_semet=False,progress=print,existing_first_build=None,building_recipe='legacy',free_value=0,work_round_guard=False):
+def recycle(mtz,native,model,sequence,output,rounds=5,refine_cycles=10,ccp4=None,build_semet=False,progress=print,existing_first_build=None,building_recipe='legacy',free_value=0,work_round_guard=False,refine_engine='refmac',minirefmac_root=None,phase_prior_mtz=None):
  building_recipe=concrete_recipe(building_recipe)
  if not isinstance(rounds,int) or not 1<=rounds<=20:raise ValueError('Rounds must be 1..20')
  if not isinstance(refine_cycles,int) or not 1<=refine_cycles<=200:raise ValueError('REFMAC cycles must be 1..200')
@@ -162,7 +163,15 @@ def recycle(mtz,native,model,sequence,output,rounds=5,refine_cycles=10,ccp4=None
      raise RuntimeError('External Buccaneer produced an empty or invalid model in round %d; inspect %s'%(number,folder/'buccaneer.log'))
     structure.make_mmcif_document().write_file(str(folder/'model.cif'));report.pop('child_pid',None)
    report['current']='refmac';save();progress('Hybrid REFMAC round %d'%number)
-   refinement=out/('round_%02d_refine'%number);ref=refmac_refine(native,folder/'model.cif',refinement,refine_cycles,ccp4,timeout=3600)
+   refinement=out/('round_%02d_refine'%number)
+   if refine_engine=='minirefmac':
+    ref=refine_model(native,folder/'model.cif',refinement,cycles=refine_cycles,engine='minirefmac',
+                     minirefmac_root=minirefmac_root,timeout=3600,
+                     phase_prior_mtz=phase_prior_mtz)
+   else:
+    # The module-level name is the documented extension point: callers replace
+    # it to inject the audited fixed-phase-prior refiner.
+    ref=refmac_refine(native,folder/'model.cif',refinement,refine_cycles,ccp4,timeout=3600)
    report['stages'].append(dict(round=number,construction='external-Buccaneer',buccaneer_cycles=3 if number==1 else 2,refmac_cycles=refine_cycles,statistics=ref['statistics']['final'],free_flags_preserved=ref['free_flags_preserved']));save();current=refinement/'refined.mtz';previous=refinement/'model.cif'
   chosen=select_round_by_work_fit(report['stages']) if work_round_guard else rounds-1
   selected_model=out/('round_%02d_refine'%(chosen+1))/'model.cif'

@@ -84,8 +84,32 @@ SAD and raw observations must share cell, space-group Hall setting and merged re
 | Columns | SAD mapping | auto; `f=FP,sigf=SIGFP,dano=DANO,sigdano=SIGDANO` or `fplus=F(+),sigfplus=SIGF(+),fminus=F(-),sigfminus=SIGF(-)` |
 | Resources | CCP4 root | `--ccp4-root` (GUI auto-detect) |
 | Resources | DM reference MTZ | bundled reference; generic, not a target structure |
+| Engines | Density modification | `--dm-engine parrot` (default, external CCP4 Parrot) or `handdm` (in-house) |
+| Engines | Refinement | `--refine-engine refmac` (default, external CCP4 REFMAC) or `minirefmac` (in-house) |
+| Engines | In-house engine paths | `--handdm-script`, `--handdm-hist-lib`, `--minirefmac-root`; blank searches the standard deployment locations |
 
 Relation caps of 0 may increase time and memory; defaults 600 / 96 are finite search settings, not exhaustive computation. Fixed settings: Buccaneer 3 cycles in round 1 and 2 thereafter; single thread; no protein seed in round 1; final model from the fixed last cycle.
+
+### Engine substitution
+
+The external CCP4 engines remain the default. The in-house engines are opt-in and never take over a run silently: they are selected by name, and every record states which engine produced the result.
+
+| Stage | External (default) | In-house | Switch |
+| --- | --- | --- | --- |
+| Density modification | CCP4 Parrot (`cparrot`) | `handdm` | `--dm-engine handdm` |
+| Refinement | CCP4 REFMAC (`refmac5`) | `minirefmac` | `--refine-engine minirefmac` |
+
+Both in-house engines run in the OASIS interpreter, so they need no separate installation; `minirefmac` carries its own monomer-restraint dictionary and needs no CCP4 monlib.
+
+Protocol differences are refused explicitly rather than silently weakened:
+
+- `handdm` cannot combine a partial model with its map, so `--feedback-cycles` must be `0`. A non-zero request is rejected at validation time; it does not run a loop whose result would differ from what the option says.
+- `minirefmac` has no equivalent of the audited fixed-phase-prior refiner. With `--refinement-prior dm_phifom` it uses the DM phase/FOM columns as an MLHL phase prior instead. That is an approximation, not the same protocol: the in-house engine refines the phases with the prior, while the REFMAC route restrains them. The refinement report records `phase_prior.mode: mlhl_prior`, `approximation: true` and `equivalent_to_fixed_phase_restraint: false`.
+- The REFMAC `WEIGHT MATRIX` pilot reads geometry RMSD; `minirefmac` takes a direct xray/geometry balance coefficient, so the pilot is skipped, the engine's declared default restraint weight is used, and `SELECTION.json` records `weight_calibration: not_supported_by_engine`.
+- `--per-round-cleanup` installs its wrapper on the external refiner, so it is rejected with `--refine-engine minirefmac`.
+- In the `pipeline` building recipe the later rounds build from FWT/PHWT only, because the in-house engine does not emit the combined HL columns that the REFMAC route produces; `hybrid_report.json` lists the differences. The adapter derives those columns (`PHCOMB` and `HLACOMB`..`HLDCOMB`) from the refined phase and figure of merit, because CCP4 Buccaneer's correlation mode cannot build its map without them; the derivation is recorded as `combined_phase_quartet` in the refinement report.
+
+Phasing (CCP4 Phaser) and model building (CCP4 Buccaneer) still require the user-supplied CCP4 installation.
 
 ## Emitted files
 

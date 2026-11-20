@@ -94,10 +94,18 @@ def merge_phase_map(work_mtz, dm_mtz, destination, *, free_value=0):
 
 def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, free_value=0,
         cycles=20, feedback_cycles=1, trace_resolution=2.0, mask_radius=3.0, anisotropy=True,
-        executable=None, trace_cycles=5, progress=print, fcalc='fc'):
+        executable=None, trace_cycles=5, progress=print, fcalc='fc', dm_engine='parrot',
+        handdm_script='', handdm_hist_lib=''):
     """Iterate external DM and work-only tracing; persist every cycle."""
-    from . import parrot_dm
     out=Path(output);out.mkdir(parents=True,exist_ok=True)
+    if dm_engine=='handdm':
+        from . import handdm_dm as engine_module
+        engine_kwargs=dict(script=handdm_script or None,hist_lib=handdm_hist_lib or None)
+        engine_label='handdm (in-house)'
+    else:
+        from . import parrot_dm as engine_module
+        engine_kwargs=dict(executable=executable,runtime=runtime)
+        engine_label='CCP4 Parrot'
     history=[]
     model=None
     merged=out/'work_only.mtz'
@@ -106,9 +114,9 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, fre
     for cycle in range(max(1,feedback_cycles+1)):
         folder=out/('cycle_%02d'%(cycle+1));folder.mkdir(exist_ok=True)
         dm_path=folder/'dm.mtz'
-        info=parrot_dm.run(merged,prior_mtz,dm_path,solvent_fraction,cycles=cycles,
-            mask_radius=mask_radius,anisotropy=anisotropy,model_pdb=model,executable=executable,
-            runtime=runtime,scratch=folder/'scratch',fcalc=fcalc)
+        info=engine_module.run(merged,prior_mtz,dm_path,solvent_fraction,cycles=cycles,
+            mask_radius=mask_radius,anisotropy=anisotropy,model_pdb=model,
+            scratch=folder/'scratch',fcalc=fcalc,**engine_kwargs)
         row={'cycle':cycle+1,'dm':str(dm_path),'dm_info':info}
         if cycle<feedback_cycles:
             trace_in=folder/'trace_input.mtz'
@@ -120,7 +128,7 @@ def run(work_mtz, prior_mtz, sequence, runtime, output, *, solvent_fraction, fre
         history.append(row)
     final=out/'map_phases.mtz'
     merge_phase_map(merged,dm_path,final,free_value=free_value)
-    report={'engine':'parrot-trace-feedback','history':history,'final_map':str(final),
+    report={'engine':engine_label+'-trace-feedback','history':history,'final_map':str(final),
         'work_only':True,'free_reflections_in_map':0,'reference_coordinates_used':False,
         'shelxe_phases_used':False,'rfree_used_for_selection':False,
         'inputs':{k:fingerprint(v) for k,v in [('work',work_mtz),('prior',prior_mtz),('sequence',sequence)]},

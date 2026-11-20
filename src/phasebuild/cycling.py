@@ -8,6 +8,7 @@ from pathlib import Path
 import gemmi
 from .chemistry import BACKBONE
 from .data import fingerprint
+from .refinement import refine_model
 from .refinement import refmac_refine
 from .sequencing import read_sequences
 from .loops import sequence_bindings
@@ -40,7 +41,8 @@ def model_counts(path):
 
 
 def run_cycles(native,sequence,start,sequence_report,original_map,profile,residue_profile,rotamers,
-               output,mode='updated-map',additional_rounds=3,initial_cycles=20,progress=print,rebuild_stage='local'):
+               output,mode='updated-map',additional_rounds=3,initial_cycles=20,progress=print,rebuild_stage='local',
+               refine_engine='refmac',minirefmac_root=None):
     if mode not in ['refine-only','fixed-map','updated-map'] or additional_rounds<1 or initial_cycles<0:
         raise ValueError('Invalid mode or cycle budget')
     if rebuild_stage not in ['local','extension']:
@@ -90,7 +92,13 @@ def run_cycles(native,sequence,start,sequence_report,original_map,profile,residu
                     raise RuntimeError('Native rebuilding failed; see '+str(folder/'rebuild.log'))
                 assignment=folder/'build/build_report.json';model=folder/'build/model.cif'
                 build_report=fingerprint(assignment)
-            refined=refmac_refine(native,model,folder/'refine',cycles=10)
+            if refine_engine=='minirefmac':
+                refined=refine_model(native,model,folder/'refine',cycles=10,
+                                     engine='minirefmac',minirefmac_root=minirefmac_root)
+            else:
+                # The module-level name is the documented extension point: callers
+                # replace it to inject a different audited refiner.
+                refined=refmac_refine(native,model,folder/'refine',10)
             if refined['keywords']!=initial['keywords'] or any(refined['statistics'][k]!=initial['statistics'][k]
                     for k in ['reflections_used_work','reflections_used_free']):
                 raise RuntimeError('Refinement settings or R-factor reflection counts changed')

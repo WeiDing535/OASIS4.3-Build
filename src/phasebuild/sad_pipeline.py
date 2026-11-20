@@ -20,7 +20,8 @@ DEFAULTS = dict(copies='auto', phase_cycles=5, dm_cycles=5, rounds=5, cycles=10,
                 method='likelihood', solvent_fraction=None, aoe=.5, rank_fit=False,
                 triplet_weight=.1, kmin=.03, max_neighbors=600, max_per_target=96, build_model=True,
                 observation_prior='', composition_sequence='', trust_kl=.0005, trust_cleanup=True, trust_stability=False, trust_partial_cleanup=False, trust_work_weight=False, trust_wang_radius=14., wavelength=None,
-                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='parrot',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc')
+                elements='', auto_fpp=False, native_labels='', input_columns=False, auto_hand=False, building_recipe='legacy',refinement_prior='original_sad',phase_blur_scale=None,phase_blur_b=None,canonical_dm_seed=False,per_round_cleanup=False,dm_engine='parrot',dm_solvent=None,dm_mask_radius=3.0,dm_anisotropy=True,feedback_cycles=0,trace_resolution=2.0,dm_executable='',fcalc='fc',
+                refine_engine='refmac',handdm_script='',handdm_hist_lib='',minirefmac_root='')
 
 
 def validate(config, inspect=True):
@@ -94,8 +95,12 @@ def validate(config, inspect=True):
     if radius!=14 and not (trusted or bundled):raise ValueError('Wang radius is active only for original-likelihood P+')
     if cfg['trust_work_weight'] and (not cfg['build_model'] or not cfg['trust_cleanup']):raise ValueError('Work-only weight calibration requires model building and cleanup enabled')
     if cfg['trust_partial_cleanup'] and (not cfg['build_model'] or not cfg['trust_cleanup']):raise ValueError('Partial cleanup requires model building and cleanup enabled')
-    if cfg['method'] in ('pplus_trust','pplus_bundled') and cfg['dm_engine']!='parrot':
-        raise ValueError('density modification engine only supports external CCP4 Parrot; the RESOLVE engine has been removed, this program is a pure CCP4 implementation')
+    if cfg['dm_engine'] not in ('parrot','handdm'):
+        raise ValueError('density modification engine must be parrot or handdm')
+    if cfg['refine_engine'] not in ('refmac','minirefmac'):
+        raise ValueError('refinement engine must be refmac or minirefmac')
+    if cfg['method'] in ('pplus_trust','pplus_bundled') and cfg['dm_engine']!='parrot' and cfg['dm_engine']!='handdm':
+        raise ValueError('density modification engine only supports external CCP4 Parrot or the in-house handdm engine')
     # For likelihood/pplus the legacy reference-based DM runs and dm_engine is
     # nominal; pplus_internal uses its own internal MLHL DM. Parrot matters only
     # for pplus_trust/pplus_bundled.
@@ -112,8 +117,13 @@ def validate(config, inspect=True):
     if isinstance(cfg['feedback_cycles'],bool) or not isinstance(cfg['feedback_cycles'],int) or not 0<=cfg['feedback_cycles']<=8:
         raise ValueError('feedback_cycles must be 0-8')
     if cfg['fcalc'] not in ('fc','fc_all','refined'):raise ValueError('fcalc must be fc, fc_all or refined')
-    if cfg['feedback_cycles'] and cfg['dm_engine']!='parrot':
-        raise ValueError('Trace feedback requires the Parrot density-modification engine')
+    if cfg['feedback_cycles'] and cfg['dm_engine'] not in ('parrot','handdm'):
+        raise ValueError('Trace feedback requires a density-modification engine')
+    if cfg['feedback_cycles'] and cfg['dm_engine']=='handdm':
+        # The in-house DM engine cannot combine a partial model with its map.
+        # Silently running the feedback loop without the model bias would
+        # report cycles that did not happen, so refuse instead.
+        raise ValueError('The in-house handdm engine does not support trace feedback: it cannot combine a partial model with the map')
     if config.get('trace_resolution') is not None:
         value=cfg['trace_resolution']
         if isinstance(value,bool) or not isinstance(value,(int,float)) or not 0.5<=value<=10:
@@ -122,6 +132,14 @@ def validate(config, inspect=True):
         from . import parrot_dm
         # Fail closed: without a usable Parrot there is no engine to fall back to.
         cfg['dm_executable']=parrot_dm.locate(cfg.get('dm_executable') or None,cfg.get('runtime') or None)
+    if cfg['dm_engine']=='handdm':
+        from . import handdm_dm
+        # Fail closed: the in-house engine must be locatable before any stage runs.
+        cfg['handdm_script']=handdm_dm.locate(cfg.get('handdm_script') or None,cfg.get('runtime') or None)
+        cfg['handdm_hist_lib']=handdm_dm._hist_lib(cfg.get('handdm_hist_lib') or None) or ''
+    if cfg['refine_engine']=='minirefmac':
+        from . import minirefmac_refine
+        cfg['minirefmac_root']=minirefmac_refine.locate(cfg.get('minirefmac_root') or None)
     if optimized:
         if isinstance(cfg['trust_kl'],bool) or not isinstance(cfg['trust_kl'],(int,float)) or not math.isfinite(cfg['trust_kl']) or not 0<cfg['trust_kl']<=.05:
             raise ValueError('P+ KL upper bound must be greater than 0 and no more than 0.05')
@@ -251,6 +269,9 @@ def stage_plan(cfg, python=None):
     if cfg.get('method')=='pplus_bundled':build_cmd.append('--work-round-guard')
     if cfg.get('phase_blur_scale') is not None:build_cmd.extend(['--phase-blur-scale',str(cfg['phase_blur_scale']),'--phase-blur-b',str(cfg['phase_blur_b'])])
     if cfg['build_semet']:build_cmd.append('--build-semet')
+    if cfg.get('refine_engine','refmac')!='refmac':
+        build_cmd.extend(['--refine-engine',str(cfg['refine_engine'])])
+        if cfg.get('minirefmac_root'):build_cmd.extend(['--minirefmac-root',str(cfg['minirefmac_root'])])
     stages=[dict(id='prepare',name='input and original free set verification',directory=str(prepare),command=None,
                  outputs=[str(prepare/'sad.mtz'),str(prepare/'sad.json')]+([str(prepare/'building.fasta')] if cfg.get('build_model',True) else [])),
             dict(id='sad',name=('continuous SAD' if cfg['method']=='likelihood' else 'direct-method P+')+' phasing: save phasing results and observed HL separately',directory=str(phase),command=phase_cmd,
@@ -287,15 +308,22 @@ def stage_plan(cfg, python=None):
             command=[python,'-u',str(root/'run_hand_preselection.py'),'--config',str(out/'pipeline_report.json'),'--output',str(hand)],
             outputs=[str(hand/name) for name in ('hand_selection.json','selected_native.mtz','selected_sad.mtz','refined_heavy.pdb')]))
     if cfg.get('building_recipe')=='pipeline' and cfg.get('build_model',True):
-        stages[4].update(name='external CCP4 Buccaneer+REFMAC build cycles (same protocol as the reference workflow)',
-            command=[python,'-u',str(root/'run_build_pipeline.py'),'--map',str(dm/'map_phases.mtz'),
+        pipeline_cmd=[python,'-u',str(root/'run_build_pipeline.py'),'--map',str(dm/'map_phases.mtz'),
                      '--native',str(hand/'selected_native.mtz') if scout else (str(phase/'selected_native.mtz') if cfg.get('auto_hand') else (str(prepare/'native.mtz') if cfg.get('input_columns') else cfg['native'])),
                      '--sequence',str(prepare/'building.fasta'),'--runtime',cfg['runtime'],
-                     '--rounds',str(cfg['rounds']),'--free-value',str(cfg['free_value']),'--output',str(build)],
+                     '--rounds',str(cfg['rounds']),'--free-value',str(cfg['free_value']),'--output',str(build)]
+        if cfg.get('refine_engine','refmac')!='refmac':
+            pipeline_cmd.extend(['--refine-engine',str(cfg['refine_engine'])])
+            if cfg.get('minirefmac_root'):pipeline_cmd.extend(['--minirefmac-root',str(cfg['minirefmac_root'])])
+        stages[4].update(name=('external CCP4 Buccaneer+REFMAC build cycles (same protocol as the reference workflow)'
+                               if cfg.get('refine_engine','refmac')=='refmac'
+                               else 'external CCP4 Buccaneer build cycles with in-house refinement'),
+            command=pipeline_cmd,
             outputs=[str(build/'primary_model.cif'),str(build/'hybrid_report.json')])
-    if cfg.get('dm_engine')=='parrot' and cfg['method'] in ('pplus_trust','pplus_bundled'):
+    if cfg.get('dm_engine') in ('parrot','handdm') and cfg['method'] in ('pplus_trust','pplus_bundled'):
         stages[2].update(name=('Parrot anisotropy correction / solvent-mask density modification (work set)' if not cfg.get('feedback_cycles')
-                               else 'Parrot density modification + %d cycles of work-set trace/Fcalc feedback'%cfg['feedback_cycles']),
+                               else 'Parrot density modification + %d cycles of work-set trace/Fcalc feedback'%cfg['feedback_cycles']) if cfg.get('dm_engine')=='parrot'
+                              else 'handdm in-house density modification (work set)',
             command=[python,'-u',str(root/'run_trace_feedback.py'),'--config',str(out/'pipeline_report.json'),'--output',str(dm)],
             outputs=[str(dm/'map_phases.mtz'),str(dm/'map_phases.json')])
     return stages if cfg.get('build_model',True) else stages[:3]

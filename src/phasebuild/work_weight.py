@@ -75,10 +75,22 @@ def _terminate_group(process):
         process.wait(timeout=5)
 
 
-def calibrate_work_weight(native_file,model_file,runtime,output,free_value=0):
+def calibrate_work_weight(native_file,model_file,runtime,output,free_value=0,engine='refmac'):
     from .refinement import reflection_partition
     out=Path(output);out.mkdir(parents=True,exist_ok=False);masked=out/'work_only.mtz';mask=mask_test_observations(native_file,masked,free_value)
     _,part=reflection_partition(native_file,free_value=free_value)
+    if engine!='refmac':
+        # The weight pilot scans REFMAC's WEIGHT MATRIX and reads the resulting
+        # geometry RMSD. The in-house engine exposes a different weight knob
+        # (xray/geometry balance), so the scan is not transferable; the
+        # predeclared default is used and the omission is recorded.
+        report={'selected_weight':0.005,'policy':'weight calibration skipped for the in-house engine; the predeclared default 0.005 is used',
+                'pilots':[],'failed_pilots':[],'mask_audit':mask,'prepilot_model':fingerprint(model_file),
+                'pilot_models_reused':False,'selection_uses_original_Rfree':False,
+                'scope':'No original test observations supplied to pilots. Previously generated model/maps are not certified end-to-end work-only.',
+                'engine':engine,'weight_calibration':'not_supported_by_engine'}
+        (out/'SELECTION.json').write_text(json.dumps(report,indent=2)+'\n')
+        return 0.005,report
     def pilot(weight):
         folder=out/('w'+str(weight).replace('.','p'));folder.mkdir();shutil.copy2(masked,folder/'input.mtz');gemmi.read_structure(str(model_file)).write_pdb(str(folder/'input.pdb'))
         text=('LABIN FP=F SIGFP=SIGF FREE=FreeR_flag\nFREE %d\nREFI TYPE REST RESO %.6f %.6f\nREFI RESI MLKF\nREFI BREF ISOT\nMAKE HYDR N HOUT N BUIL N\nSCAL TYPE BULK\nSCAL MLSC WORK\nWEIGHT MATRIX %.6g\nNCYC 30\nEND\n')%(free_value,part['observed_resolution_low']*1.0001,part['observed_resolution_high']*.9999,weight)

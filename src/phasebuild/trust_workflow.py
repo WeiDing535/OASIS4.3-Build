@@ -195,21 +195,38 @@ def finish(cfg, output):
             cleaned.make_mmcif_document().write_file(str(out/'cleaned.cif'));dump(out/'cleanup.json',audit)
             if cfg.get('trust_work_weight'):
                 from .work_weight import calibrate_work_weight
-                post_weight,calibration=calibrate_work_weight(cfg['native'],out/'cleaned.cif',cfg['runtime'],out/'work_weight_calibration',cfg['free_value'])
+                post_weight,calibration=calibrate_work_weight(cfg['native'],out/'cleaned.cif',cfg['runtime'],out/'work_weight_calibration',cfg['free_value'],
+                                                        engine=cfg.get('refine_engine') or 'refmac')
             shutil.copyfile(cfg['native'],out/'input.mtz');cleaned.write_pdb(str(out/'input.pdb'))
             inp,part=reflection_partition(cfg['native'],free_value=cfg['free_value'])
             keywords='LABIN FP=F SIGFP=SIGF FREE=FreeR_flag\nFREE %d\nREFI TYPE REST RESO %.6f %.6f\nREFI RESI MLKF\nREFI BREF ISOT\nMAKE HYDR N HOUT N BUIL N\nSCAL TYPE BULK\nSCAL MLSC WORK\nWEIGHT MATRIX %.6g\nNCYC 30\nEND\n'%(cfg['free_value'],part['observed_resolution_low']*1.0001,part['observed_resolution_high']*.9999,post_weight)
             (out/'keywords.txt').write_text(keywords)
-            command=[str(Path(cfg['runtime'])/'bin/refmac5'),'HKLIN','input.mtz','XYZIN','input.pdb','HKLOUT','refined.mtz','XYZOUT','refined.pdb','XMLOUT','refmac.xml']
-            env=runtime_environment(Path(cfg['runtime']),scratch=out/'scratch')
             # The post-cleanup refinement is an optional improvement. A numerical
             # failure here must not discard a completed phasing/building endpoint;
             # the fixed last build round is kept instead and the failure recorded.
             try:
-                launch(command,out,'refmac',keywords,env)
-                stats=parse_statistics(out/'refmac.log',out/'refmac.xml')
-                if stats['final']['cycle']!=30:raise RuntimeError('Post-cleanup refinement did not finish')
-                flags=verify_free_flags(inp,gemmi.read_mtz_file(str(out/'refined.mtz')),'FreeR_flag','F','SIGF')
+                engine=cfg.get('refine_engine') or 'refmac'
+                if engine=='minirefmac':
+                    from .refinement import refine_model
+                    sub=out/'minirefmac'
+                    prior=None
+                    if cfg.get('refinement_prior')=='dm_phifom':
+                        prior=parent/'03_dm/map_phases.mtz'
+                        if not prior.is_file():raise RuntimeError('DM phase prior is unavailable: '+str(prior))
+                    ref=refine_model(out/'input.mtz',out/'input.pdb',sub,cycles=30,engine='minirefmac',
+                                     minirefmac_root=cfg.get('minirefmac_root') or None,timeout=3600,
+                                     phase_prior_mtz=prior)
+                    stats=ref['statistics']
+                    for name in ('refined.mtz','refined.pdb'):shutil.copyfile(sub/name,out/name)
+                    shutil.copyfile(sub/'model.cif',out/'model.cif')
+                    flags=ref['free_flag_audit']
+                else:
+                    command=[str(Path(cfg['runtime'])/'bin/refmac5'),'HKLIN','input.mtz','XYZIN','input.pdb','HKLOUT','refined.mtz','XYZOUT','refined.pdb','XMLOUT','refmac.xml']
+                    env=runtime_environment(Path(cfg['runtime']),scratch=out/'scratch')
+                    launch(command,out,'refmac',keywords,env)
+                    stats=parse_statistics(out/'refmac.log',out/'refmac.xml')
+                    if stats['final']['cycle']!=30:raise RuntimeError('Post-cleanup refinement did not finish')
+                    flags=verify_free_flags(inp,gemmi.read_mtz_file(str(out/'refined.mtz')),'FreeR_flag','F','SIGF')
                 gemmi.read_structure(str(out/'refined.pdb')).make_mmcif_document().write_file(str(out/'model.cif'))
             except (RuntimeError,ValueError,OSError,subprocess.TimeoutExpired) as error:
                 # TimeoutExpired is a SubprocessError, not OSError/RuntimeError:

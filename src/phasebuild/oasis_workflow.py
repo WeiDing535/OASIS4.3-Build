@@ -73,9 +73,9 @@ def make_plan(config, project, python=None, inspect=True):
             if key not in config and protocol is None:cfg[key]=DEFAULTS[key]
     if protocol is not None and not cfg['build_model']:cfg.update(trust_work_weight=False,trust_partial_cleanup=False)
     if 'method' not in config:cfg['method']='pplus_bundled' if protocol is not None else DEFAULTS['method'] # old saved configs retain their historical route
-    if cfg.get('dm_engine')=='parrot' and cfg.get('method') not in ('pplus_trust','pplus_internal','pplus_bundled'):
-        # Parrot only matters for the P+ routes; likelihood/pplus run their own
-        # legacy DM engine, so the choice is nominal and feedback is disabled.
+    if cfg.get('dm_engine') in ('parrot','handdm') and cfg.get('method') not in ('pplus_trust','pplus_internal','pplus_bundled'):
+        # The external DM engines only matter for the P+ routes; likelihood/pplus
+        # run their own legacy DM engine, so the choice is nominal and feedback is disabled.
         cfg['feedback_cycles']=0
     if 'explore' not in config:cfg['explore']=False # never silently migrate saved single-run configs
     explore=cfg.pop('explore');workers=cfg.pop('explore_workers')
@@ -111,6 +111,11 @@ def make_plan(config, project, python=None, inspect=True):
     if protocol is not None:checked['protocol']=protocol
     return checked,[dict(name='OASIS4.3: phasing → density modification'+(' → Buccaneer → REFMAC' if checked['build_model'] else ' (model building not enabled)'),kind='sad_to_model',
                          output=str(outer/'00_sad_to_model'),command=command)]
+
+
+def _dm_engine_label(cfg):
+    """Human-readable label for the density-modification engine in use."""
+    return 'external CCP4 Parrot' if cfg.get('dm_engine')!='handdm' else 'handdm (in-house)'
 
 
 def describe_plan(cfg):
@@ -153,7 +158,7 @@ def describe_plan(cfg):
         active.update(elements=cfg['elements'],fpp=cfg['fpp'],fpp_source=scattering['source'],
                       fpp_kind='theoretical value computed from the required experimental wavelength, not an absorption-edge measurement')
     if cfg['method']=='pplus_bundled' and cfg.get('trust_wang_radius')==8 and cfg.get('trust_work_weight') and not cfg.get('trust_stability'):
-        active.update(method='P+ Wang8 + refinement weight search',dm_engine='external CCP4 Parrot')
+        active.update(method='P+ Wang8 + refinement weight search',dm_engine=_dm_engine_label(cfg))
     if cfg['method'] in ('pplus_trust','pplus_bundled'):active['trust_wang_radius']=cfg.get('trust_wang_radius',14.)
     from .portfolio import PROTOCOLS
     from .portfolio_gui import NAMES
@@ -161,7 +166,7 @@ def describe_plan(cfg):
     if active_profile and cfg['method']=='pplus_bundled':
         active['protocol']=active_profile
         active['method']=NAMES[active_profile]
-        active['dm_engine']='external CCP4 Parrot'
+        active['dm_engine']=_dm_engine_label(cfg)
     active['per_round_cleanup']=cfg.get('per_round_cleanup',False)
     active['canonical_dm_seed']=cfg.get('canonical_dm_seed',False)
     active['auto_hand']=cfg.get('auto_hand',False)

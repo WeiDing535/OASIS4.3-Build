@@ -24,7 +24,9 @@ Only per-experiment parameters are shown:
 - Phasing method: P+ method, parameter scheme, density-modification engine.
 - Input files: SAD data, heavy-atom model, sequence, element, wavelength, output directory.
 - Sample and density modification: copy number, solvent content.
-- Model building and refinement: whether to build a model, auto hand determination, refinement rounds and cycles per round.
+- Model building and refinement: whether to build a model, auto hand determination, refinement engine, refinement rounds and cycles per round.
+
+The two engine selectors are explicit choices, not automatic detection. The density-modification selector offers CCP4 Parrot (default) and the in-house `handdm`; the refinement selector offers CCP4 REFMAC (default) and the in-house `minirefmac`. Selecting an in-house engine needs its deployment to be reachable (the in-house programs live outside the package); if it cannot be found, the run stops at configuration validation instead of falling back to the external engine. The in-house engines differ from the external ones in documented ways — for example `handdm` cannot run the trace-feedback loop, so that request is refused rather than silently downgraded.
 
 Remaining parameters (native data, observational priors, combined sequence, MTZ column names, free-set value, loop/sampling limits, P+ optimization constants, reference structure, runtime environment, feedback endpoint combination) are hidden by default. Check "Show Advanced Parameters" at the bottom to expand, grouped under "Input Details / Loops & Sampling / P+ Optimization / Run Resources & Endpoint Combination". They are calibration constants or run resources; defaults are normally fine. Hiding affects display only, not meaning or defaults. Detect external engine paths with "Detect"; if detection fails, enter the `--ccp4-root` directory manually.
 

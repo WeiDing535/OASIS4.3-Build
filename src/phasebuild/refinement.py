@@ -104,6 +104,22 @@ def verify_free_flags(before_mtz,after_mtz,free,fp,sigfp):
             'scope':'Unobserved rows may be omitted; observed reflections may not be omitted by this adapter.'}
 
 
+def refine_model(mtz_path, model_path, output, cycles=10, ccp4=None, engine='refmac',
+                 minirefmac_root=None, **kwargs):
+    """Refine a model with the selected engine.
+
+    ``engine='refmac'`` runs the external CCP4 program; ``engine='minirefmac'``
+    runs the in-house maximum-likelihood engine. Both produce the same report
+    schema, so callers do not need to know which one ran.
+    """
+    if engine=='minirefmac':
+        from .minirefmac_refine import refine
+        return refine(mtz_path,model_path,output,cycles=cycles,root=minirefmac_root,**kwargs)
+    if engine!='refmac':
+        raise ValueError('Unknown refinement engine: '+str(engine))
+    return refmac_refine(mtz_path,model_path,output,cycles=cycles,ccp4=ccp4,**kwargs)
+
+
 def refmac_refine(mtz_path,model_path,output,cycles=10,ccp4=None,
                   fp='F',sigfp='SIGF',free='FreeR_flag',free_value=0,timeout=300):
     if not isinstance(cycles,int) or cycles<0:

@@ -42,6 +42,33 @@ The full pipeline also needs **user-supplied external engines**: CCP4 `phaser`, 
 
 The source distribution ships no 3.5 GB third-party runtime. The CCP4 engines needed for the full pipeline must be supplied and licensed by the user; set the CCP4 root with `--ccp4-root` (the GUI field offers auto-detect). Density modification uses CCP4 Parrot (`cparrot`); trace/Fcalc feedback uses REFMAC (`refmac5`) zero-cycle structure factors, both from the same CCP4 install. The historical dev17 portable runtime (`runtime/`, ~3.5 GB, with `cparrot`/`cbuccaneer`/`refmac5`/`phaser` and `density/`) was a restricted validation asset containing licensed third-party components; per upstream licences it is not publicly redistributable and is limited to internal or authorised channels. See [Linux testing](LINUX_TESTING.md).
 
+### (c) In-house engines (optional, no CCP4 needed for these stages)
+
+Two self-contained engines can replace the CCP4 density-modification and refinement steps. They are **opt-in**: the default configuration still runs the external CCP4 Parrot and REFMAC, so existing reference results are unchanged and no engine ever takes over silently.
+
+| Stage | External (default) | In-house | Selected with |
+| --- | --- | --- | --- |
+| Density modification | CCP4 Parrot (`cparrot`) | `handdm` (in-house density modification) | `--dm-engine handdm` |
+| Model refinement | CCP4 REFMAC (`refmac5`) | `minirefmac` (in-house ML refinement) | `--refine-engine minirefmac` |
+
+```bash
+python -u run_sad_to_model.py \
+  --method pplus_bundled --dm-engine handdm --refine-engine minirefmac \
+  --handdm-script /path/to/oasis-dm/src/handdm_v2.py \
+  --minirefmac-root /path/to/oasis-refine \
+  ... (the remaining arguments are unchanged)
+```
+
+Blank `--handdm-script` / `--handdm-hist-lib` / `--minirefmac-root` search the standard deployment locations. Both engines run inside the OASIS interpreter, so no extra installation is required; `minirefmac` carries its own monomer-restraint dictionary.
+
+Protocol differences are enforced rather than silently absorbed:
+
+- `handdm` cannot combine a partial model with its map, so `--feedback-cycles` must be `0` with this engine; the request is refused instead of running a loop that would not do what it claims.
+- `minirefmac` has no equivalent of the audited fixed-phase-prior refiner. With `--refinement-prior dm_phifom` it uses the DM phase/FOM columns as an MLHL phase prior instead — an approximation, because the in-house engine refines the phases with the prior while REFMAC restrains them. The refinement report records the difference.
+- The REFMAC `WEIGHT MATRIX` pilot is unavailable with `minirefmac`; the engine's declared default restraint weight is used and the calibration record says so.
+
+Model building (CCP4 Buccaneer) and phasing (CCP4 Phaser) still need the user-supplied CCP4 install.
+
 ### Launch the GUI
 
 - Double-click `OASIS4.3.command` in the project root, or `OASIS4.3.app` on the desktop;

@@ -136,7 +136,8 @@ def _refmac_keywords(labin_phase, hklin, xyzin, hklout, xyzout, title):
 
 
 def run(native, phase_map, sequence, runtime, output, *, cycles=5, free_value=0,
-        resolve_cycles=2.0, jobs=1, timeout=21600):
+        resolve_cycles=2.0, jobs=1, timeout=21600, refine_engine='refmac',
+        minirefmac_root=None):
     """Run an in-package equivalent of CCP4's buccaneer_pipeline.
 
     Only the bundled ``cbuccaneer`` and ``refmac5`` executables are used, with the
@@ -144,12 +145,20 @@ def run(native, phase_map, sequence, runtime, output, *, cycles=5, free_value=0,
     first round, 2 Buccaneer cycles with combined HL and FWT/PHWT maps afterwards).
     This removes the dependency on a CCP4 Python installation and its pipeline
     module while keeping the scientific protocol identical.
+
+    ``refine_engine='minirefmac'`` replaces REFMAC with the in-house refinement
+    engine. Two protocol differences follow from that engine and are recorded in
+    the report: the first round uses the DM phase/FOM columns as an MLHL phase
+    prior instead of REFMAC's fixed phase restraint, and the later rounds build
+    from FWT/PHWT only, because the in-house engine does not emit the combined HL
+    columns that the REFMAC route produces.
     """
     native=Path(native).resolve();phase_map=Path(phase_map).resolve()
     out=Path(output).resolve();out.mkdir(parents=True,exist_ok=True)
     work=out/'build_input.mtz'
     staged=input_mtz(native,phase_map,work,free_value)
-    buccaneer=_find('cbuccaneer',runtime);refmac=_find('refmac5',runtime)
+    buccaneer=_find('cbuccaneer',runtime)
+    refmac=None if refine_engine=='minirefmac' else _find('refmac5',runtime)
     reference=(Path(runtime)/'lib/data/reference_structures/reference-1tqw').resolve()
     env=_environment(buccaneer,out/'scratch')
     title='OASIS4.3 P+ build'
@@ -172,18 +181,22 @@ def run(native, phase_map, sequence, runtime, output, *, cycles=5, free_value=0,
         if done.returncode or not build_pdb.is_file():
             raise RuntimeError('cbuccaneer failed in cycle %d; see %s'%(cycle,log))
         refine_mtz=folder/'refine.mtz';refine_pdb=folder/'refine.pdb'
-        labin=('  PHIB=PHIB FOM=FOM' if cycle==1 else
-               '  HLA=HLACOMB HLB=HLBCOMB HLC=HLCCOMB HLD=HLDCOMB')
-        keywords=_write(folder/'refmac.in',_refmac_keywords(labin,current,build_pdb,refine_mtz,refine_pdb,title))
-        rlog=folder/'refmac.log'
-        with rlog.open('w') as handle:
-            done=subprocess.run([refmac,'HKLIN',str(current),'XYZIN',str(build_pdb),
-                'HKLOUT',str(refine_mtz),'XYZOUT',str(refine_pdb)],
-                input=Path(keywords).read_text(),text=True,stdout=handle,stderr=subprocess.STDOUT,
-                env=env,cwd=folder,timeout=timeout)
-        if done.returncode or not refine_pdb.is_file():
-            raise RuntimeError('REFMAC failed in cycle %d; see %s'%(cycle,rlog))
-        stats=_refmac_final(rlog)
+        if refine_engine=='minirefmac':
+            stats=_minirefmac_cycle(current,build_pdb,folder,free_value,minirefmac_root,
+                                     timeout,phase_prior=(cycle==1))
+        else:
+            labin=('  PHIB=PHIB FOM=FOM' if cycle==1 else
+                   '  HLA=HLACOMB HLB=HLBCOMB HLC=HLCCOMB HLD=HLDCOMB')
+            keywords=_write(folder/'refmac.in',_refmac_keywords(labin,current,build_pdb,refine_mtz,refine_pdb,title))
+            rlog=folder/'refmac.log'
+            with rlog.open('w') as handle:
+                done=subprocess.run([refmac,'HKLIN',str(current),'XYZIN',str(build_pdb),
+                    'HKLOUT',str(refine_mtz),'XYZOUT',str(refine_pdb)],
+                    input=Path(keywords).read_text(),text=True,stdout=handle,stderr=subprocess.STDOUT,
+                    env=env,cwd=folder,timeout=timeout)
+            if done.returncode or not refine_pdb.is_file():
+                raise RuntimeError('REFMAC failed in cycle %d; see %s'%(cycle,rlog))
+            stats=_refmac_final(rlog)
         rows.append(dict(cycle=cycle,**stats))
         current=refine_mtz;previous=refine_pdb
     model=Path(previous)
@@ -201,8 +214,29 @@ def run(native, phase_map, sequence, runtime, output, *, cycles=5, free_value=0,
         'selection':'fixed final build/refine cycle; no Rfree used',
         'scope':'Same builder protocol as the reference route; only the input phases differ',
         'requires_ccp4_python':False,'external_executables':['cbuccaneer','refmac5']}
+    if refine_engine=='minirefmac':
+        report['engine']='oasis-buccaneer-inhouse-refine-pipeline'
+        report['refinement_engine']='in-house minirefmac'
+        report['external_executables']=['cbuccaneer']
+        report['protocol_differences']=[
+            'Round 1 uses the DM phase/FOM columns as an MLHL phase prior; the REFMAC route uses a fixed phase restraint.',
+            'The in-house engine does not emit the REFMAC combined phase quartet, so the adapter derives PHCOMB and HLACOMB..HLDCOMB from the refined phase and figure of merit before the next build round.',
+            'The in-house engine rescales the observed amplitudes onto the model scale; the REFMAC route keeps them on the observation scale.']
     (out/'hybrid_report.json').write_text(json.dumps(report,indent=2)+'\n')
     return report
+
+
+def _minirefmac_cycle(current, build_pdb, folder, free_value, root, timeout, phase_prior):
+    """Refine one build round with the in-house engine and mirror the REFMAC outputs."""
+    from .minirefmac_refine import refine
+    sub=folder/'minirefmac'
+    report=refine(str(current),str(build_pdb),sub,cycles=10,root=root,
+                  fp='FP',sigfp='SIGFP',free='FreeR_flag',free_value=free_value,
+                  timeout=timeout,phase_prior=phase_prior)
+    shutil.copyfile(sub/'refined.mtz',folder/'refine.mtz')
+    shutil.copyfile(sub/'refined.pdb',folder/'refine.pdb')
+    final=report['statistics']['final']
+    return {'r_work':final['r_work'],'r_free':final['r_free']}
 
 
 def _refmac_final(log):

@@ -30,7 +30,10 @@ METHOD_NAMES=dict(METHODS)
 PROTOCOLS=[('','no parameter recipe'),('pplus_w8_weight','P+ · Wang8 + refinement weight search (calibrated recipe)'),
            ('pplus_w8','P+ · Wang8'),('pplus_w14','P+ · Wang14'),('stable_w14','stabilized P+ · Wang14')]
 RECIPES=[('pipeline','CCP4 Buccaneer/REFMAC pipeline (recommended)'),('ccp4','external CCP4 pipeline'),('legacy','legacy per-cycle pipeline')]
-ENGINES=[('parrot','CCP4 Parrot density modification (external engine)')]
+ENGINES=[('parrot','CCP4 Parrot density modification (external engine)'),
+         ('handdm','handdm density modification (in-house engine, no CCP4 needed)')]
+REFINE_ENGINES=[('refmac','CCP4 REFMAC refinement (external engine)'),
+                ('minirefmac','minirefmac refinement (in-house engine, no CCP4 needed)')]
 PRIORS=[('dm_phifom','density-modification phases + model amplitudes'),('original_sad','original SAD phases')]
 
 # key, title, kind, hint, options, only-methods
@@ -393,6 +396,11 @@ class App:
         ttk.Checkbutton(row,text='automatic hand determination (try both hands, without R-free)',variable=self.auto_hand).pack(side='left',padx=12)
         for key in ESSENTIAL_GROUPS[2][1]:
             self._field(build,specs[key])
+        row=ttk.Frame(build);row.pack(fill='x',pady=2)
+        ttk.Label(row,text='refinement engine',width=26,anchor='w').pack(side='left')
+        self.refine_engine=self.tk.StringVar(value='refmac')
+        ttk.Combobox(row,textvariable=self.refine_engine,values=[label for _,label in REFINE_ENGINES],
+                     state='readonly',width=30).pack(side='left')
         for key,title,values,var in [('building_recipe','build recipe',RECIPES,'recipe'),
                                      ('refinement_prior','refinement phase source',PRIORS,'prior')]:
             row=ttk.Frame(build);row.pack(fill='x',pady=2)
@@ -511,6 +519,9 @@ class App:
         engine=dict(ENGINES).get(values.get('dm_engine'))
         if engine:
             self.dm_engine.set(engine)
+        refine=dict(REFINE_ENGINES).get(values.get('refine_engine'))
+        if refine:
+            self.refine_engine.set(refine)
         if 'build_model' in values:
             self.build_model.set(bool(values['build_model']))
         if 'auto_hand' in values:
@@ -553,6 +564,7 @@ class App:
             values['solvent_fraction']=None
         values['method']=self.method.get()
         values['dm_engine']=dict((label,key) for key,label in ENGINES).get(self.dm_engine.get(),'parrot')
+        values['refine_engine']=dict((label,key) for key,label in REFINE_ENGINES).get(self.refine_engine.get(),'refmac')
         values['building_recipe']=dict((label,key) for key,label in RECIPES).get(self.recipe.get(),'pipeline')
         values['refinement_prior']=dict((label,key) for key,label in PRIORS).get(self.prior.get(),'dm_phifom')
         values['build_model']=bool(self.build_model.get())

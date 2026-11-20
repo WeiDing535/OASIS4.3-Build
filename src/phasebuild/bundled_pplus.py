@@ -145,6 +145,7 @@ def dm(cfg,output):
         from .hand_selection import copy_selected_dm
         return copy_selected_dm(cfg,output)
     # The RESOLVE/CCTBX density-modification backend was removed. The pipeline
-    # always routes DM through external CCP4 Parrot (run_trace_feedback.py);
-    # this branch is unreachable unless a caller bypasses the validated config.
-    raise ValueError('density modification is fixed to the external CCP4 Parrot engine (RESOLVE has been removed)')
+    # routes DM through the external CCP4 Parrot engine or the in-house handdm
+    # engine (run_trace_feedback.py); this branch is unreachable unless a
+    # caller bypasses the validated config.
+    raise ValueError('density modification must run through the configured engine (CCP4 Parrot or the in-house handdm engine); the RESOLVE backend has been removed')

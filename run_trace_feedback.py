@@ -47,9 +47,13 @@ def main():
         anisotropy=bool(cfg.get('dm_anisotropy',True)),
         executable=cfg.get('dm_executable') or None,
         fcalc=cfg.get('fcalc','fc'),
+        dm_engine=cfg.get('dm_engine') or 'parrot',
+        handdm_script=cfg.get('handdm_script') or '',
+        handdm_hist_lib=cfg.get('handdm_hist_lib') or '',
         progress=lambda m:print(m,flush=True))
     report.update(solvent_source='user' if cfg.get('dm_solvent') is not None else 'sequence_estimate',
         original_prior=fingerprint(prior),
+        engine=(cfg.get('dm_engine') or 'parrot')+'-trace-feedback',
         map_formula='FWT=|FP|*FOM, PHWT=PHIB from the final Parrot HL quartet; work reflections only',
         free_reflections_in_map=0)
     (out/'map_phases.json').write_text(json.dumps(report,indent=2)+'\n')
