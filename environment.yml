@@ -1,0 +1,14 @@
+name: oasis43-unified
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  # Ten-case validation environment exact versions (2026-11-16, dev17 portable runtime), pinned for numerical reproducibility
+  - numpy=1.26.4
+  - scipy=1.13.1
+  - gemmi=0.7.5
+  - pytest=8.4.2
+  # GUI uses tkinter; conda-forge python usually includes it; declared explicitly for portability
+  # Linux users also need the system package: python3-tk
+  - tk

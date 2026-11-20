@@ -1,0 +1,28 @@
+{
+  "pdb_id": "1TQW",
+  "kind": "Exact existing reference map coefficients, only unused columns removed",
+  "data_source": "CCP4 standard reference_structures/reference-1tqw.mtz",
+  "public_data_url": "https://ftp.ccp4.ac.uk/ccp4/6.4.0/ccp4-6.4.0/lib/data/reference_structures/reference-1tqw.mtz",
+  "documentation_url": "https://www.ccp4.ac.uk/html/parrot.html",
+  "structure_url": "https://www.rcsb.org/structure/1TQW",
+  "reference": "PDB 1TQW; see CCP4 and original PDB structure authors in reference documentation",
+  "source_sha256": "e43c1c7ba791e33b3ce0b36a149425947e2ff2130cc46dece8a5328c51afd3c5",
+  "mtz_sha256": "1683f8b91212dde07c2f98cbc584d5649925e84ed7464b4c3c9b416c1ddd3ea7",
+  "reflections": 328518,
+  "resolution_limit": 1.2000019592189037,
+  "cell": [
+    69.007,
+    110.044,
+    138.946,
+    90.0,
+    90.0,
+    90.0
+  ],
+  "spacegroup": "P 21 21 21",
+  "coefficients_changed": false,
+  "target_structure_used": false,
+  "independence": "1TQW is outside the 100-case benchmark; future target homology is not automatically detected",
+  "limitations": "Generic protein histogram; unusual compositions may require an independent matched reference",
+  "distribution_note": "This resource is reference diffraction/map data, not Parrot code or a runtime dependency. Public PDB archive inputs are CC0; this notice does not assert a new license over the CCP4-processed data.",
+  "public_release_policy": "MTZ omitted from public source/wheels. Explicit provisioning retrieves pinned upstream data, retaining the exact validated coefficients. Upstream data terms apply separately from the code license."
+}

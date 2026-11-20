@@ -1,0 +1,617 @@
+"""Desktop front end: toolkit-free controller, form mapping and Tk window."""
+import json
+from pathlib import Path
+import pytest
+from phasebuild import desktop,oasis_workflow as workflow
+
+
+def project(tmp_path):
+    root=Path(__file__).resolve().parents[1]
+    (tmp_path/'run_sad_to_model.py').symlink_to(root/'run_sad_to_model.py')
+    return tmp_path
+
+
+def test_controller_defaults_and_plan_come_from_the_workflow(tmp_path):
+    controller=desktop.Controller(project(tmp_path))
+    default=controller.defaults()
+    assert default['method']=='pplus_bundled' and default['dm_engine']=='parrot'
+    assert 'profile' not in default
+    assert 'gui_workflow' not in __import__('sys').modules
+
+
+def test_controller_rejects_a_retired_mode_without_creating_output(tmp_path):
+    controller=desktop.Controller(project(tmp_path))
+    with pytest.raises(ValueError):
+        controller.plan({'mode':'refine'})
+    assert not (tmp_path/'runs').exists()
+
+
+def test_controller_import_requires_a_real_result_tree(tmp_path):
+    controller=desktop.Controller(project(tmp_path))
+    empty=tmp_path/'empty';empty.mkdir()
+    with pytest.raises(ValueError):
+        controller.import_results(empty)
+
+
+def test_every_form_field_is_a_workflow_option():
+    """A stale widget would make make_plan reject the whole configuration."""
+    root=Path(__file__).resolve().parents[1]
+    default=workflow.defaults(root)
+    covered={spec[0] for spec in desktop.FIELD_SPECS}
+    assert covered <= set(default)
+    assert {'sad','heavy','sequence','elements','wavelength','copies','output'} <= covered
+
+
+def test_protocol_and_engine_labels_round_trip():
+    for key,label in desktop.PROTOCOLS:
+        assert dict((label,value) for value,label in desktop.PROTOCOLS)[label]==key
+    assert dict(desktop.ENGINES)['parrot']=='CCP4 Parrot density modification (external engine)'
+
+
+def fill(app,values):
+    for key,value in values.items():
+        if key in app.fields:
+            app.fields[key]['var'].set(str(value))
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_window_builds_and_collects_the_form(tmp_path):
+    """Exercise the real widgets without entering the event loop."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    app=desktop.App(controller)
+    try:
+        app.root.update_idletasks()
+        assert app.start_button.winfo_exists()
+        with pytest.raises(ValueError,match='wavelength'):
+            app.collect()
+        fill(app,dict(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
+                      wavelength='0.97918',copies='2',output=str(tmp_path/'run')))
+        values=app.collect()
+        assert values['method']=='pplus_bundled' and values['dm_engine']=='parrot'
+        assert values['build_model'] is True and values['auto_hand'] is True
+        assert values['copies']==2 and values['wavelength']==0.97918
+        assert values['protocol']=='pplus_w8_weight' and values['building_recipe']=='pipeline'
+        assert values['solvent_fraction'] is None  # blank means estimate, not ''
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_config_and_run_live_on_separate_full_width_pages(tmp_path):
+    """The form must own the whole window; actions route to the page that shows their result."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    controller.describe=lambda config:dict(stages=[],effective_options={})
+    app=desktop.App(controller)
+    try:
+        app.root.update_idletasks()
+        assert [app.pages.tab(i,'text').strip() for i in range(len(app.pages.tabs()))]==['configuration inputs','run and results']
+        assert app.pages.index(app.pages.select())==0
+        assert app.fields['sad']['row'].winfo_width()>app.root.winfo_width()*0.8
+        buttons=[w for w in app.form.winfo_children() for w in w.winfo_children() if isinstance(w,tkinter.ttk.Button)]
+        assert buttons and all(button.winfo_ismapped() for button in buttons)
+
+        fill(app,dict(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
+                      wavelength='0.97918',copies='2',output=str(tmp_path/'run')))
+        app.on_check()
+        assert app.pages.index(app.pages.select())==1
+        assert app.tabs.index(app.tabs.select())==4
+
+        app.on_new()
+        assert app.pages.index(app.pages.select())==0
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_check_uses_real_plan_stages_without_status(tmp_path):
+    """A real describe_plan has stages without a 'status' key; check must not crash."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    from phasebuild import sad_pipeline
+    controller=desktop.Controller(project(tmp_path))
+    config=dict(sad_pipeline.DEFAULTS)
+    config.update(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
+                  wavelength='0.97918',copies='2',output=str(tmp_path/'run'),fpp=0.0,
+                  labels='S',native='native.mtz',reference='',runtime='')
+    for key in ('runtime','reference','rounds','cycles'):
+        config.setdefault(key,'')
+    real_stages=[{k:stage[k] for k in ('id','name','directory','command','outputs') if k in stage}
+                 for stage in sad_pipeline.stage_plan(config)]
+    assert real_stages and all('status' not in stage for stage in real_stages)
+    real_plan=dict(stages=real_stages,effective_options={})
+    controller.describe=lambda cfg: real_plan
+    app=desktop.App(controller)
+    try:
+        fill(app,dict(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
+                      wavelength='0.97918',copies='2',output=str(tmp_path/'run')))
+        app.on_check()
+        assert app.pages.index(app.pages.select())==1
+        assert app.tabs.index(app.tabs.select())==4
+    finally:
+        app.root.destroy()
+
+
+def test_copy_number_accepts_auto_or_an_integer(tmp_path):
+    """``auto`` is the documented default, so the form must not force a number."""
+    pytest.importorskip('tkinter')
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    app=desktop.App(desktop.Controller(project(tmp_path)))
+    try:
+        fill(app,dict(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
+                      wavelength='0.97918',copies='auto',output=str(tmp_path/'run')))
+        assert app.collect()['copies']=='auto'
+        app.fields['copies']['var'].set('3')
+        assert app.collect()['copies']==3
+    finally:
+        app.root.destroy()
+
+
+def test_main_check_builds_the_window_without_an_event_loop(tmp_path,capsys):
+    pytest.importorskip('tkinter')
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    assert desktop.main(['--project',str(project(tmp_path)),'--check'])==0
+    assert 'desktop window ok' in capsys.readouterr().out
+
+
+def test_unattended_failure_is_reported_instead_of_waiting_for_a_dialog(tmp_path,capsys):
+    """--exit-on-finish runs cannot click a message box, so errors must go to stderr."""
+    pytest.importorskip('tkinter')
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    app=desktop.App(desktop.Controller(project(tmp_path)),exit_on_finish=True)
+    try:
+        app._error('boom')
+        assert app.error_text=='boom'
+        assert 'OASIS4.3: boom' in capsys.readouterr().err
+    finally:
+        app.root.destroy()
+
+
+def test_project_resolution_accepts_a_source_tree_or_a_portable_bundle(tmp_path):
+    """The window must find its scripts from a checkout and from a bundle root."""
+    (tmp_path/'run_sad_to_model.py').write_text('')
+    assert desktop.resolve_project(tmp_path)==tmp_path.resolve()
+    bundle=tmp_path/'bundle'
+    (bundle/'app').mkdir(parents=True)
+    (bundle/'app'/'run_sad_to_model.py').write_text('')
+    assert desktop.resolve_project(bundle)==(bundle/'app').resolve()
+    assert desktop.resolve_project(bundle/'app')==(bundle/'app').resolve()
+    (bundle/'app'/'run_sad_to_model.py').unlink()
+    assert desktop.resolve_project(bundle) is None
+
+
+def test_results_panel_lists_the_endpoint_grid_and_the_retained_one(tmp_path):
+    """A fixed-endpoint run must show every endpoint and which one was kept."""
+    pytest.importorskip('tkinter')
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    controller.results=lambda identifier: dict(method_name='P+ Wang8 + refinement weight search',dm_engine='parrot',metrics=[],
+                solvent_fraction=0.5,solvent_source='user',final_model='00_sad_to_model/endpoint_fb2_s0.50/primary_model.cif',
+                primary_metric={'stage':'post-refinement after complete chain','r_work':0.2834,'r_free':0.3147},
+                endpoint_selection={'selected_feedback':2},
+                endpoints=[{'feedback':2,'solvent':0.5,'primary_metric':{'r_work':0.2834,'r_free':0.3147}},
+                           {'feedback':3,'solvent':0.5,'primary_metric':{'r_work':0.2911,'r_free':0.3273}}])
+    app=desktop.App(controller)
+    try:
+        app.job={'id':'x','output':str(tmp_path)}
+        app._show_results()
+        text=app.summary.cget('text')
+        assert 'fb2 kept' in text and 'fb3/solvent 0.50' in text and 'R-work 29.11' in text
+        assert 'final R-work 28.34 / R-free 31.47' in text
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_task_list_shows_every_job_and_switches_the_log(tmp_path):
+    """The window must remember earlier runs and show the selected one's log."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    rows=[dict(id='new',created=200,updated=210,status='running',output=str(tmp_path/'b'),
+               completed=1,total=6,error=None,method='pplus_bundled',label='b.mtz',
+               method_name='P+ bundled engine',r_work=None,r_free=None),
+          dict(id='old',created=100,updated=110,status='success',output=str(tmp_path/'a'),
+               completed=6,total=6,error=None,method='pplus_bundled',label='a.mtz',
+               method_name='P+ Wang8 + refinement weight search',r_work=0.2834,r_free=0.3147)]
+    controller.history=lambda:rows
+    controller.running=lambda:['new']
+    controller.state=lambda identifier:dict(rows[0] if identifier=='new' else rows[1],
+                                            log='log of '+identifier,pipeline_progress={'total':6,'completed':1})
+    app=desktop.App(controller)
+    try:
+        app._refresh_history(force=True)
+        assert set(app.history.get_children())=={'new','old'}
+        assert app.history.set('old','rwork')=='28.34'
+        assert app.history.set('old','status')=='completed'
+        app.history.selection_set('old')
+        app.on_select_job()
+        assert app.job['id']=='old' and 'log of old' in app.log.get('1.0','end')
+        assert app.tabs.index(app.tabs.select())==0   # the record page keeps its buttons usable
+        assert app.history.set('old','method')=='P+ Wang8 + refinement weight search'
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_imported_result_is_shown_read_only(tmp_path):
+    """An imported run must show its results instead of looking like a live job."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    output=tmp_path/'portfolio';output.mkdir()
+    rows=[dict(id='imported',created=100,updated=110,status='imported',output=str(output),
+               completed=0,total=0,error=None,method='pplus_bundled',label='',
+               method_name='P+ bundled engine',r_work=0.3156,r_free=0.3829)]
+    controller.history=lambda:rows
+    controller.running=lambda:[]
+    controller.state=lambda identifier:dict(rows[0],log='')
+    pairs=[(0.3903,0.4266),(0.3156,0.3829)]
+    metrics=[dict(stage='cycle %d'%index,round=index,r_work=work,r_free=free)
+             for index,(work,free) in enumerate(pairs,1)]
+    controller.results=lambda identifier:dict(metrics=metrics,final_model=None,preview=[],
+                                              method_name='P+ bundled engine',dm_engine='parrot',
+                                              primary_metric=dict(stage='cycle 2',r_work=0.3156,r_free=0.3829))
+    app=desktop.App(controller)
+    try:
+        app._refresh_history(force=True)
+        assert app.history.set('imported','status')=='imported (view only)'
+        assert app.history.set('imported','rwork')=='31.56'
+        app.history.selection_set('imported')
+        app.on_select_job()
+        summary=app.summary.cget('text')
+        assert 'will not be rerun' in summary and 'final R-work 31.56' in summary
+        assert 'running' not in summary
+        assert str(app.stop_button['state'])=='disabled'
+        assert len(app.tree.get_children())==2
+        assert 'no run log' in app.log.get('1.0','end')
+        assert len(app.chart.rows)==2
+        app._refresh()   # the 900 ms poll must not wipe the placeholder
+        assert 'no run log' in app.log.get('1.0','end')
+        assert 'will not be rerun' in app.summary.cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_two_runs_start_from_the_window_without_stopping_the_first(tmp_path):
+    """Starting a second run must work while the first is still refining."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    started=[];rows=[]
+    def start(config,name=''):
+        identifier='job%d'%len(started)
+        started.append((identifier,config,name))
+        Path(config['output']).mkdir(parents=True,exist_ok=True)
+        row=dict(id=identifier,created=100+len(started),updated=100+len(started),status='running',
+                 output=str(config['output']),completed=0,total=6,error=None,
+                 method=config['method'],label='sad.mtz',method_name='P+ bundled engine',r_work=None,r_free=None)
+        rows.insert(0,row)
+        return dict(row,config=config,plan={'stages':[]},steps=[])
+    controller.start=start
+    controller.history=lambda:rows
+    controller.running=lambda:[row['id'] for row in rows if row['status']=='running']
+    app=desktop.App(controller)
+    try:
+        fill(app,dict(sad='sad.mtz',heavy='heavy.pdb',sequence='seq.fasta',elements='Se',
+                      wavelength='0.97918',copies='2',output=str(tmp_path/'first')))
+        app.task_name.set('first job')
+        app.on_start()
+        assert app.job['id']=='job0'
+        second=app.fields['output']['var'].get()
+        assert second!=str(tmp_path/'first')  # a fresh directory is offered automatically
+        fill(app,dict(output=str(tmp_path/'second')))
+        app.on_start()
+        assert [(identifier,name) for identifier,_,name in started]==[('job0','first job'),('job1','')]
+        assert len(app.history.get_children())==2
+        assert app.job['id']=='job1'
+        assert app.controller.running()==['job1','job0']
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_closing_asks_once_for_all_running_jobs(tmp_path,monkeypatch):
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    controller=desktop.Controller(project(tmp_path))
+    controller.running=lambda:['a','b']
+    from tkinter import messagebox
+    asked=[]
+    monkeypatch.setattr(messagebox,'askokcancel',lambda *a,**k:(asked.append(a),False)[1])
+    app=desktop.App(controller)
+    try:
+        app.on_close()
+        assert asked and '2 jobs' in asked[0][1]
+        assert app.root.winfo_exists()
+    finally:
+        app.root.destroy()
+
+
+def window(tmp_path):
+    """Build a real window for a test, skipping when no display exists."""
+    pytest.importorskip('tkinter')
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    app=desktop.App(desktop.Controller(project(tmp_path)))
+    app.root.update_idletasks()
+    return app
+
+
+def test_advanced_parameters_stay_hidden_until_asked_for(tmp_path):
+    """Only experiment inputs are visible; calibrated constants wait behind a toggle."""
+    app=window(tmp_path)
+    try:
+        assert app.advanced_box.winfo_manager()==''      # never packed at start
+        essential=[key for _,keys in desktop.ESSENTIAL_GROUPS for key in keys]
+        advanced=[key for _,keys in desktop.ADVANCED_GROUPS for key in keys]
+        assert set(essential)|set(advanced)==set(app.fields)
+        assert app.fields['sad']['row'].winfo_ismapped()
+        assert not app.fields['native']['row'].winfo_ismapped()
+        app.advanced.set(True);app._toggle_advanced();app.root.update_idletasks()
+        assert app.advanced_box.winfo_manager()=='pack'
+        assert app.fields['native']['row'].winfo_ismapped()
+        app.advanced.set(False);app._toggle_advanced();app.root.update_idletasks()
+        assert app.advanced_box.winfo_manager()==''
+    finally:
+        app.root.destroy()
+
+
+def test_new_task_clears_the_form_and_offers_a_fresh_output(tmp_path):
+    """"new job" must start from defaults without losing the task history."""
+    app=window(tmp_path)
+    try:
+        fill(app,dict(sad='old.mtz',heavy='old.pdb',sequence='old.fasta',elements='Se',
+                      wavelength='0.9',copies='3',output=str(tmp_path/'runs/oasis_run')))
+        app.job={'id':'previous','output':str(tmp_path/'runs/oasis_run')}
+        app.log.insert('end','old log')
+        app.on_new()
+        assert app.job is None
+        assert app.fields['sad']['var'].get()=='' and app.fields['heavy']['var'].get()==''
+        assert app.fields['wavelength']['var'].get()==''
+        assert app.log.get('1.0','end').strip()==''
+        output=app.fields['output']['var'].get()
+        assert output!=str(tmp_path/'runs/oasis_run')
+        assert Path(output).name.startswith('oasis_') and not Path(output).exists()
+        assert Path(output).parent==tmp_path/'runs'
+        assert 'new job' in app.summary.cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_task_name_and_delete_live_in_the_job_record(tmp_path):
+    """A name is stored with the record; deleting forgets it but keeps the results."""
+    class Workflow:
+        def make_plan(self,config,project): return dict(config),[]
+        def describe_plan(self,config): return {'stages':[]}
+        def save_selected_result(self,output): pass
+        def enrich_job(self,job): return job
+        def collect_results(self,output): raise ValueError('no results here')
+    jobs=desktop.Jobs(project(tmp_path),workflow=Workflow())
+    first=jobs.start(dict(output=str(tmp_path/'run1'),sad=str(tmp_path/'a.mtz'),
+                          method='pplus_bundled'),'7E1D rerun')
+    jobs.workers[first['id']].join(5)
+    assert jobs.history()[0]['name']=='7E1D rerun'
+    stored=json.loads((jobs.storage/(first['id']+'.json')).read_text())
+    assert stored['name']=='7E1D rerun'
+    jobs.delete(first['id'])
+    assert jobs.history()==[]
+    assert not (jobs.storage/(first['id']+'.json')).exists()
+    assert (tmp_path/'run1').is_dir()          # results stay on disk
+    second=jobs.start(dict(output=str(tmp_path/'run2'),sad=str(tmp_path/'b.mtz')),'')
+    jobs.workers[second['id']].join(5)
+    assert jobs.history()[0]['name']==''
+    jobs.items[second['id']]['status']='running'
+    with pytest.raises(ValueError,match='still running'):
+        jobs.delete(second['id'])
+    assert (jobs.storage/(second['id']+'.json')).exists()
+
+
+@pytest.mark.skipif(not __import__('importlib').util.find_spec('tkinter'),reason='Tk not installed')
+def test_window_names_relaunches_and_deletes_history_rows(tmp_path,monkeypatch):
+    """Name a run, reuse its parameters, and remove records without losing data."""
+    import tkinter
+    try:
+        tkinter.Tk().destroy()
+    except tkinter.TclError:
+        pytest.skip('no display available')
+    import tkinter.messagebox as box
+    controller=desktop.Controller(project(tmp_path))
+    config=dict(controller.defaults(),sad=str(tmp_path/'old.mtz'),heavy=str(tmp_path/'old.pdb'),
+                sequence=str(tmp_path/'old.fasta'),wavelength=0.97918,copies=2,
+                output=str(tmp_path/'old_run'),dm_cycles=12)
+    rows=[dict(id='done',created=100,updated=110,status='success',output=str(tmp_path/'old_run'),
+               name='7E1D rerun',completed=6,total=6,error=None,method='pplus_bundled',
+               label='old.mtz',method_name='P+ bundled engine',r_work=0.28,r_free=0.31),
+          dict(id='imported',created=90,updated=91,status='imported',output=str(tmp_path/'imp'),
+               name='',completed=0,total=0,error=None,method='pplus_bundled',label='',
+               method_name='P+ bundled engine',r_work=0.30,r_free=0.35),
+          dict(id='busy',created=80,updated=81,status='running',output=str(tmp_path/'busy'),
+               name='',completed=1,total=6,error=None,method='pplus_bundled',label='',
+               method_name='P+ bundled engine',r_work=None,r_free=None)]
+    deleted=[]
+    controller.history=lambda:list(rows)
+    controller.state=lambda identifier:dict([r for r in rows if r['id']==identifier][0],log='',
+                                            config=config if identifier=='done' else None)
+    def delete(identifier):
+        deleted.append(identifier)
+        rows[:]=[r for r in rows if r['id']!=identifier]
+    controller.delete=delete
+    controller.results=lambda identifier:dict(metrics=[],final_model=None,preview=[],
+                                              method_name='P+ bundled engine',dm_engine='parrot',
+                                              primary_metric={})
+    errors=[]
+    monkeypatch.setattr(box,'showerror',lambda title,text:errors.append(text))
+    monkeypatch.setattr(box,'askokcancel',lambda *args,**kwargs: True)
+    app=desktop.App(controller)
+    try:
+        app._refresh_history(force=True)
+        assert app.history.set('done','name')=='7E1D rerun'
+        assert app.history.set('imported','name')==''
+        app.history.selection_set('done')
+        app.on_select_job()
+        assert app.tabs.index(app.tabs.select())==0
+        app.on_relaunch()
+        assert app.fields['sad']['var'].get()==str(tmp_path/'old.mtz')
+        assert app.fields['wavelength']['var'].get()=='0.97918'
+        assert app.task_name.get()=='7E1D rerun'
+        assert app.advanced.get() is True            # dm_cycles was not the default
+        output=app.fields['output']['var'].get()
+        assert output!=str(tmp_path/'old_run') and Path(output).name.startswith('oasis_')
+        assert app.tabs.index(app.tabs.select())==4  # the plan page shows the reused setup
+        assert 'reused parameters from job' in app.summary.cget('text')
+        app.history.selection_set('imported')
+        app.on_select_job()
+        app.on_relaunch()
+        assert 'cannot be reused' in errors[-1]               # imported records carry no config
+        app.history.selection_set('busy')
+        app.on_delete_history()
+        assert deleted==[] and 'still running' in app.status.cget('text')
+        app.history.selection_set('done')
+        app.on_select_job()
+        app.on_delete_history()
+        assert deleted==['done']
+        assert 'done' not in app.history.get_children()
+        assert app.job is None and 'no results yet' in app.summary.cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_export_copies_the_whole_run_directory(tmp_path,monkeypatch):
+    """The download button copies the run tree to a folder the user picks."""
+    app=window(tmp_path)
+    try:
+        run=tmp_path/'run'
+        (run/'00_sad_to_model').mkdir(parents=True)
+        (run/'00_sad_to_model'/'primary_model.cif').write_text('data_x\n')
+        (run/'gui.log').write_text('log\n')
+        app.job={'id':'x','output':str(run)}
+        from tkinter import filedialog
+        target=tmp_path/'chosen';target.mkdir()
+        monkeypatch.setattr(filedialog,'askdirectory',lambda **kwargs:str(target))
+        app.on_export()
+        exported=list(target.glob('oasis_export_*'))
+        assert len(exported)==1
+        assert (exported[0]/'00_sad_to_model'/'primary_model.cif').read_text()=='data_x\n'
+        assert (exported[0]/'gui.log').is_file()
+        assert 'exported 2 files' in app.status.cget('text')
+    finally:
+        app.root.destroy()
+
+
+def test_save_model_writes_the_final_model_file(tmp_path,monkeypatch):
+    app=window(tmp_path)
+    try:
+        model=tmp_path/'primary_model.cif';model.write_text('data_x\n')
+        app.result={'final_model':str(model)}
+        from tkinter import filedialog
+        destination=tmp_path/'saved.cif'
+        monkeypatch.setattr(filedialog,'asksaveasfilename',lambda **kwargs:str(destination))
+        app.on_save_model()
+        assert destination.read_text()=='data_x\n'
+    finally:
+        app.root.destroy()
+
+
+def test_structure_page_draws_the_ca_trace_and_can_show_all_atoms(tmp_path):
+    """The 3D page draws the result preview and switches to all atoms on demand."""
+    app=window(tmp_path)
+    try:
+        assert 'Structure 3D' in [app.tabs.tab(index,'text') for index in range(len(app.tabs.tabs()))]
+        model=tmp_path/'primary_model.pdb'
+        model.write_text(
+            'ATOM      1  N   MET A   1       0.000   0.000   0.000  1.00 20.00           N\n'
+            'ATOM      2  CA  MET A   1       1.458   0.000   0.000  1.00 20.00           C\n'
+            'ATOM      3  CA  GLY A   2       2.916   0.000   0.000  1.00 20.00           C\n'
+            'END\n')
+        preview=[{'chain':'A','points':[[0,0,0,'1','MET'],[3.8,0,0,'2','ALA'],[7.6,0,0,'3','GLY']]},
+                 {'chain':'B','points':[[0,4,0,'1','SER'],[3.8,4,0,'2','THR']]}]
+        app.tabs.select(3);app.root.update()
+        app.structure.show(model,preview)
+        app.structure._draw()
+        assert len(app.structure.chains)==2
+        trace_items=len(app.structure.canvas.find_all())
+        assert trace_items>=3            # two polylines plus the caption
+        app.structure.all_atoms.set(True)
+        app.structure._draw()
+        assert len(app.structure.canvas.find_all())>trace_items
+        assert sum(len(coordinates) for _,coordinates in app.structure.atoms)==3
+        app.structure.all_atoms.set(False)
+        app.structure.show(None)
+        assert app.structure.canvas.find_all()      # a placeholder, not an empty page
+    finally:
+        app.root.destroy()
+
+
+def test_results_page_draws_the_r_work_and_r_free_curve(tmp_path):
+    """The curve needs the per-round metrics, and one round cannot make a line."""
+    app=window(tmp_path)
+    try:
+        pairs=[(0.3903,0.4266),(0.3639,0.4031),(0.3402,0.3931),(0.3345,0.3869),(0.3156,0.3829)]
+        metrics=[dict(stage='cycle %d'%index,round=index,r_work=work,r_free=free)
+                 for index,(work,free) in enumerate(pairs,1)]
+        app.controller.results=lambda identifier:dict(metrics=metrics,final_model=None,preview=[])
+        app.job={'id':'x','output':str(tmp_path)}
+        app._show_results()
+        app.root.update()
+        app.chart._draw()
+        items=app.chart.canvas.find_all()
+        assert len(items)>25
+        texts=[app.chart.canvas.itemcget(item,'text') for item in items
+               if app.chart.canvas.type(item)=='text']
+        assert any('R-work 31.6%' in text for text in texts)
+        assert any('R-free 38.3%' in text for text in texts)
+        assert sum(1 for text in texts if text.endswith('%'))>=3   # y axis ticks
+        assert {'1','5'} <= set(texts)                             # x axis rounds
+
+        app.controller.results=lambda identifier:dict(metrics=metrics[:1],final_model=None,preview=[])
+        app._show_results()
+        app.chart._draw()
+        texts=[app.chart.canvas.itemcget(item,'text') for item in app.chart.canvas.find_all()
+               if app.chart.canvas.type(item)=='text']
+        assert any('at least two cycles' in text for text in texts)
+    finally:
+        app.root.destroy()

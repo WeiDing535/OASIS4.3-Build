@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.venv/
+*.egg-info/
+build/
+dist/
+.gui/
+.DS_Store
+validation/
+trial_validation/
+*.log
+runs/*
+!runs/sad_four_optimization/
+runs/sad_four_optimization/*
+!runs/sad_four_optimization/models/
+
+.conda-unified/
+
+.gui-oasis/
+
+# Release compliance: third-party runtimes must not be publicly redistributed; do not commit
+runtime/
+# Large validation artifacts and local working directories
+validation_ten_cases/campaign_*/
+validation_ten_cases/verify_*/
+work/
+# Local-only: Python interpreter path (includes absolute paths on dev machines; do not commit)
+.local_python
+OASIS4.3.app/

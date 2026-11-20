@@ -1,0 +1,21 @@
+{
+  "method": "inverse-variance weighted local density correlation",
+  "training_structure": {
+    "path": "/Applications/ccp4-9/lib/data/reference_structures/reference-1tqw.pdb",
+    "sha256": "0a64f3609a6b4c560444fb62c1b99c7564575a5e9a4e98cf38f2c6f95f7664a9"
+  },
+  "training_map": {
+    "path": "/Applications/ccp4-9/lib/data/reference_structures/reference-1tqw.mtz",
+    "sha256": "e43c1c7ba791e33b3ce0b36a149425947e2ff2130cc46dece8a5328c51afd3c5"
+  },
+  "residues": 1014,
+  "radius": 3.0,
+  "spacing": 0.8,
+  "resolution_high": 1.9000091153258079,
+  "warning": "Not a probability; training reference must be unrelated to the test protein.",
+  "training_positive_correlation_quantiles": [
+    0.6883865921103536,
+    0.8764214187162794,
+    0.9227079142838486
+  ]
+}
